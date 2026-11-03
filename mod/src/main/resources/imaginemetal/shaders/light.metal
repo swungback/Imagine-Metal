@@ -22,7 +22,7 @@ kernel void im_light_step(texture3d<float, access::read> seeds [[texture(0)]], t
 	float level = float(bits & 15u) / 15.0;
 	// a solid block stops light, unless it gives off light itself (glowstone, sea lanterns, froglights...)
 	if ((bits & 128u) != 0u && level == 0.0) {
-		next.write(half4(0.0h), id);
+		next.write(half4(0.0h, 0.0h, 0.0h, -1.0h), id);  // (a < 0: solid, "no data" to the terrain's filter, not "no light")
 		return;
 	}
 	float strength = level;

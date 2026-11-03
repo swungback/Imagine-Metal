@@ -160,7 +160,23 @@ static float4 imBlockLight(float3 p, float3 n, constant ImFrame &f, texture3d<fl
 	float3 e = min(uvw, 1.0 - uvw) * f.lightSize.xyz;  // blocks to the grid's nearest side
 	float inside = smoothstep(1.0, 6.0, min(min(e.x, e.y), e.z));
 	if (inside <= 0.0) return float4(warm, 0.0);
-	float4 c = vol.sample(vs, uvw);
+	// a trilinear filter by hand that leaves solid voxels out (they hold a < 0): blending their nothing into the light next to
+	// a wall made dark smears along the block grid, like shadows; this is the leak-proof filter Complementary uses too
+	float3 g = uvw * f.lightSize.xyz - 0.5;
+	float3 g0 = floor(g), t = g - g0;
+	int3 i0 = int3(g0), top = int3(f.lightSize.xyz) - 1;
+	float4 c = float4(0.0);
+	float wsum = 0.0;
+	for (int k = 0; k < 8; k++) {
+		int3 o = int3(k & 1, (k >> 1) & 1, (k >> 2) & 1);
+		float4 v = vol.read(uint3(clamp(i0 + o, int3(0), top)));
+		if (v.a < 0.0) continue;
+		float3 tw = select(1.0 - t, t, bool3(o != 0));
+		float w = tw.x * tw.y * tw.z;
+		c += v * w;
+		wsum += w;
+	}
+	c = wsum > 1e-4 ? c / wsum : float4(0.0);
 	float m = max(max(c.r, c.g), c.b);
 	if (m < 1e-4) return float4(warm, 0.0);
 	float3 hue = c.rgb / m;
@@ -213,9 +229,9 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		if (f.lightVol.w < 0.5) return float3(0.25, 0.0, 0.25);
 		float3 uvw = (p + n * 0.5 - f.lightVol.xyz) / f.lightSize.xyz;
 		if (any(uvw < 0.0) || any(uvw > 1.0)) return float3(0.25, 0.0, 0.25);
-		float4 g = lvol.sample(lsamp, uvw);
-		float gm = max(max(g.r, g.g), g.b);
-		return pow(gm > 1e-4 ? g.rgb / gm * saturate(g.a * 1.5) : float3(0.0), 1.0 / 2.2) * 0.9 + base * 0.1;
+		float4 gl = imBlockLight(p, n, f, lvol, lsamp);
+		float gm = max(max(gl.r, gl.g), gl.b);
+		return pow(gm > 1e-4 ? gl.rgb / gm * saturate(gl.a * 1.5) : float3(0.0), 1.0 / 2.2) * 0.9 + base * 0.1;
 	}
 	float emit = imEmission(mat & 15u, tex);
 
