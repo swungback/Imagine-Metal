@@ -520,13 +520,9 @@ public final class OwnTerrain {
 		return instance;
 	}
 
-	/** (Imagine Metal) the native terrain state, for its library (the shadow casters' pipelines). */
+	/** AnimCopy's compute copy: the native state (its library and pipelines) and the backend encoder. (Imagine Metal: public, the shadow
+	 * casters' pipelines come from its library too.) */
 	public long ownHandle() {
-		return this.own;
-	}
-
-	/** AnimCopy's compute copy: the native state (its library and pipelines) and the backend encoder. */
-	long ownHandle() {
 		return this.own;
 	}
 
