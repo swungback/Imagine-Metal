@@ -33,6 +33,8 @@ public final class Materials {
 		// ores first: a lit redstone ore gives off light, but only its specks should glow, not the stone around them
 		if (name.contains("ancient_debris") || name.contains("nether") && name.contains("_ore")) return NETHER_ORE;
 		if (name.contains("_ore")) return ORE;
+		// sculk: its cyan specks glow like stars in the deep dark (the blocks themselves give off no light)
+		if (name.contains("sculk")) return DIM;
 		int light = state.getLightEmission();
 		if (name.contains("sea_lantern")) return EMITTER; // (a whole glowing block, pale: the flame rule would miss it)
 		if (light > 0) {
