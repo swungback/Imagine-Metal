@@ -87,8 +87,12 @@ static inline float imShadowPcf(depth2d_array<float> smap, sampler cmp, float2 u
 // the far cascade's edge, 0 outside or with no maps this frame), so the caller blends to its sky-light fallback without a seam.
 static float2 imShadow(float3 p, float3 n, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp) {
 	if (f.shadow.y < 0.5) return float2(1.0, 0.0);
+	// the normal offset grows as the light grazes the face (a low sun across the ground): there one shadow texel spans a long strip
+	// of the surface and a fixed offset leaves the surface shadowing itself in crawling stripes
+	float nl = dot(n, f.lightDir.xyz);
+	float grazing = 0.6 + 1.6 * sqrt(saturate(1.0 - nl * nl));
 	// the near cascade
-	float4 c0 = f.shadowNear * float4(p + n * f.shadow.x, 1.0);
+	float4 c0 = f.shadowNear * float4(p + n * (f.shadow.x * grazing), 1.0);
 	float e0 = max(abs(c0.x), abs(c0.y));
 	float nearW = (c0.z > 0.0 && c0.z < 1.0) ? 1.0 - smoothstep(0.8, 0.92, e0) : 0.0;
 	float litNear = 1.0;
@@ -98,7 +102,7 @@ static float2 imShadow(float3 p, float3 n, float2 pixel, constant ImFrame &f, de
 		if (nearW >= 1.0) return float2(litNear, 1.0);
 	}
 	// the far cascade
-	float4 c1 = f.shadowFar * float4(p + n * f.shadow.z, 1.0);
+	float4 c1 = f.shadowFar * float4(p + n * (f.shadow.z * grazing), 1.0);
 	float e1 = max(abs(c1.x), abs(c1.y));
 	if (e1 > 0.98 || c1.z > 1.0 || c1.z < 0.0) return nearW > 0.0 ? float2(litNear, nearW) : float2(1.0, 0.0);
 	float2 uv1 = float2(0.5 + 0.5 * c1.x, 0.5 - 0.5 * c1.y);

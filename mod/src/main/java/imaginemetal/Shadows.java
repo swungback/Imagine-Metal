@@ -35,11 +35,13 @@ public final class Shadows {
 	private static final float MIN_ELEVATION = 0.08f;
 	private static final int FRAME_BYTES = 128;
 	/**
-	 * The light direction the maps use moves in steps of this angle (radians; the sun crosses one in ~0.15 s). Not every frame (the
-	 * maps re-rasterized every frame shimmered), and not in big steps either (0.25 degrees: the leaf pattern visibly hopped every
-	 * ~0.8 s): small steps that, with the receivers' filter, read as the shadows creeping with the sun.
+	 * The light direction the maps use moves in steps of the shadows' length, not of the sun's angle: the quantity stepped is the
+	 * horizontal run of a shadow per block of caster height (cot of the elevation), in steps of 0.001, so an 8-block tree's shadow
+	 * moves 0.008 blocks (a quarter of a near texel) per step at any time of day. At noon that is a step every ~0.2 s; at dusk,
+	 * when shadows are long and really do move fast, it is about every frame. (Fixed angle steps were fine at noon but at a low sun
+	 * each one threw long shadows a third of a block or more at once, which read as fast, jerky shadows at sunset.)
 	 */
-	private static final double ANGLE_STEP = Math.toRadians(0.045);
+	private static final double RUN_STEP = 0.001;
 
 	/** This frame's light clips (camera-relative world -> cascade clip), column-major: [0] near, [1] far. */
 	static final float[][] MATRIX = {new float[16], new float[16]};
@@ -74,11 +76,10 @@ public final class Shadows {
 		prepared = false;
 		if (!ON || failed || dim == 1) return;
 		Vec3 cam = Minecraft.getInstance().gameRenderer.mainCamera().position();
-		// the sun and moon move in the x-y plane (the End's light is fixed): quantize the angle there
-		double angle = Math.atan2(lightDir[1], lightDir[0]);
-		angle = Math.round(angle / ANGLE_STEP) * ANGLE_STEP;
-		double r = Math.hypot(lightDir[0], lightDir[1]);
-		double lx = r * Math.cos(angle), ly = Math.max(r * Math.sin(angle), MIN_ELEVATION), lz = lightDir[2];
+		// the sun and moon move in the x-y plane (the End's light is fixed): quantize the shadows' run along x per block of height
+		double ly0 = Math.max(lightDir[1], MIN_ELEVATION);
+		double run = Math.round(lightDir[0] / ly0 / RUN_STEP) * RUN_STEP;
+		double lx = run, ly = 1.0, lz = lightDir[2] / ly0;
 		double ll = Math.sqrt(lx * lx + ly * ly + lz * lz);
 		lx /= ll;
 		ly /= ll;
