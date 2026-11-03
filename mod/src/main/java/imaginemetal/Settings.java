@@ -18,7 +18,7 @@ public final class Settings {
 	public static volatile float shadowRange = Config.number("imaginemetal.shadowRange", 160, 64, 256);
 	public static volatile boolean coloredLight = Engine.flag("imaginemetal.coloredLight", true);
 	public static volatile boolean sky = Engine.flag("imaginemetal.sky", true);
-	public static volatile float haze = Config.number("imaginemetal.haze", 0.5f, 0f, 2f);
+	public static volatile float haze = Config.number("imaginemetal.haze", 0.75f, 0f, 2f);
 	public static volatile boolean pbr = Engine.flag("imaginemetal.pbr", true);
 	public static volatile float normals = Config.number("imaginemetal.generatedNormals", 0f, 0f, 4f);
 	public static volatile boolean bloom = Engine.flag("imaginemetal.bloom", true);

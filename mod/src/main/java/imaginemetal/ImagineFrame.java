@@ -139,11 +139,13 @@ public final class ImagineFrame {
 			// the sky itself: Complementary Reimagined's sky colours (lib/colors/skyColors.glsl), from Minecraft's sky colour for this
 			// biome and time (so every biome's sky keeps its own hue): a deep colour overhead, a bright band at the horizon, a
 			// separate set for sunrise and sunset and for the night
+			// (linear: matched against Reimagined's own frames, whose sky overhead at noon is a deep blue, about (67, 100, 166),
+			// fading to (192, 201, 224) at the horizon; fed Minecraft's colour as it is, the port came out a pale (137, 165, 190))
 			float[] raw = new float[3];
 			if (sc != null) {
-				raw[0] = Math.max(sc.x(), 0f);
-				raw[1] = Math.max(sc.y(), 0f);
-				raw[2] = Math.max(sc.z(), 0f);
+				raw[0] = (float) Math.pow(Math.max(sc.x(), 0f), 2.2);
+				raw[1] = (float) Math.pow(Math.max(sc.y(), 0f), 2.2);
+				raw[2] = (float) Math.pow(Math.max(sc.z(), 0f), 2.2);
 			}
 			float sunH = sy;
 			sunFactor = sunH < 0f ? Math.clamp(sunH + 0.375f, 0f, 0.75f) / 0.75f : Math.clamp(sunH + 0.03125f, 0f, 0.0625f) / 0.0625f;
