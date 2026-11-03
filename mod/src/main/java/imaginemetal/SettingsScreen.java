@@ -30,8 +30,10 @@ public final class SettingsScreen extends OptionsSubScreen {
 				"How far around you shadows reach. Less is faster."));
 
 		this.list.addHeader(Component.literal("Sky"));
-		this.list.addBig(toggle("Sky and haze", Settings.sky, v -> Settings.sky = v,
-			"Our sky (a gradient, the sun's glow, sunsets, a blue night) and the haze that fades distant land into it. Off: Minecraft's."));
+		this.list.addSmall(toggle("Sky and haze", Settings.sky, v -> Settings.sky = v,
+			"Our sky (Reimagined's colours, the sun's glow, sunsets, a blue night) and the haze that fades distant land into it. Off: Minecraft's."),
+			slider("Haze", 0, 2, 0.05f, Settings.haze, v -> Settings.haze = v, v -> Math.round(v * 100) + "%",
+				"How thick the distance haze is, with each biome's own character on top. 100% is Reimagined's."));
 
 		this.list.addHeader(Component.literal("Surfaces"));
 		this.list.addSmall(toggle("PBR", Settings.pbr, v -> Settings.pbr = v,

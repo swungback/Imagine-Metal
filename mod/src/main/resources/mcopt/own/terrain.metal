@@ -2316,9 +2316,10 @@ fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]],
 		camAlt *= camAlt;
 		alt = mix(alt, 1.0, 0.8 * camAlt);
 		alt *= 1.0 - 0.5 * camAlt * (1.0 - rain);
-		atm = saturate(atm * alt * imf.fogParams.z * imf.hazeTint.w);
+		atm = saturate(atm * alt * imf.fogParams.z * imf.hazeTint.w * imf.fogParams.w);
 		if (atm > 0.002) {
-			float3 atmColor = imPresent(imAtmFogColor(altRaw, dot(dir, imf.sunDir.xyz), imf) * imf.hazeTint.rgb, imf);
+			// (a little deeper blue than Reimagined's: against our darker ground its pale haze read as white)
+			float3 atmColor = imPresent(imAtmFogColor(altRaw, dot(dir, imf.sunDir.xyz), imf) * imf.hazeTint.rgb * float3(0.78, 0.88, 1.0), imf);
 			color.rgb = pow(mix(pow(max(color.rgb, 0.0), 2.2), atmColor, atm), 1.0 / 2.2);
 		}
 		float bf = dist / max(imf.fogParams.x, 16.0);
@@ -2327,7 +2328,7 @@ fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]],
 		bf *= bf;
 		bf *= bf;
 		imFog = 1.0 - exp(-3.0 * bf);
-		imFogColor = pow(imPresent(imSkyColor(dir, imf, false), imf), 1.0 / 2.2);
+		if (max(imFog, imFade) > 0.001) imFogColor = pow(imPresent(imSkyColor(dir, imf, false), imf), 1.0 / 2.2);
 	}
 	imFog = 1.0 - (1.0 - imFog) * (1.0 - imFade);
 	return float4(mix(color.rgb, imFogColor, imFog), color.a);

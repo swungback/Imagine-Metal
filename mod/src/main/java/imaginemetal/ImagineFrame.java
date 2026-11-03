@@ -255,7 +255,7 @@ public final class ImagineFrame {
 		put(sunDir[0], sunDir[1], sunDir[2], ourFog ? 1f : 0f);
 		// the haze (Reimagined's atmospheric fog) with this biome's character: its tint, how thick (eased as you walk between biomes)
 		put(Haze.tint[0], Haze.tint[1], Haze.tint[2], Haze.density);
-		put(mc.options.getEffectiveRenderDistance() * 16f, (float) cam.y, 1f - cave, 0f);
+		put(mc.options.getEffectiveRenderDistance() * 16f, (float) cam.y, 1f - cave, Settings.haze);
 		// the reflections' history (Reflections): its transform and inverse, and how far the camera has moved since (w 1 = valid)
 		for (int c = 0; c < 4; c++) for (int r = 0; r < 4; r++) BUF.putFloat(Reflections.CLIP.get(c, r));
 		for (int c = 0; c < 4; c++) for (int r = 0; r < 4; r++) BUF.putFloat(Reflections.CLIP_INV.get(c, r));

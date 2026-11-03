@@ -18,6 +18,7 @@ public final class Settings {
 	public static volatile float shadowRange = Config.number("imaginemetal.shadowRange", 160, 64, 256);
 	public static volatile boolean coloredLight = Engine.flag("imaginemetal.coloredLight", true);
 	public static volatile boolean sky = Engine.flag("imaginemetal.sky", true);
+	public static volatile float haze = Config.number("imaginemetal.haze", 0.5f, 0f, 2f);
 	public static volatile boolean pbr = Engine.flag("imaginemetal.pbr", true);
 	public static volatile float normals = Config.number("imaginemetal.generatedNormals", 0f, 0f, 4f);
 	public static volatile boolean bloom = Engine.flag("imaginemetal.bloom", true);
@@ -42,6 +43,7 @@ public final class Settings {
 		v.put("imaginemetal.shadowRange", String.valueOf(Math.round(shadowRange)));
 		v.put("imaginemetal.coloredLight", String.valueOf(coloredLight));
 		v.put("imaginemetal.sky", String.valueOf(sky));
+		v.put("imaginemetal.haze", String.format(java.util.Locale.ROOT, "%.2f", haze));
 		v.put("imaginemetal.pbr", String.valueOf(pbr));
 		v.put("imaginemetal.generatedNormals", String.format(java.util.Locale.ROOT, "%.2f", normals));
 		v.put("imaginemetal.bloom", String.valueOf(bloom));

@@ -571,7 +571,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// reflections (Reimagined's blend): how much by the angle, with a steep falloff for rough surfaces (they only reflect at
 	// grazing angles), metals and gems at every angle; traced through the last frame's picture where it shows what's reflected,
 	// the sky where nothing is in the way (as much as the sky can be seen from here: in a cave only what the screen shows)
-	if (pbr && surf.d > 0.0) {
+	if (pbr && surf.d >= 0.3) {
 		float fresnel = 1.0 - saturate(dot(N, V));
 		float ff = (1.0 - surf.d) * 0.7;
 		float fm = max(fresnel - ff, 0.0) / (1.0 - ff);
@@ -585,8 +585,11 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			// (a fixed dither: without TAA a per-frame one would only shimmer)
 			float dither = fract(dot(pixel, float2(0.06711056, 0.00583715)) * 52.9829189);
 			float4 hit = f.histShift.w > 0.5 ? imReflect(p, n, R, lod, dither, f, hc, hd, hs) : float4(0.0);
-			float3 skyR = (f.flags.x == 0 ? imPresent(imSkyColor(R, f, false), f) : imPresent(f.ambientUp.rgb * 2.0, f)) * (skyF * skyF)
-				* smoothstep(-0.1, 0.2, R.y);
+			float open = smoothstep(0.6, 1.0, sky);
+			float3 skyR = float3(0.0);
+			if (open * smoothstep(-0.1, 0.2, R.y) > 0.0)
+				skyR = (f.flags.x == 0 ? imPresent(imSkyColor(R, f, false), f) : imPresent(f.ambientUp.rgb * 2.0, f)) * (open * open)
+					* smoothstep(-0.1, 0.2, R.y);
 			float3 refl = hit.a > 0.0 ? mix(skyR, hit.rgb, hit.a) : skyR;
 			if (hit.a < 0.0) fm = 0.0;
 			// (texture kept: Reimagined keeps 70 % of the surface under its reflection)
