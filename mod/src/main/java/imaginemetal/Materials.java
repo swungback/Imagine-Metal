@@ -10,7 +10,7 @@ import net.minecraft.world.level.block.state.BlockState;
  * says about the block, so modded blocks get classes too: anything that gives off light glows, anything named an ore glows faintly.
  */
 public final class Materials {
-	public static final byte NONE = 0, EMITTER = 1, LAVA = 2, FLAME = 3, ORE = 4, DIM = 5, NETHER_ORE = 6;
+	public static final byte NONE = 0, EMITTER = 1, LAVA = 2, FLAME = 3, ORE = 4, DIM = 5, NETHER_ORE = 6, SCULK = 7;
 
 	private static final ConcurrentHashMap<BlockState, Byte> CACHE = new ConcurrentHashMap<>();
 
@@ -34,7 +34,7 @@ public final class Materials {
 		if (name.contains("ancient_debris") || name.contains("nether") && name.contains("_ore")) return NETHER_ORE;
 		if (name.contains("_ore")) return ORE;
 		// sculk: its cyan specks glow like stars in the deep dark (the blocks themselves give off no light)
-		if (name.contains("sculk")) return DIM;
+		if (name.contains("sculk") && state.getLightEmission() == 0) return SCULK;
 		int light = state.getLightEmission();
 		if (name.contains("sea_lantern")) return EMITTER; // (a whole glowing block, pale: the flame rule would miss it)
 		if (light > 0) {

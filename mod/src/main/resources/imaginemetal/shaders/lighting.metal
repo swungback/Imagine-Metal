@@ -120,6 +120,7 @@ static float2 imShadow(float3 p, float3 n, float2 pixel, constant ImFrame &f, de
 #define IM_MAT_ORE 4       // an ore: its coloured specks glow faintly
 #define IM_MAT_DIM 5       // a faint light (magma, sculk sensors, glow lichen...): its bright coloured parts glow
 #define IM_MAT_NETHER_ORE 6 // an ore in netherrack (nether quartz, nether gold, ancient debris)
+#define IM_MAT_SCULK 7     // sculk: its specks glow like stars
 
 // How much light a fragment of class cls gives off, as a multiple of its texture's colour (tex: the texel as sampled, before the
 // vertex colour's tint and Minecraft's corner shading, so every face of a block glows alike). The result goes on top of the
@@ -140,6 +141,9 @@ static float imEmission(uint cls, float3 tex) {
 		case IM_MAT_NETHER_ORE: return 0.6 * smoothstep(0.5, 0.75, l);
 		// faint lights (sculk sensors and catalysts, magma, glow lichen): only their bright, coloured parts glow, as a flame's
 		case IM_MAT_DIM: return 1.6 * smoothstep(0.5, 0.85, hi) * smoothstep(0.12, 0.35, sat);
+		// sculk's specks: only their brightest pixels (small, calm dots), but far past white, so the bloom gives each a soft halo
+		// while the screen's roll-off keeps the dot itself from getting brighter
+		case IM_MAT_SCULK: return 3.5 * smoothstep(0.62, 0.9, hi) * smoothstep(0.2, 0.45, sat);
 		default: return 0.0;
 	}
 }
