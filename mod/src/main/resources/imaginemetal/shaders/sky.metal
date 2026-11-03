@@ -22,6 +22,6 @@ fragment float4 im_sky_fs(ImSkyOut in [[stage_in]], constant ImFrame &f [[buffer
 	// (the backend flips vertex y so its images keep GL's row order: this pixel is where clip y = -ndc.y lands)
 	float4 q = rot * float4(in.ndc.x, -in.ndc.y, 0.5, 1.0);
 	float3 d = normalize(q.xyz / q.w);
-	float3 c = imSkyColor(d, f);
-	return float4(pow(max(c, 0.0), 1.0 / 2.2), 1.0);
+	// (through the same exposure, tone curve and grade as the terrain, as Reimagined's sky goes through its tonemap with the rest)
+	return float4(pow(imPresent(imSkyColor(d, f, true), f), 1.0 / 2.2), 1.0);
 }

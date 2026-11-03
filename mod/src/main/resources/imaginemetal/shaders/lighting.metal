@@ -32,32 +32,91 @@ struct ImFrame {
 	                     // w 1 = PBR (reflections and highlights) on
 	float4 lightVol;     // the coloured light grid (light.metal): xyz its low corner, camera-relative (blocks), w 1 = valid this frame
 	float4 lightSize;    // xyz its size in voxels (one a block), w the generated normals' strength (0 off)
-	float4 skyZenith;    // the sky straight up (linear), w rain 0..1
-	float4 skyHorizon;   // the sky at the horizon (linear), w how much it's sunset or sunrise 0..1
-	float4 skySunset;    // the sunset band's colour (linear), w the distance haze's density (per block)
-	float4 sunDir;       // xyz unit direction toward the sun (by night too), w how much its glow shows 0..1
-	float4 sunGlow;      // the glow around the sun (linear), w 1 = this frame's fog is ours (overworld, eyes in air)
+	// the sky (Complementary Reimagined's, lib/colors/skyColors.glsl and lib/atmospherics/sky.glsl; linear)
+	float4 dayUp;        // rgb its colour overhead by day, w rain 0..1
+	float4 dayMiddle;    // rgb at the horizon by day, w sunFactor (Reimagined's: the day's share)
+	float4 dayDown;      // rgb below the horizon by day, w noonFactor
+	float4 nightUp;      // rgb overhead by night, w nightFactor
+	float4 nightMiddle;  // rgb at the horizon by night, w sunVisibility
+	float4 nightDown;    // rgb below the horizon by night, w shadowTime (how far from sunrise/sunset)
+	float4 sunsetDown;   // rgb the sunset band (Reimagined's sunsetDownSkyColorP), w invNoonFactor
+	float4 sunDir;       // xyz unit direction toward the sun (by night too), w 1 = this frame's fog is ours (overworld, eyes in air)
+	float4 hazeTint;     // rgb the biome's tint on the haze, w its density multiplier
+	float4 fogParams;    // x render distance (blocks), y the camera's world height, z 1 - how far underground, w 0
 	float4x4 histClip;   // the reflections' history (the last frame's picture and depth): camera-relative world (then) -> clip
 	float4x4 histClipInv;
 	float4 histShift;    // xyz the camera's move since (now - then: a camera-relative position now + this = then), w 1 = valid
 };
 
-// The sky's colour in direction d (world space, unit; linear light, HDR around the sun): a gradient from the zenith to a bright
-// horizon, a glow around the sun, a warm band along the horizon at sunrise and sunset, strongest toward the sun. The sky pass
-// (sky.metal) draws it behind everything; the terrain's distance haze fades into it, so far land melts into the horizon.
-static float3 imSkyColor(float3 d, constant ImFrame &f) {
-	float up = d.y;
-	float h = 1.0 - saturate(up);
-	float3 c = mix(f.skyZenith.rgb, f.skyHorizon.rgb, h * h * h);
-	if (up < 0.0) c = f.skyHorizon.rgb * mix(1.0, 0.55, saturate(-up * 2.5));  // below the horizon: a darker haze
-	float mu = dot(d, f.sunDir.xyz);
-	float toward = saturate(mu * 0.5 + 0.5);
-	float band = pow(1.0 - abs(up), 5.0) * (0.25 + 0.75 * toward * toward);
-	c = mix(c, f.skySunset.rgb, band * f.skyHorizon.w);
-	float m = saturate(mu);
-	float m2 = m * m, m4 = m2 * m2, m8 = m4 * m4, m16 = m8 * m8;
-	c += f.sunGlow.rgb * (0.30 * m8 * m4 + 1.2 * m16 * m16 * m16) * f.sunDir.w;
-	return c;
+static inline float imSqrt2(float x) { x = 1.0 - x; x *= x; x *= x; return 1.0 - x; }
+static inline float imSqrt3(float x) { x = 1.0 - x; x *= x; x *= x; x *= x; return 1.0 - x; }
+static inline float imSmooth1(float x) { return x * x * (3.0 - 2.0 * x); }
+
+// The sky's colour in direction d (world space, unit; linear, before the tone curve): Complementary Reimagined's GetSky. A
+// gradient from overhead to a bright horizon (wider toward the sun), the sunset band, a scattered glow below the horizon, and
+// the sun's (or moon's) glare. ground: darken below the horizon (the sky pass; the haze's colour leaves it).
+static float3 imSkyColor(float3 d, constant ImFrame &f, bool ground) {
+	float VdotU = d.y, VdotS = dot(d, f.sunDir.xyz);
+	float rain = f.dayUp.w, rain2 = rain * rain, invRain = 1.0 - rain;
+	float sunFactor = f.dayMiddle.w, noon = f.dayDown.w, night = f.nightUp.w, sunVis = f.nightMiddle.w, shadowTime = f.nightDown.w;
+	float invNoon = f.sunsetDown.w;
+	float nfs2 = imSqrt2(night);
+	float nfM = imSqrt2(nfs2) * 0.4;
+	float s1 = max(VdotS, 0.0);
+	float VdotSM1 = s1 * s1, VdotSM2 = VdotSM1 * VdotSM1;
+	float s3 = max(-VdotS, 0.0);
+	s3 *= s3;
+	float VdotSM3 = s3 * s3;
+	float VdotSML = sunVis > 0.5 ? VdotS : -VdotS;
+	float VdotUmax0 = max(VdotU, 0.0);
+
+	float3 upColor = mix(f.nightUp.rgb * (1.5 - 0.5 * nfs2 + nfM * VdotSM3 * 1.5), f.dayUp.rgb, sunFactor);
+	float3 middleColor = mix(f.nightMiddle.rgb * (3.0 - 2.0 * nfs2), f.dayMiddle.rgb * (1.0 + VdotSM2 * 0.3), sunFactor);
+	float3 downColor = mix(f.nightDown.rgb, f.dayDown.rgb, (sunFactor + sunVis) * 0.5);
+
+	float u1 = 1.0 - VdotUmax0;
+	float VdotUM1 = u1 * u1;
+	VdotUM1 = pow(VdotUM1, (1.0 - VdotSM2 * 0.4) * (1.15 - 0.15 * rain2));
+	VdotUM1 = mix(VdotUM1, 1.0, rain2 * 0.15);
+	float3 c = mix(upColor, middleColor, VdotUM1);
+
+	float u2 = 1.0 - abs(VdotU);
+	float VdotUM2 = u2 * u2;
+	VdotUM2 = VdotUM2 * VdotUM2 * (3.0 - 2.0 * VdotUM2);
+	VdotUM2 *= (0.7 - nfM + VdotSM1 * (0.3 + nfM)) * invNoon * sunFactor;
+	c = mix(c, f.sunsetDown.rgb * (1.0 + VdotSM1 * 0.3), VdotUM2 * invRain);
+
+	float VdotUM3 = imSmooth1(min(max(-VdotU + 0.08, 0.0) / 0.35, 1.0));
+	float3 mixer = float3(VdotUM3 * VdotUM3, VdotUM3 * (2.0 - VdotUM3), imSqrt3(VdotUM3));
+	mixer = mix(float3(VdotUM3), mixer, 0.75 - 0.5 * rain);
+	c = mix(c, downColor, mixer);
+
+	if (ground) {
+		float g = 1.0 + min(VdotU, 0.0);
+		c *= imSmooth1(g * g);
+	}
+
+	if (VdotSML > 0.0) {
+		float scatter = 3.0 * (2.0 - saturate(VdotS * 1000.0));
+		scatter *= 1.0 - 0.75 * rain2;
+		float VdotSM4 = pow(abs(VdotS), scatter);
+		const float vis = 0.075;
+		float glare = (vis / (1.0 - (1.0 - vis) * VdotSM4) - vis) * 0.7;
+		float3 glareColor = mix(float3(0.38, 0.4, 0.5) * 0.3, float3(1.5, 0.7, 0.3) + float3(0.0, 0.5, 0.5) * noon, sunVis);
+		glare *= 1.0 - 0.8 * rain;
+		glareColor = mix(glareColor, float3(dot(glareColor, float3(0.2126, 0.7152, 0.0722))), 0.5 * rain);
+		c += glareColor * glare * shadowTime;
+	}
+	return max(c, 0.0);
+}
+
+// Reimagined's atmospheric fog colour (GetAtmFogColor): the night's sky colour by night, the day's colour below the horizon by day.
+static float3 imAtmFogColor(float altitudeFactorRaw, float VdotS, constant ImFrame &f) {
+	float rain = f.dayUp.w, night = f.nightUp.w, sunVis = f.nightMiddle.w;
+	float a2 = altitudeFactorRaw * altitudeFactorRaw;
+	float nightFogMult = 2.5 - 0.625 * max(a2 * a2, rain);
+	float blend = pow(1.0 - night, 4.0 - VdotS - 2.5 * sunVis * sunVis);
+	return mix(f.nightUp.rgb * (nightFogMult - blend * nightFogMult), f.dayDown.rgb * (0.9 + 0.3 * f.dayDown.w), blend);
 }
 
 static inline float imLuma(float3 c) {
@@ -81,6 +140,18 @@ static inline float3 imTonemap(float3 x, float4 t) {
 	float3 xa = pow(max(x, 1e-6), float3(t.x));
 	float3 xad = pow(max(x, 1e-6), float3(t.x * t.y));
 	return xa / (xad * t.z + t.w);
+}
+
+// saturation and vibrance (vibrance lifts the colours that aren't saturated yet)
+static inline float3 imGrade(float3 c, constant ImFrame &f) {
+	float l = imLuma(c);
+	float sat = max(max(c.r, c.g), c.b) - min(min(c.r, c.g), c.b);
+	return mix(float3(l), c, f.grade.x + f.grade.y * (1.0 - sat));
+}
+
+// light (linear, before the tone curve) as the terrain's own light ends up: exposure, the tone curve, the grade (linear after)
+static inline float3 imPresent(float3 c, constant ImFrame &f) {
+	return max(imGrade(imTonemap(c * f.minLight.w, f.tonemap), f), 0.0);
 }
 
 // The face normal from the position's screen derivatives (a 2x2 quad always shades one triangle), turned toward the camera and
@@ -495,11 +566,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	}
 	float emit = imEmission(cls, tex);
 
-	float3 c = imTonemap(radiance, f.tonemap);
-	// saturation and vibrance (vibrance lifts the colours that aren't saturated yet)
-	float l = imLuma(c);
-	float sat = max(max(c.r, c.g), c.b) - min(min(c.r, c.g), c.b);
-	c = mix(float3(l), c, f.grade.x + f.grade.y * (1.0 - sat));
+	float3 c = imGrade(imTonemap(radiance, f.tonemap), f);
 
 	// reflections (Reimagined's blend): how much by the angle, with a steep falloff for rough surfaces (they only reflect at
 	// grazing angles), metals and gems at every angle; traced through the last frame's picture where it shows what's reflected,
@@ -518,7 +585,8 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			// (a fixed dither: without TAA a per-frame one would only shimmer)
 			float dither = fract(dot(pixel, float2(0.06711056, 0.00583715)) * 52.9829189);
 			float4 hit = f.histShift.w > 0.5 ? imReflect(p, n, R, lod, dither, f, hc, hd, hs) : float4(0.0);
-			float3 skyR = (f.flags.x == 0 ? imSkyColor(R, f) : f.ambientUp.rgb * 2.0) * (skyF * skyF) * smoothstep(-0.1, 0.2, R.y);
+			float3 skyR = (f.flags.x == 0 ? imPresent(imSkyColor(R, f, false), f) : imPresent(f.ambientUp.rgb * 2.0, f)) * (skyF * skyF)
+				* smoothstep(-0.1, 0.2, R.y);
 			float3 refl = hit.a > 0.0 ? mix(skyR, hit.rgb, hit.a) : skyR;
 			if (hit.a < 0.0) fm = 0.0;
 			// (texture kept: Reimagined keeps 70 % of the surface under its reflection)
