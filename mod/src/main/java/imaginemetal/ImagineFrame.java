@@ -46,8 +46,9 @@ public final class ImagineFrame {
 	// the palette (linear)
 	private static final float[] SUN_NOON = {1.22f, 1.05f, 0.74f};
 	private static final float[] SUN_GOLDEN = {1.65f, 0.78f, 0.36f};
-	private static final float[] MOON = {0.17f, 0.20f, 0.32f};
-	private static final float[] NIGHT_SKY = {0.065f, 0.08f, 0.14f};
+	// night (toward Reimagined's: a lavender-blue moonlight, its red above its green, a deep blue sky light; a little darker)
+	private static final float[] MOON = {0.15f, 0.14f, 0.24f};
+	private static final float[] NIGHT_SKY = {0.052f, 0.056f, 0.118f};
 	private static final float[] TORCH = {1.30f, 0.70f, 0.33f};
 	private static final float[] CAVE = {0.0055f, 0.0060f, 0.0085f};
 	private static final float[] END_LIGHT = {0.40f, 0.30f, 0.62f};
@@ -182,6 +183,11 @@ public final class ImagineFrame {
 				nightUp[i] = (float) Math.pow(ncf, 0.9) * 0.45f;
 				nightMid[i] = (float) Math.sqrt(nightUp[i]) * 0.65f;
 				nightDown[i] = nightMid[i] * nightDownK[i];
+				// (a deeper, more violet night than Reimagined's: red kept, green pulled back, a little darker)
+				float[] violet = {0.92f, 0.78f, 1.0f};
+				nightUp[i] *= violet[i] * 0.85f;
+				nightMid[i] *= violet[i] * 0.85f;
+				nightDown[i] *= violet[i] * 0.85f;
 			}
 			sunDir[0] = sx;
 			sunDir[1] = sy;

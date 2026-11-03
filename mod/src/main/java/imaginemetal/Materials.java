@@ -12,7 +12,9 @@ import net.minecraft.world.level.block.state.BlockState;
  */
 public final class Materials {
 	public static final byte NONE = 0, EMITTER = 1, LAVA = 2, FLAME = 3, ORE = 4, DIM = 5, NETHER_ORE = 6, SCULK = 7, METAL = 8, POLISHED = 9, GEM = 10,
-		STONE = 11, SAND = 12, WOOD = 13, FOLIAGE = 14, DIRT = 15;
+		STONE = 11, SAND = 12, WOOD = 13, FOLIAGE = 14,
+		/** dirt: the foliage class's non-green rule is dirt's own (lighting.metal), so dirt shares it */
+		DIRT = FOLIAGE, GLOW_GEM = 15;
 
 	// by name first (vanilla's known blocks), then by the block's sound (what it's made of: modded blocks get families too)
 	private static final String[] METAL_NAMES = {"iron_block", "gold_block", "copper_block", "cut_copper", "chiseled_copper", "copper_grate",
@@ -89,6 +91,7 @@ public final class Materials {
 		if (name.contains("sculk") && state.getLightEmission() == 0) return SCULK;
 		int light = state.getLightEmission();
 		if (name.contains("sea_lantern")) return EMITTER; // (a whole glowing block, pale: the flame rule would miss it)
+		if (name.contains("crying_obsidian")) return GLOW_GEM;
 		if (light > 0) {
 			// a flame or a small lit part on an unlit body: only its bright, saturated texels glow
 			if (name.contains("torch") || name.contains("lantern") || name.contains("candle") || name.contains("fire") || name.contains("campfire")

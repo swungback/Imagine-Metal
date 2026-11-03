@@ -227,7 +227,7 @@ static float2 imShadow(float3 p, float3 n, float2 pixel, constant ImFrame &f, de
 #define IM_MAT_SAND 12     // sand, red sand, sandstone, gravel: the brightest grains glint
 #define IM_MAT_WOOD 13     // planks, logs, wood
 #define IM_MAT_FOLIAGE 14  // leaves, grass (the block and the plants), vines, ferns
-#define IM_MAT_DIRT 15     // dirt, coarse dirt, podzol, mud, farmland, paths
+#define IM_MAT_GLOW_GEM 15 // crying obsidian: glows like a light and reflects like a gem
 
 // How much light a fragment of class cls gives off, as a multiple of its texture's colour (tex: the texel as sampled, before the
 // vertex colour's tint and Minecraft's corner shading, so every face of a block glows alike). The result goes on top of the
@@ -237,7 +237,7 @@ static float imEmission(uint cls, float3 tex) {
 	float hi = max(max(tex.r, tex.g), tex.b), lo = min(min(tex.r, tex.g), tex.b);
 	float sat = hi - lo;
 	switch (cls) {
-		case IM_MAT_EMITTER: return 2.6 * l * l + 0.25;
+		case IM_MAT_EMITTER: case IM_MAT_GLOW_GEM: return 2.6 * l * l + 0.25;
 		case IM_MAT_LAVA: return 1.9 + 1.4 * l;
 		case IM_MAT_FLAME: return 4.0 * smoothstep(0.62, 0.92, hi) * smoothstep(0.15, 0.4, sat);
 		// ores: every pixel with clear colour against the grey stone around it (the whole speck, its coloured edge too; iron's pale
@@ -385,15 +385,12 @@ static ImSurf imSurface(uint cls, float3 col, float3 tex) {
 				s.g = col.r * 0.1 + 0.1;  // (the dirt under a grass block's top)
 			}
 			break;
-		case IM_MAT_DIRT:
-			s.g = col.r * 0.1 + 0.1;
-			break;
 		case IM_MAT_POLISHED:
 			s.g = 0.2 + 0.5 * imLinStep(0.1, 0.85, L);
 			s.d = s.g;
 			s.hl = 1.5;
 			break;
-		case IM_MAT_GEM:  // Photon's gems and obsidian: smooth, a strong reflectance
+		case IM_MAT_GEM: case IM_MAT_GLOW_GEM:  // Photon's gems and obsidian: smooth, a strong reflectance
 			s.g = 0.55 + 0.4 * sqrt(imLinStep(0.05, 0.85, L));
 			s.d = s.g;
 			s.f0 = 0.2;
