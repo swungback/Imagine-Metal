@@ -13,7 +13,8 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// Per-frame values, written by imaginemetal.ImagineFrame (same layout, 336 bytes) and bound at fragment buffer 30.
+// Per-frame values, written by imaginemetal.ImagineFrame (same layout, 416 bytes) and bound at fragment buffer 30 (and at buffer 0
+// of the sky pass, sky.metal).
 struct ImFrame {
 	float4 lightDir;     // xyz unit direction toward the light that casts this frame's light (sun by day, moon by night), w 1 = sun
 	float4 lightColor;   // rgb direct light (linear), w rain 0..1
@@ -30,7 +31,30 @@ struct ImFrame {
 	float4 shadow;       // x near cascade normal offset (blocks), y 1 = the maps are valid this frame, z far cascade normal offset, w 0
 	float4 lightVol;     // the coloured light grid (light.metal): xyz its low corner, camera-relative (blocks), w 1 = valid this frame
 	float4 lightSize;    // xyz its size in voxels (one a block)
+	float4 skyZenith;    // the sky straight up (linear), w rain 0..1
+	float4 skyHorizon;   // the sky at the horizon (linear), w how much it's sunset or sunrise 0..1
+	float4 skySunset;    // the sunset band's colour (linear), w the distance haze's density (per block)
+	float4 sunDir;       // xyz unit direction toward the sun (by night too), w how much its glow shows 0..1
+	float4 sunGlow;      // the glow around the sun (linear), w 1 = this frame's fog is ours (overworld, eyes in air)
 };
+
+// The sky's colour in direction d (world space, unit; linear light, HDR around the sun): a gradient from the zenith to a bright
+// horizon, a glow around the sun, a warm band along the horizon at sunrise and sunset, strongest toward the sun. The sky pass
+// (sky.metal) draws it behind everything; the terrain's distance haze fades into it, so far land melts into the horizon.
+static float3 imSkyColor(float3 d, constant ImFrame &f) {
+	float up = d.y;
+	float h = 1.0 - saturate(up);
+	float3 c = mix(f.skyZenith.rgb, f.skyHorizon.rgb, h * h * h);
+	if (up < 0.0) c = f.skyHorizon.rgb * mix(1.0, 0.55, saturate(-up * 2.5));  // below the horizon: a darker haze
+	float mu = dot(d, f.sunDir.xyz);
+	float toward = saturate(mu * 0.5 + 0.5);
+	float band = pow(1.0 - abs(up), 5.0) * (0.25 + 0.75 * toward * toward);
+	c = mix(c, f.skySunset.rgb, band * f.skyHorizon.w);
+	float m = saturate(mu);
+	float m2 = m * m, m4 = m2 * m2, m8 = m4 * m4, m16 = m8 * m8;
+	c += f.sunGlow.rgb * (0.30 * m8 * m4 + 1.2 * m16 * m16 * m16) * f.sunDir.w;
+	return c;
+}
 
 static inline float imLuma(float3 c) {
 	return dot(c, float3(0.2126, 0.7152, 0.0722));

@@ -14,7 +14,7 @@ import org.joml.Vector4f;
 import org.lwjgl.system.MemoryUtil;
 
 /**
- * The lighting's per-frame values (lighting.metal ImFrame, 336 bytes): where the sun or moon is, the colours of its light, of
+ * The lighting's per-frame values (lighting.metal ImFrame, 416 bytes): where the sun or moon is, the colours of its light, of
  * the sky's light and of torches for this time of day and weather, the cave floor, the tone curve. Made once per frame at
  * LevelRenderer.render's start (LevelRendererMixin) and handed to the backend, which binds it on every terrain draw.
  *
@@ -22,7 +22,7 @@ import org.lwjgl.system.MemoryUtil;
  * a deep orange golden hour, blue-violet nights), tuned for our pipeline.
  */
 public final class ImagineFrame {
-	static final int SIZE = 336;
+	static final int SIZE = 416;
 	private static final ByteBuffer BUF = MemoryUtil.memAlloc(SIZE).order(ByteOrder.LITTLE_ENDIAN);
 	private static final long ADDRESS = MemoryUtil.memAddress(BUF);
 	private static int frame;
@@ -52,13 +52,23 @@ public final class ImagineFrame {
 	private static final float[] CAVE = {0.0055f, 0.0060f, 0.0085f};
 	private static final float[] END_LIGHT = {0.40f, 0.30f, 0.62f};
 	private static final float[] END_SKY = {0.10f, 0.07f, 0.15f};
+	private static final float[] SKY_HAZE = {0.72f, 0.82f, 1.0f};
+	private static final float[] NIGHT_ZENITH = {0.008f, 0.012f, 0.032f};
+	private static final float[] NIGHT_HORIZON = {0.03f, 0.04f, 0.08f};
+	private static final float[] SUNSET_HORIZON = {0.95f, 0.55f, 0.35f};
+	private static final float[] SUNSET = {1.25f, 0.46f, 0.16f};
 	/** The moon's light by phase (vanilla's index: 0 full ... 4 new). */
 	private static final float[] MOON_PHASE = {1f, 0.8f, 0.6f, 0.4f, 0.25f, 0.4f, 0.6f, 0.8f};
 
 	private ImagineFrame() {
 	}
 
+	static long address() {
+		return ADDRESS;
+	}
+
 	public static void update(CameraRenderState camera) {
+		Sky.active = false;
 		if (failed || !Engine.TERRAIN) return;
 		try {
 			long t0 = Perf.start();
@@ -86,6 +96,9 @@ public final class ImagineFrame {
 
 		float[] lightDir = {0f, 1f, 0f}, light = new float[3], up = new float[3], down = new float[3];
 		float day = 0f, sunFlag = 0f;
+		// the sky (imSkyColor): zenith, horizon, sunset band, the sun's direction and glow
+		float[] zenith = new float[3], horizon = new float[3], sunset = new float[3], sunDir = {0f, 1f, 0f}, glow = new float[3];
+		float golden = 0f, glowShows = 0f;
 		if (dim == 0) {
 			double sa = sky.sunAngle, ma = sky.moonAngle;
 			float sx = (float) -Math.sin(sa), sy = (float) Math.cos(sa);
@@ -94,7 +107,7 @@ public final class ImagineFrame {
 			sunFlag = sunUp ? 1f : 0f;
 			day = smoothstep(-0.10f, 0.25f, sy);
 			// golden hour: the sun low, a little before it touches the horizon to a while after
-			float golden = smoothstep(-0.10f, 0.04f, sy) * (1f - smoothstep(0.05f, 0.45f, sy));
+			golden = smoothstep(-0.10f, 0.04f, sy) * (1f - smoothstep(0.05f, 0.45f, sy));
 			// the direct light fades out and back in around the sun/moon switch, which hides it
 			float switchFade = smoothstep(0.0f, 0.10f, Math.abs(sunUp ? sy : my));
 			if (sunUp) {
@@ -126,6 +139,29 @@ public final class ImagineFrame {
 			}
 			float grey = luma(up) * 0.85f;
 			for (int i = 0; i < 3; i++) up[i] = mix(up[i], grey, 0.7f * rain);
+
+			// the sky itself: the biome's sky hue (brightest channel 1, so time of day is ours alone), a deep blue overhead, paler
+			// toward the horizon; a dark blue night; a warm band along the horizon and a darker, dusky zenith at golden hour
+			float hm = Math.max(skyc[0], Math.max(skyc[1], skyc[2]));
+			float skyDay = smoothstep(-0.20f, 0.20f, sy);
+			for (int i = 0; i < 3; i++) {
+				float dz = (float) Math.pow(skyc[i] / hm, 2.2) * 0.80f;
+				float dh = mix(dz, SKY_HAZE[i], 0.62f);
+				zenith[i] = mix(NIGHT_ZENITH[i], dz * (1f - 0.35f * golden), skyDay);
+				horizon[i] = mix(NIGHT_HORIZON[i], mix(dh, SUNSET_HORIZON[i], 0.55f * golden), skyDay);
+				sunset[i] = SUNSET[i];
+			}
+			float gz = luma(zenith) * 0.8f, gh = luma(horizon) * 0.8f;
+			for (int i = 0; i < 3; i++) {
+				zenith[i] = mix(zenith[i], gz, 0.8f * rain);
+				horizon[i] = mix(horizon[i], gh, 0.8f * rain);
+			}
+			golden *= 1f - rain;
+			sunDir[0] = sx;
+			sunDir[1] = sy;
+			normalize(sunDir);
+			glowShows = smoothstep(-0.15f, 0.02f, sy) * (1f - 0.9f * rain);
+			for (int i = 0; i < 3; i++) glow[i] = mix(SUN_NOON[i], SUN_GOLDEN[i], golden) * 0.65f;
 		} else if (dim == 1) {
 			// the Nether: no sun; its haze colour lights everything, warm from below (the lava sea)
 			Vector4f fc = camera.fogData.color;
@@ -184,6 +220,15 @@ public final class ImagineFrame {
 		var cam = Minecraft.getInstance().gameRenderer.mainCamera().position();
 		put((float) (LightVolume.originX() - cam.x), (float) (LightVolume.originY() - cam.y), (float) (LightVolume.originZ() - cam.z), LightVolume.valid() ? 1f : 0f);
 		put(LightVolume.SX, LightVolume.SY, LightVolume.SZ, 0f);
+		// the sky and the haze (ours only in the overworld with the eyes in air: in water, lava or snow Minecraft's fog stays)
+		boolean ourFog = dim == 0 && Settings.sky && camera.fogType == net.minecraft.world.level.material.FogType.NONE;
+		float haze = 0.0011f * (1f + 3f * rain) * (1f - cave);
+		put(zenith[0], zenith[1], zenith[2], rain);
+		put(horizon[0], horizon[1], horizon[2], golden);
+		put(sunset[0], sunset[1], sunset[2], haze);
+		put(sunDir[0], sunDir[1], sunDir[2], glowShows);
+		put(glow[0], glow[1], glow[2], ourFog ? 1f : 0f);
+		if (BUF.position() != SIZE) throw new IllegalStateException("ImFrame is " + BUF.position() + " bytes, not " + SIZE);
 	}
 
 	private static void put(float x, float y, float z, float w) {

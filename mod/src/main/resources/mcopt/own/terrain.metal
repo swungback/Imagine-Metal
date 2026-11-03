@@ -2250,7 +2250,16 @@ fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]],
 	float4 texel = g.UseRgss == 1 ? sampleRGSS(atlas, atlasSampler, in.texCoord0, pixelSize) : sampleNearest(atlas, atlasSampler, in.texCoord0, pixelSize);
 	float4 color = texel * getColor(in);
 	// F_LEAN: the chunk visibility is 1 (mix(x, y, 1) is y), the render-distance fog value 0 (max(e, 0) is e for e >= 0)
+#ifdef IM_SHADE
+	// (the fade-in of new chunks goes with the fog, after the lighting: toward the same colour the fog uses)
+	float imFade = 0.0;
+	if (F_RICH) {
+		imFade = 1.0 - in.chunkVisibility;
+		color.a = mix(fog.FogColor.a * color.a, color.a, in.chunkVisibility);
+	}
+#else
 	if (F_RICH) color = mix(fog.FogColor * float4(1, 1, 1, color.a), color, in.chunkVisibility);
+#endif
 	if (CUTOUT && color.a < CUTOUT_LIMIT) discard_fragment();
 	float fogValue;
 	if (F_FVT && in.fogIn != 0) {
@@ -2261,8 +2270,19 @@ fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]],
 	}
 #ifdef IM_SHADE
 	color.rgb = imShade(color.rgb, texel.rgb, in.imPos, in.imLight, in.imMat, in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler); // (Imagine Metal)
-#endif
+	float3 imFogColor = fog.FogColor.rgb;
+	float imFog = fogValue * fog.FogColor.a;
+	if (imf.sunGlow.w > 0.5) {
+		// our sky's: the distance fades into the sky behind it (its colour in this direction), with a light haze on the way
+		float dist = length(in.imPos);
+		imFogColor = pow(min(imSkyColor(in.imPos / max(dist, 1e-3), imf), 1.5), 1.0 / 2.2);
+		imFog = max(fogValue, 1.0 - exp(-dist * imf.skySunset.w));
+	}
+	imFog = 1.0 - (1.0 - imFog) * (1.0 - imFade);
+	return float4(mix(color.rgb, imFogColor, imFog), color.a);
+#else
 	return float4(mix(color.rgb, fog.FogColor.rgb, fogValue * fog.FogColor.a), color.a);
+#endif
 }
 
 // The per-quad path's lists drawn by mesh shading (-Dmcopt.own.frag.qmesh, with -Dmcopt.own.quads): a threadgroup per 32 listed quads

@@ -31,6 +31,9 @@ public final class Config {
 		# How far around you shadows reach, in blocks (64 to 256). Less is faster: fewer blocks to draw into the map.
 		imaginemetal.shadowRange=160
 		#
+		# Our sky and distance haze (false: Minecraft's sky and fog).
+		imaginemetal.sky=true
+		#
 		# Coloured light: torches, soul fire, redstone, lava and other light sources light the world in their own colours.
 		imaginemetal.coloredLight=true
 		#

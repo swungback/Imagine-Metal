@@ -27,6 +27,9 @@ final class ImNative {
 		JAVA_INT, JAVA_INT, JAVA_LONG), false);
 	private static final MethodHandle LIGHT_STEP = fn("im_light_step", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_INT,
 		JAVA_INT), false);
+	private static final MethodHandle SKY_NEW = fn("im_sky_new", FunctionDescriptor.of(JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT), false);
+	private static final MethodHandle SKY_DRAW = fn("im_sky_draw", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT,
+		JAVA_LONG, JAVA_LONG, JAVA_INT), false);
 
 	private static MethodHandle fn(String name, FunctionDescriptor d, boolean critical) {
 		var symbol = MetalBridge.library().find(name).orElseThrow(() -> new IllegalStateException("missing native symbol " + name));
@@ -96,6 +99,22 @@ final class ImNative {
 	static void lightStep(long enc, long state, int dx, int dy, int dz, boolean reset) {
 		try {
 			LIGHT_STEP.invokeExact(enc, state, dx, dy, dz, reset ? 1 : 0);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
+	static long skyNew(long ctx, long source, long err, int errCap) {
+		try {
+			return (long) SKY_NEW.invokeExact(ctx, source, err, errCap);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
+	static int skyDraw(long enc, long state, long target, long frame, int frameBytes, long rot, long err, int errCap) {
+		try {
+			return (int) SKY_DRAW.invokeExact(enc, state, target, frame, frameBytes, rot, err, errCap);
 		} catch (Throwable t) {
 			throw new IllegalStateException(t);
 		}

@@ -29,6 +29,10 @@ public final class SettingsScreen extends OptionsSubScreen {
 			slider("Shadow distance", 64, 256, 16, Settings.shadowRange, v -> Settings.shadowRange = v, v -> Math.round(v) + " blocks",
 				"How far around you shadows reach. Less is faster."));
 
+		this.list.addHeader(Component.literal("Sky"));
+		this.list.addBig(toggle("Sky and haze", Settings.sky, v -> Settings.sky = v,
+			"Our sky (a gradient, the sun's glow, sunsets, a blue night) and the haze that fades distant land into it. Off: Minecraft's."));
+
 		this.list.addHeader(Component.literal("Light"));
 		this.list.addBig(toggle("Coloured light", Settings.coloredLight, v -> Settings.coloredLight = v,
 			"Light sources light the world in their own colours: soul fire blue, redstone red, lava orange."));
