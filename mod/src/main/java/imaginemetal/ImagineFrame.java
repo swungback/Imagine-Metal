@@ -40,7 +40,7 @@ public final class ImagineFrame {
 	}
 
 	// the palette (linear)
-	private static final float[] SUN_NOON = {1.30f, 1.12f, 0.80f};
+	private static final float[] SUN_NOON = {1.12f, 0.98f, 0.72f};
 	private static final float[] SUN_GOLDEN = {1.65f, 0.78f, 0.36f};
 	private static final float[] MOON = {0.17f, 0.20f, 0.32f};
 	private static final float[] NIGHT_SKY = {0.065f, 0.08f, 0.14f};
@@ -152,7 +152,7 @@ public final class ImagineFrame {
 		put(TORCH[0], TORCH[1], TORCH[2], dim == 0 ? day * (1f - 0.5f * rain) : 0f);
 		put(floor[0], floor[1], floor[2], 1f); // w: exposure
 		put(TM_A, TM_D, TM_B, TM_C);
-		put(1.07f, 0.15f, 0f, 0f); // saturation, vibrance
+		put(1.0f, 0.08f, 0f, 0f); // saturation, vibrance (vanilla's foliage is saturated already)
 		BUF.putInt(dim).putInt(Integer.getInteger("imaginemetal.debug", 0)).putInt(1).putInt(frame++);
 		put(0f, 0f, 0f, 0f);
 	}
