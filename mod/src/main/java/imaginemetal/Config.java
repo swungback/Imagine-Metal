@@ -33,8 +33,8 @@ public final class Config {
 		#
 		# Our sky and distance haze (false: Minecraft's sky and fog).
 		imaginemetal.sky=true
-		# How thick the distance haze is (1 = Complementary Reimagined's; 0 none, up to 2).
-		imaginemetal.haze=0.75
+		# How thick the air is (1 = Photon's: blue distance, morning mist in the valleys; 0 none, up to 3).
+		imaginemetal.airFog=1
 		#
 		# Surfaces: reflections and highlights (every block family by its texture, as Complementary Reimagined and Photon do), and
 		# generated normals' strength (0 off; 1 is Reimagined's default strength, up to 4): edges between texels bevel.

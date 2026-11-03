@@ -41,8 +41,8 @@ struct ImFrame {
 	float4 nightDown;    // rgb below the horizon by night, w shadowTime (how far from sunrise/sunset)
 	float4 sunsetDown;   // rgb the sunset band (Reimagined's sunsetDownSkyColorP), w invNoonFactor
 	float4 sunDir;       // xyz unit direction toward the sun (by night too), w 1 = this frame's fog is ours (overworld, eyes in air)
-	float4 hazeTint;     // rgb the biome's tint on the haze, w its density multiplier
-	float4 fogParams;    // x render distance (blocks), y the camera's world height, z 1 - how far underground, w 0
+	float4 hazeTint;     // the air fog (Photon's): rgb Rayleigh scattering per block (by biome), w Mie per block (time of day, weather)
+	float4 fogParams;    // x render distance (blocks), y the camera's world height, z 1 - how far underground, w the air's thickness (setting)
 	float4x4 histClip;   // the reflections' history (the last frame's picture and depth): camera-relative world (then) -> clip
 	float4x4 histClipInv;
 	float4 histShift;    // xyz the camera's move since (now - then: a camera-relative position now + this = then), w 1 = valid
@@ -486,6 +486,56 @@ static float4 imReflect(float3 p, float3 n, float3 R, float lod, float dither, c
 	return float4(0.0);
 }
 
+// ---- the air (Photon's analytic air fog, include/fog/overworld/analytic.glsl) ----
+// Rayleigh (blue, thin, thinning with height: distant land turns blue) and Mie (white, glowing toward the sun, lying low: mist in
+// the valleys at dawn, dusk and night, in rain and humid biomes), integrated exactly along the line from the eye to the surface
+// (no marching), lit by the sun or moon (with multiple scattering) and the sky. Returns the light scattered in (linear, like the
+// terrain's light) and sets trans, how much of the surface still shows through.
+static inline float imHg(float nu, float g) {
+	float gg = g * g;
+	float d = 1.0 + gg - 2.0 * g * nu;
+	return (0.0795775 - 0.0795775 * gg) / (d * sqrt(d));
+}
+
+static float3 imAirFog(float3 p, float skyLight, constant ImFrame &f, thread float3 &trans) {
+	trans = float3(1.0);
+	if (f.sunDir.w < 0.5 || f.fogParams.w <= 0.0) return float3(0.0);
+	float len = length(p);
+	if (len < 0.5) return float3(0.0);
+	float3 dir = p / len;
+	// heights clamped at Photon's volume floor (sea level - 24): the air doesn't keep thickening down into caves
+	float y0 = max(f.fogParams.y, 39.0), y1 = max(f.fogParams.y + p.y, 39.0);
+	float dy = (y1 - y0) / len;
+	const float2 mul = -1.0 / float2(30.0, 7.0);
+	const float2 add = -mul * float2(93.0, 70.0);  // (falloff starts: sea level + 30 for Rayleigh, + 7 for Mie)
+	float2 a = y0 * mul + add;
+	float2 am;
+	if (abs(dy) < 1e-4) am = exp2(a) * len;
+	else am = (exp2(len * dy * mul + a) - exp2(a)) / (0.693147 * mul * dy);
+	am = clamp(am, 0.0, len) * (0.5 * f.fogParams.w * f.fogParams.z);
+	float3 R = f.hazeTint.rgb;
+	float mie = f.hazeTint.w, rain = f.dayUp.w;
+	float3 od = R * am.x + mie * am.y;
+	trans = exp(-od);
+	float3 si = (1.0 - trans) / max(od, 1e-6);
+	float3 rs = si * am.x * R;
+	float3 ms = si * am.y * (mie * mix(0.9, 0.5, rain));
+	float LoV = dot(dir, f.lightDir.xyz);
+	const float iso = 0.0795775;
+	float3 sc = 2.0 * (rs + ms) * iso * f.ambientUp.rgb;
+	float amount = 1.0, an = 1.0;
+	for (int i = 0; i < 4; i++) {
+		float ph = 0.7 * imHg(LoV, 0.5 * an) + 0.3 * imHg(LoV, -0.2 * an);
+		sc += amount * (rs * iso + ms * ph) * f.lightColor.rgb;
+		amount *= 0.5;
+		an *= 0.7;
+	}
+	sc *= max(skyLight, f.fogParams.z);
+	float sy = f.sunDir.y + 0.02;
+	sc *= 1.0 + 0.75 * saturate((exp(-300.0 * sy * sy) - 0.05) / 0.95);  // (Photon: brighter in the early morning and evening)
+	return max(sc, 0.0);
+}
+
 static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint mat, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp,
 	texture3d<float> lvol, sampler lsamp, float2 uv, float4 rect, texture2d<float> atlas, texture2d<float> hc, depth2d<float> hd, sampler hs) {
 	if (f.flags.z == 0) return albedo * (0.2 + 0.8 * max(light.x, light.y)); // the engine hasn't filled a frame yet
@@ -554,6 +604,12 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		radiance += f.lightColor.rgb * (hlt * sun) * tint * f.minLight.w;
 	}
 
+	// the air between the eye and the surface (Photon's air fog)
+	float3 airT;
+	float3 airS = f.flags.y == 0 ? imAirFog(p, sky, f, airT) : float3(0.0);
+	if (f.flags.y == 0) radiance = radiance * airT + airS * f.minLight.w;
+	else airT = float3(1.0);
+
 	if (f.flags.y == 1) return float3(light, 0.0);          // debug: light levels
 	if (f.flags.y == 2) return N * 0.5 + 0.5;               // debug: normals (with the generated ones)
 	if (f.flags.y == 4) {                                   // debug: the coloured light grid alone (its colour where light reaches)
@@ -600,6 +656,6 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		}
 	}
 	// light given off: on top of the tone-mapped light, unclamped (the picture is HDR: Bloom's resolve maps it to the screen)
-	c = max(c, 0.0) + pow(max(tex, 0.0), 2.2) * emit;  // (the texture's colour: light given off isn't darkened by corner shading)
+	c = max(c, 0.0) + pow(max(tex, 0.0), 2.2) * emit * airT;  // (the texture's colour: light given off isn't darkened by corner shading)
 	return pow(c, 1.0 / 2.2);
 }

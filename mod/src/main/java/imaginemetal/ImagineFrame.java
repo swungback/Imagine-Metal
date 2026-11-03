@@ -255,8 +255,8 @@ public final class ImagineFrame {
 		put(nightDown[0], nightDown[1], nightDown[2], shadowTime);
 		put(sunsetP[0], sunsetP[1], sunsetP[2], invNoon);
 		put(sunDir[0], sunDir[1], sunDir[2], ourFog ? 1f : 0f);
-		// the haze (Reimagined's atmospheric fog) with this biome's character: its tint, how thick (eased as you walk between biomes)
-		put(Haze.tint[0], Haze.tint[1], Haze.tint[2], Haze.density);
+		// the air fog (Photon's): Rayleigh by biome (rgb), Mie by time of day and weather (w)
+		put(Haze.rayleigh[0], Haze.rayleigh[1], Haze.rayleigh[2], dim == 0 ? Haze.mie(sunDir[0], sunDir[1], rain) : 0f);
 		put(mc.options.getEffectiveRenderDistance() * 16f, (float) cam.y, 1f - cave, Settings.haze);
 		// the reflections' history (Reflections): its transform and inverse, and how far the camera has moved since (w 1 = valid)
 		for (int c = 0; c < 4; c++) for (int r = 0; r < 4; r++) BUF.putFloat(Reflections.CLIP.get(c, r));

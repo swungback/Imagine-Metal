@@ -5,43 +5,42 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * The haze's character in the biome around the camera: a tint and a thickness (lighting.metal's atmospheric fog multiplies its
- * colour and density by them). Eased over a few seconds, so walking from a plain into a swamp thickens the air gradually.
- * Decided from the biome's name, so modded biomes with the usual words (swamp, jungle, desert...) get it too.
+ * The air fog's coefficients (Photon's, include/weather/fog.glsl): Rayleigh scattering per block (blue: what makes distant land
+ * turn blue) by biome, and Mie (white mist that glows toward the sun, lying low in valleys) by time of day and weather, more in
+ * humid biomes. The biome is the one around the camera, eased over a few seconds as you walk between biomes. Modded biomes with
+ * the usual words in their names (desert, jungle, swamp, taiga...) get the matching air.
  */
 public final class Haze {
-	/** linear tint (1 = the sky's own colour), density multiplier (1 = Reimagined's) */
-	static final float[] tint = {1f, 1f, 1f};
-	static float density = 1f;
-	private static final float[] targetTint = {1f, 1f, 1f};
-	private static float targetDensity = 1f;
+	/** linear Rayleigh scattering coefficient per block (rgb) */
+	static final float[] rayleigh = new float[3];
+	/** extra Mie from humidity (jungles, swamps), per block */
+	static float humidMie;
+	private static final float[] target = new float[3];
+	private static float targetHumid;
 	private static int counter;
-	private static boolean warned;
+	private static boolean warned, started;
 	private static String lastName = "";
 
-	/** name fragment -> {r, g, b, density} */
-	private static final Object[][] BIOMES = {
-		{"mangrove", new float[] {0.55f, 0.78f, 0.38f, 2.6f}},
-		{"swamp", new float[] {0.52f, 0.75f, 0.36f, 2.6f}},
-		{"pale_garden", new float[] {0.72f, 0.72f, 0.76f, 2.6f}},
-		{"jungle", new float[] {0.62f, 1.00f, 0.62f, 2.0f}},
-		{"bamboo", new float[] {0.62f, 1.00f, 0.62f, 2.0f}},
-		{"dark_forest", new float[] {0.70f, 0.88f, 0.70f, 1.6f}},
-		{"cherry", new float[] {1.00f, 0.66f, 0.86f, 1.5f}},
-		{"badlands", new float[] {1.00f, 0.58f, 0.32f, 1.8f}},
-		{"desert", new float[] {1.00f, 0.74f, 0.45f, 1.8f}},
-		{"savanna", new float[] {1.00f, 0.82f, 0.58f, 1.4f}},
-		{"snowy", new float[] {0.86f, 0.95f, 1.12f, 1.5f}},
-		{"frozen", new float[] {0.86f, 0.95f, 1.12f, 1.5f}},
-		{"ice_spikes", new float[] {0.86f, 0.95f, 1.12f, 1.5f}},
-		{"grove", new float[] {0.88f, 0.96f, 1.10f, 1.3f}},
-		{"mushroom", new float[] {0.88f, 0.68f, 1.00f, 1.5f}},
-		{"ocean", new float[] {0.80f, 0.95f, 1.10f, 1.0f}},
-		{"peaks", new float[] {0.95f, 0.98f, 1.05f, 0.7f}},
-	};
-
+	// Photon's defaults: {r, g, b (sRGB), density per block}
+	private static final float[] TEMPERATE = {0.31f, 0.67f, 1.00f, 0.0005f};
+	private static final float[] ARID = {0.65f, 0.80f, 1.00f, 0.0003f};
+	private static final float[] SNOWY = {0.50f, 0.81f, 1.00f, 0.0010f};
+	private static final float[] TAIGA = {0.31f, 0.85f, 1.00f, 0.0006f};
+	private static final float[] JUNGLE = {0.40f, 0.95f, 1.00f, 0.0013f};
+	private static final float[] SWAMP = {0.67f, 1.00f, 0.94f, 0.0014f};
+	private static final float[] PALE_GARDEN = {0.90f, 0.80f, 1.00f, 0.0300f};
 
 	private Haze() {
+	}
+
+	private static float[] biome(String n) {
+		if (n.contains("pale_garden")) return PALE_GARDEN;
+		if (n.contains("swamp") || n.contains("mangrove")) return SWAMP;
+		if (n.contains("jungle") || n.contains("bamboo")) return JUNGLE;
+		if (n.contains("desert") || n.contains("badlands") || n.contains("mesa") || n.contains("savanna")) return ARID;
+		if (n.contains("snowy") || n.contains("frozen") || n.contains("ice") || n.contains("grove") || n.contains("jagged")) return SNOWY;
+		if (n.contains("taiga")) return TAIGA;
+		return TEMPERATE;
 	}
 
 	static void update(ClientLevel level, Vec3 cam, float dt) {
@@ -50,27 +49,33 @@ public final class Haze {
 			try {
 				name = level.getBiome(BlockPos.containing(cam)).getRegisteredName().toLowerCase(java.util.Locale.ROOT);
 			} catch (Throwable t) {
-				if (!warned) System.out.println("[Imagine Metal] haze: biome name unavailable: " + t);
+				if (!warned) System.out.println("[Imagine Metal] air fog: biome name unavailable: " + t);
 				warned = true;
 			}
 			if (!name.equals(lastName)) {
-				System.out.println("[Imagine Metal] haze: biome " + name);
+				System.out.println("[Imagine Metal] air fog: biome " + name);
 				lastName = name;
 			}
-			float[] t = {1f, 1f, 1f, 1f};
-			for (Object[] e : BIOMES) {
-				if (name.contains((String) e[0])) {
-					t = (float[]) e[1];
-					break;
-				}
-			}
-			targetTint[0] = t[0];
-			targetTint[1] = t[1];
-			targetTint[2] = t[2];
-			targetDensity = t[3];
+			float[] b = biome(name);
+			for (int i = 0; i < 3; i++) target[i] = (float) Math.pow(b[i], 2.2) * b[3];
+			targetHumid = b == JUNGLE || b == SWAMP ? 8f * 0.0001f : 0f;
 		}
-		float k = 1f - (float) Math.exp(-dt / 2.5f);
-		for (int i = 0; i < 3; i++) tint[i] += (targetTint[i] - tint[i]) * k;
-		density += (targetDensity - density) * k;
+		float k = started ? 1f - (float) Math.exp(-dt / 2.5f) : 1f;
+		started = true;
+		for (int i = 0; i < 3; i++) rayleigh[i] += (target[i] - rayleigh[i]) * k;
+		humidMie += (targetHumid - humidMie) * k;
+	}
+
+	/** Photon's Mie density for this time of day (sunY, sunX: the sun's direction) and rain. */
+	static float mie(float sunX, float sunY, float rain) {
+		float fade = sunY < 0.18f ? 0.37f + 1.2f * Math.max(0f, -sunY) : 1.7f;
+		float me = Math.clamp(1f - fade * Math.abs(sunY - 0.18f), 0f, 1f);
+		me *= me;
+		float sunrise = sunX > 0f ? me : 0f, sunset = sunX < 0f ? me : 0f;
+		float noon = sunY > 0f ? 1f - me : 0f, midnight = sunY < 0f ? 1f - me : 0f;
+		float bh = sunY + 0.07283f;
+		float blueHour = Math.clamp(((float) Math.exp(-190f * bh * bh) - 0.05f) / 0.95f, 0f, 1f);
+		float m = 0.0070f * sunrise + 0.0001f * noon + 0.0050f * sunset + 0.0050f * midnight + 0.0020f * blueHour + humidMie;
+		return m + (0.030f - m) * rain;
 	}
 }

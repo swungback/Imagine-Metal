@@ -2301,32 +2301,10 @@ fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]],
 	float3 imFogColor = fog.FogColor.rgb;
 	float imFog = fogValue * fog.FogColor.a;
 	if (imf.sunDir.w > 0.5) {
-		// our sky's (Complementary Reimagined's two fogs): the atmospheric haze, thicker in the lowlands and thinner up high, with
-		// the biome's tint and thickness; then at the edge of the render distance a fade into the sky exactly as it is behind
+		// our sky's: the air itself (Photon's air fog) is in the lighting (imShade); here only Reimagined's border fog, a fade at the
+		// edge of the render distance into the sky exactly as it is behind
 		float dist = length(in.imPos);
 		float3 dir = in.imPos / max(dist, 1e-3);
-		float rain = imf.dayUp.w;
-		float renDisFactor = min(1.0, 192.0 / max(imf.fogParams.x, 16.0));
-		float atm = 1.0 - exp(-pow(dist * (0.001 - 0.0007 * rain), 2.0 - rain * rain) * dist * renDisFactor);
-		atm *= 0.95 - 0.1 - 0.15 * (1.0 - rain);
-		float altRaw = 1.0 - clamp(in.imPos.y + imf.fogParams.y - 63.1, 0.0, 60.0) / 60.0;
-		altRaw *= altRaw;
-		float alt = altRaw * 0.9 + 0.1;
-		float camAlt = 1.0 - clamp(imf.fogParams.y + 15.0 - 63.1, 0.0, 60.0) / 60.0;
-		camAlt *= camAlt;
-		alt = mix(alt, 1.0, 0.8 * camAlt);
-		alt *= 1.0 - 0.5 * camAlt * (1.0 - rain);
-		atm = saturate(atm * alt * imf.fogParams.z * imf.hazeTint.w * imf.fogParams.w);
-		if (atm > 0.002) {
-			// (a little deeper blue than Reimagined's: against our darker ground its pale haze read as white)
-			// (its colour: the sky just above the horizon in this direction, so it is the air's own colour, warm toward the sun and blue
-			// away from it, deepened toward the colour overhead, Reimagined's below-horizon tone by night; the biome's tint on top)
-			float3 d2 = normalize(float3(dir.x, max(dir.y, 0.0) + 0.08, dir.z));
-			float3 air = mix(imSkyColor(d2, imf, false), imf.dayUp.rgb * 1.2, 0.35);
-			air = mix(imAtmFogColor(altRaw, dot(dir, imf.sunDir.xyz), imf), air, imf.dayMiddle.w);
-			float3 atmColor = imPresent(air * imf.hazeTint.rgb, imf);
-			color.rgb = pow(mix(pow(max(color.rgb, 0.0), 2.2), atmColor, atm), 1.0 / 2.2);
-		}
 		float bf = dist / max(imf.fogParams.x, 16.0);
 		bf *= bf;
 		bf *= bf;
