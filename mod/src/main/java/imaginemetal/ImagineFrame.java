@@ -68,7 +68,7 @@ public final class ImagineFrame {
 
 	private static float sunY;
 	private static long auroraLastNs;
-	private static float[] auroraLow = Aurora.LOW[0], auroraHigh = Aurora.HIGH[0];
+	private static float[] auroraLow = Aurora.low(0), auroraHigh = Aurora.high(0);
 	private static final float[] auroraLight = new float[3];
 
 	private static float lightDirSunY() {
