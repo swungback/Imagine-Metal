@@ -49,9 +49,9 @@ public final class SettingsScreen extends OptionsSubScreen {
 			"Off: vanilla's lighting on the terrain, for comparing. " + RESTART));
 
 		this.list.addHeader(Component.literal("Debug"));
-		String[] views = {"Off", "Light levels", "Normals", "Bloom glow only"};
+		String[] views = {"Off", "Light levels", "Normals", "Bloom glow only", "Coloured light grid"};
 		this.list.addBig(CycleButton.<Integer>builder(v -> Component.literal(views[v]), Settings.debug)
-			.withValues(0, 1, 2, 3)
+			.withValues(0, 1, 2, 3, 4)
 			.withTooltip(v -> Tooltip.create(Component.literal("Shows one part of the picture on its own, to check it.")))
 			.create(0, 0, 310, 20, Component.literal("Debug view"), (b, v) -> Settings.debug = v));
 	}

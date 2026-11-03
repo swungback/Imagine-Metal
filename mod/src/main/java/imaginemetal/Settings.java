@@ -19,8 +19,8 @@ public final class Settings {
 	public static volatile boolean coloredLight = Engine.flag("imaginemetal.coloredLight", true);
 	public static volatile boolean bloom = Engine.flag("imaginemetal.bloom", true);
 	public static volatile float bloomStrength = Config.number("imaginemetal.bloomStrength", 0.5f, 0f, 2f);
-	/** 0 the picture, 1 light levels, 2 normals, 3 the bloom's glow alone. */
-	public static volatile int debug = (int) Config.number("imaginemetal.debug", 0, 0, 3);
+	/** 0 the picture, 1 light levels, 2 normals, 3 the bloom's glow alone, 4 the coloured light grid alone. */
+	public static volatile int debug = (int) Config.number("imaginemetal.debug", 0, 0, 4);
 
 	// after a restart (what the game started with is in Resolution.RETINA, Engine.TERRAIN, Shadows.RES)
 	public static volatile boolean retina = Engine.flag("imaginemetal.retina", false);

@@ -42,7 +42,7 @@ public final class Config {
 		# Imagine Metal's lighting on the terrain (false: vanilla's lighting, for comparing). A restart applies it.
 		imaginemetal.terrain=true
 		#
-		# Debug view: 0 the picture, 1 light levels, 2 normals, 3 the bloom's glow alone.
+		# Debug view: 0 the picture, 1 light levels, 2 normals, 3 the bloom's glow alone, 4 the coloured light grid alone.
 		imaginemetal.debug=0
 		""";
 

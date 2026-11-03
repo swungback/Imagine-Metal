@@ -189,6 +189,14 @@ static float3 imShade(float3 albedo, float3 p, float2 light, uint mat, float2 pi
 
 	if (f.flags.y == 1) return float3(light, 0.0);          // debug: light levels
 	if (f.flags.y == 2) return n * 0.5 + 0.5;               // debug: normals
+	if (f.flags.y == 4) {                                   // debug: the coloured light grid alone (its colour where light reaches)
+		if (f.lightVol.w < 0.5) return float3(0.25, 0.0, 0.25);
+		float3 uvw = (p + n * 0.5 - f.lightVol.xyz) / f.lightSize.xyz;
+		if (any(uvw < 0.0) || any(uvw > 1.0)) return float3(0.25, 0.0, 0.25);
+		float4 g = lvol.sample(lsamp, uvw);
+		float gm = max(max(g.r, g.g), g.b);
+		return pow(gm > 1e-4 ? g.rgb / gm * saturate(g.a * 1.5) : float3(0.0), 1.0 / 2.2) * 0.9 + base * 0.1;
+	}
 	float emit = imEmission(mat & 15u, albedo);
 
 	float3 c = imTonemap(radiance, f.tonemap);
