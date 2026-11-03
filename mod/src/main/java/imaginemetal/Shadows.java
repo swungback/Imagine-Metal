@@ -47,6 +47,8 @@ public final class Shadows {
 	static final float[][] MATRIX = {new float[16], new float[16]};
 	private static final Matrix4f[] CLIP = {new Matrix4f(), new Matrix4f()};
 	private static final float[] LIGHT = new float[3];
+	/** Each cascade's grid anchor (world position, kept within half a texel of the camera across the light's plane). */
+	private static final double[][] ANCHOR = new double[2][];
 	private static boolean prepared, everRendered, failed;
 	private static long state, atlas;
 	private static int pipelines; // 1 ready, -1 failed
@@ -89,14 +91,24 @@ public final class Shadows {
 		if (len(x) < 1e-4) x = cross(new double[] {1, 0, 0}, z);
 		normalize(x);
 		double[] y = cross(z, x);
-		// each cascade's centre snapped to its own texel grid in the light's plane (world-fixed: the camera's world position is
-		// projected, not its offset), so moving never shifts a caster's texels
-		double px = dot(cam.x, cam.y, cam.z, x), py = dot(cam.x, cam.y, cam.z, y);
+		// each cascade's centre: an anchor kept next to the camera that only ever moves by whole texels of its own grid (and freely
+		// along the light), so the grid stays put in the world while walking. The grid hangs on the anchor, not on the world origin:
+		// when the light turns a step, a grid through a point thousands of blocks away swung a random part of a texel here and every
+		// edge re-rasterized at each step; through a point next to the player only what's above or below it moves, by the true
+		// amount the shadows move.
 		for (int c = 0; c < 2; c++) {
 			float range = c == 0 ? NEAR_RANGE : RANGE;
 			double step = 2.0 * range / RES;
-			double dx = Math.floor(px / step) * step - px, dy = Math.floor(py / step) * step - py;
-			float cx = (float) (dx * x[0] + dy * y[0]), cy = (float) (dx * x[1] + dy * y[1]), cz = (float) (dx * x[2] + dy * y[2]);
+			double[] a = ANCHOR[c];
+			if (a == null) {
+				a = ANCHOR[c] = new double[] {cam.x, cam.y, cam.z};
+			} else {
+				double ax = cam.x - a[0], ay = cam.y - a[1], az = cam.z - a[2];
+				double kx = Math.round(dot(ax, ay, az, x) / step) * step, ky = Math.round(dot(ax, ay, az, y) / step) * step;
+				double kz = dot(ax, ay, az, z);
+				for (int i = 0; i < 3; i++) a[i] += kx * x[i] + ky * y[i] + kz * z[i];
+			}
+			float cx = (float) (a[0] - cam.x), cy = (float) (a[1] - cam.y), cz = (float) (a[2] - cam.z);
 			CLIP[c].setOrtho(-range, range, -range, range, 0f, 2f * DEPTH, true)
 				.lookAt(cx + (float) z[0] * DEPTH, cy + (float) z[1] * DEPTH, cz + (float) z[2] * DEPTH, cx, cy, cz, (float) y[0], (float) y[1], (float) y[2]);
 			CLIP[c].get(MATRIX[c]);
