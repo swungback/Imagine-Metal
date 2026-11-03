@@ -49,6 +49,9 @@ struct ImFrame {
 	float4 cloudPos;     // our clouds: xy the camera's place on the cloud map (texels, wind included), z their height, w 1 = on
 	float4 aurora;       // x the aurora's visibility (night, cold biome), y its drift, zw the camera's place on its plane
 	float4 world;        // xyz the camera's world position (wrapped every 4096 blocks), w time in seconds (wrapped hourly)
+	float4 auroraLow;    // the aurora's colour where its curtains end (low), w its style (0 smooth, 1 pixel)
+	float4 auroraHigh;   // its colour at their height, w its brightness
+	float4 held;         // the light in the player's hands: rgb its colour (brightest channel 1), w its level 0..1
 };
 
 static inline float imSqrt2(float x) { x = 1.0 - x; x *= x; x *= x; return 1.0 - x; }
@@ -580,6 +583,15 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// torches: warm, weaker in full daylight
 	float4 bl = imBlockLight(p, n, f, lvol, lsamp);
 	float3 torch = bl.rgb * imBlockCurve(max(block, bl.a)) * (1.0 - 0.45 * f.blockColor.w * smoothstep(0.5, 1.0, sky));
+	// the light in the player's hands: a level falling one a block from the eye, as a placed light would, softer at the edge
+	if (f.held.w > 0.0) {
+		float hl = saturate(f.held.w - length(p) / 15.0);
+		if (hl > 0.0) {
+			float3 hc = f.held.rgb * (max(max(f.blockColor.r, f.blockColor.g), f.blockColor.b) / max(max(max(f.held.r, f.held.g), f.held.b), 1e-3));
+			float facing = 0.6 + 0.4 * saturate(dot(N, -normalize(p)));
+			torch = max(torch, hc * imBlockCurve(hl) * facing * (1.0 - 0.45 * f.blockColor.w * smoothstep(0.5, 1.0, sky)));
+		}
+	}
 
 	// directional face shading (vanilla's is taken out of the vertex colours, FlatFaceShadeMixin): tops full, bottoms 60 %,
 	// north/south a little brighter than east/west, so every block reads as a solid shape even in flat light

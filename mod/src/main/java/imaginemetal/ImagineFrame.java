@@ -14,7 +14,7 @@ import org.joml.Vector4f;
 import org.lwjgl.system.MemoryUtil;
 
 /**
- * The lighting's per-frame values (lighting.metal ImFrame, 688 bytes): where the sun or moon is, the colours of its light, of
+ * The lighting's per-frame values (lighting.metal ImFrame, 736 bytes): where the sun or moon is, the colours of its light, of
  * the sky's light and of torches for this time of day and weather, the cave floor, the tone curve. Made once per frame at
  * LevelRenderer.render's start (LevelRendererMixin) and handed to the backend, which binds it on every terrain draw.
  *
@@ -22,7 +22,7 @@ import org.lwjgl.system.MemoryUtil;
  * a deep orange golden hour, blue-violet nights), tuned for our pipeline.
  */
 public final class ImagineFrame {
-	static final int SIZE = 688;
+	static final int SIZE = 736;
 	private static final ByteBuffer BUF = MemoryUtil.memAlloc(SIZE).order(ByteOrder.LITTLE_ENDIAN);
 	private static final long ADDRESS = MemoryUtil.memAddress(BUF);
 	private static int frame;
@@ -47,8 +47,8 @@ public final class ImagineFrame {
 	private static final float[] SUN_NOON = {1.22f, 1.05f, 0.74f};
 	private static final float[] SUN_GOLDEN = {1.65f, 0.78f, 0.36f};
 	// night (toward Reimagined's: a lavender-blue moonlight, its red above its green, a deep blue sky light; a little darker)
-	private static final float[] MOON = {0.15f, 0.14f, 0.24f};
-	private static final float[] NIGHT_SKY = {0.052f, 0.056f, 0.118f};
+	private static final float[] MOON = {0.12f, 0.11f, 0.20f};
+	private static final float[] NIGHT_SKY = {0.036f, 0.039f, 0.085f};
 	private static final float[] TORCH = {1.30f, 0.70f, 0.33f};
 	private static final float[] CAVE = {0.0055f, 0.0060f, 0.0085f};
 	private static final float[] END_LIGHT = {0.40f, 0.30f, 0.62f};
@@ -67,6 +67,8 @@ public final class ImagineFrame {
 	private static float auroraVis;
 
 	private static float sunY;
+	private static long auroraLastNs;
+	private static float[] auroraLow = Aurora.LOW[0], auroraHigh = Aurora.HIGH[0];
 
 	private static float lightDirSunY() {
 		return sunY;
@@ -130,7 +132,7 @@ public final class ImagineFrame {
 				lightDir[0] = mx;
 				lightDir[1] = my;
 				float phase = MOON_PHASE[Math.floorMod(sky.moonPhase.index(), 8)];
-				for (int i = 0; i < 3; i++) light[i] = MOON[i] * phase;
+				for (int i = 0; i < 3; i++) light[i] = MOON[i] * phase * Settings.nightBrightness;
 			}
 			normalize(lightDir);
 			float direct = switchFade * (1f - 0.85f * rain);
@@ -147,7 +149,7 @@ public final class ImagineFrame {
 			float[] sunsetTint = {1.21f, 0.92f, 0.76f};
 			for (int i = 0; i < 3; i++) {
 				float dayAmb = (float) Math.pow(Math.max(skyc[i], 0f), 1.65) * 0.52f * mix(1f, sunsetTint[i], golden);
-				up[i] = mix(NIGHT_SKY[i], dayAmb, day);
+				up[i] = mix(NIGHT_SKY[i] * Settings.nightBrightness, dayAmb, day);
 			}
 			float grey = luma(up) * 0.85f;
 			for (int i = 0; i < 3; i++) up[i] = mix(up[i], grey, 0.7f * rain);
@@ -227,12 +229,32 @@ public final class ImagineFrame {
 		// the light bounced up from the ground: the sky's, dimmer, and a little of the sun's
 		for (int i = 0; i < 3; i++) down[i] = (dim == 1 ? 1.1f : 0.6f) * up[i] + 0.10f * light[i];
 		// the aurora: at night in cold biomes, out of rain; its pink-violet and green light added to the sky's (aurora influence)
-		auroraVis = dim == 0 && Settings.aurora && Settings.sky ? Haze.cold * (1f - smoothstep(-0.12f, 0.02f, lightDirSunY())) * (1f - rain) : 0f;
-		if (auroraVis > 0f) {
-			float[] tint = {0.050f, 0.020f, 0.060f};
+		// where and when (the setting: every night, cold biomes, full moon, or either), eased both ways over a few seconds, so it
+		// fades in and out instead of popping when you cross into a snowy biome or the night starts
+		float fullMoon = dim == 0 && sky.moonPhase != null && sky.moonPhase.index() == 0 ? 1f : 0f;
+		float where = switch (Settings.auroraWhen) {
+			case 0 -> 1f;
+			case 1 -> Haze.cold;
+			case 2 -> fullMoon;
+			default -> Math.max(Haze.cold, fullMoon);
+		};
+		float auroraTarget = dim == 0 && Settings.aurora && Settings.sky ? where * (1f - smoothstep(-0.12f, 0.02f, lightDirSunY())) * (1f - rain) : 0f;
+		long nowA = System.nanoTime();
+		float dtA = auroraLastNs == 0 ? 1f : Math.min((nowA - auroraLastNs) / 1e9f, 0.25f);
+		auroraLastNs = nowA;
+		auroraVis += (auroraTarget - auroraVis) * (1f - (float) Math.exp(-dtA / 4f));
+		if (auroraVis < 0.002f && auroraTarget == 0f) auroraVis = 0f;
+		int scheme = Math.clamp(Settings.auroraColors, 0, Aurora.NAMES.length - 1);
+		auroraLow = Aurora.LOW[scheme];
+		auroraHigh = Aurora.HIGH[scheme];
+		if (auroraVis > 0f && Settings.auroraInfluence > 0f) {
+			// the aurora's light on the world (Euphoria Patches' aurora influence): its colours, mostly the lower one (pink in
+			// Reimagined's), in the sky's light from above and, a little less, bounced from below
+			float k = auroraVis * Settings.auroraInfluence * Settings.auroraBrightness;
 			for (int i = 0; i < 3; i++) {
-				up[i] += tint[i] * auroraVis;
-				down[i] += tint[i] * 0.8f * auroraVis;
+				float c = (0.7f * auroraLow[i] / 16f + 0.3f * auroraHigh[i] / 18f);
+				up[i] += c * 0.11f * k;
+				down[i] += c * 0.08f * k;
 			}
 		}
 
@@ -304,6 +326,12 @@ public final class ImagineFrame {
 		put(auroraVis, (float) ((secs * 0.001) % 1000.0), (float) ax, (float) az);
 		put((float) (cam.x - Math.floor(cam.x / 4096.0) * 4096.0), (float) (cam.y), (float) (cam.z - Math.floor(cam.z / 4096.0) * 4096.0),
 			(float) (secs % 3600.0));
+		// the aurora's colours (below, above; w its style and brightness)
+		put(auroraLow[0], auroraLow[1], auroraLow[2], Settings.auroraStyle);
+		put(auroraHigh[0], auroraHigh[1], auroraHigh[2], Settings.auroraBrightness);
+		// the light in the player's hands (the brighter of the two): its colour, its level / 15
+		float[] held = HeldLight.get();
+		put(held[0], held[1], held[2], held[3]);
 		if (BUF.position() != SIZE) throw new IllegalStateException("ImFrame is " + BUF.position() + " bytes, not " + SIZE);
 	}
 

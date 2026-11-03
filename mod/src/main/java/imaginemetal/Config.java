@@ -43,6 +43,17 @@ public final class Config {
 		# Our clouds (Reimagined's blocky clouds; false: Minecraft's) and the aurora (at night in cold biomes, tinting the snow).
 		imaginemetal.clouds=true
 		imaginemetal.aurora=true
+		# when (0 every night, 1 cold biomes, 2 full moon, 3 cold biomes or full moon), style (0 smooth, 1 pixel), colours (0..),
+		# brightness, influence (how much it tints the world)
+		imaginemetal.auroraWhen=3
+		imaginemetal.auroraStyle=0
+		imaginemetal.auroraColors=0
+		imaginemetal.auroraBrightness=1
+		imaginemetal.auroraInfluence=1
+		#
+		# A light in your hand lights what's around you; how bright moonlit nights are (1 = ours).
+		imaginemetal.heldLight=true
+		imaginemetal.nightBrightness=1
 		imaginemetal.generatedNormals=0
 		#
 		# Coloured light: torches, soul fire, redstone, lava and other light sources light the world in their own colours.

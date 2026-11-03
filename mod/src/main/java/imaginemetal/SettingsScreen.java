@@ -5,6 +5,7 @@ import java.util.function.Function;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.AbstractWidget;
+import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
@@ -18,59 +19,117 @@ import net.minecraft.network.chat.Component;
 public final class SettingsScreen extends OptionsSubScreen {
 	private static final String RESTART = "Applies after a restart.";
 
+	/** The pages: the main one lists the others. */
+	public enum Page {
+		MAIN("Imagine Metal"), LIGHT("Light and shadows"), SKY("Sky and weather"), AURORA("Aurora"), SURFACES("Surfaces"), ADVANCED("Advanced");
+
+		final String title;
+
+		Page(String title) {
+			this.title = title;
+		}
+	}
+
+	private final Page page;
+
 	public SettingsScreen(Screen lastScreen) {
-		super(lastScreen, Minecraft.getInstance().options, Component.literal("Imagine Metal"));
+		this(lastScreen, Page.MAIN);
+	}
+
+	public SettingsScreen(Screen lastScreen, Page page) {
+		super(lastScreen, Minecraft.getInstance().options, Component.literal(page == Page.MAIN ? "Imagine Metal" : "Imagine Metal: " + page.title));
+		this.page = page;
+	}
+
+	private AbstractWidget open(Page p) {
+		return Button.builder(Component.literal(p.title + "..."), b -> Minecraft.getInstance().gui.setScreen(new SettingsScreen(this, p))).bounds(0, 0, 150, 20)
+			.build();
+	}
+
+	private static String pct(float v) {
+		return Math.round(v * 100) + "%";
 	}
 
 	@Override
 	protected void addOptions() {
-		this.list.addHeader(Component.literal("Shadows"));
-		this.list.addSmall(toggle("Shadows", Settings.shadows, v -> Settings.shadows = v, "Sun and moon shadows."),
-			slider("Shadow distance", 64, 256, 16, Settings.shadowRange, v -> Settings.shadowRange = v, v -> Math.round(v) + " blocks",
-				"How far around you shadows reach. Less is faster."));
+		switch (this.page) {
+			case MAIN -> {
+				this.list.addSmall(open(Page.LIGHT), open(Page.SKY));
+				this.list.addSmall(open(Page.SURFACES), open(Page.AURORA));
+				this.list.addBig(open(Page.ADVANCED));
+			}
+			case LIGHT -> {
+				this.list.addHeader(Component.literal("Shadows"));
+				this.list.addSmall(toggle("Shadows", Settings.shadows, v -> Settings.shadows = v, "Sun and moon shadows."),
+					slider("Shadow distance", 64, 256, 16, Settings.shadowRange, v -> Settings.shadowRange = v, v -> Math.round(v) + " blocks",
+						"How far around you shadows reach. Less is faster."));
+				this.list.addHeader(Component.literal("Light"));
+				this.list.addSmall(toggle("Coloured light", Settings.coloredLight, v -> Settings.coloredLight = v,
+					"Light sources light the world in their own colours: soul fire blue, redstone red, lava orange."),
+					toggle("Held light", Settings.heldLight, v -> Settings.heldLight = v,
+						"A torch, lantern or any other light in your hand lights up what's around you."));
+				this.list.addBig(slider("Night brightness", 0.25f, 2f, 0.05f, Settings.nightBrightness, v -> Settings.nightBrightness = v, SettingsScreen::pct,
+					"How bright moonlit nights are. 100% is ours."));
+				this.list.addHeader(Component.literal("Glow"));
+				this.list.addSmall(toggle("Bloom", Settings.bloom, v -> Settings.bloom = v, "The soft glow around bright things."),
+					slider("Bloom strength", 0, 2, 0.05f, Settings.bloomStrength, v -> Settings.bloomStrength = v,
+						v -> String.format(java.util.Locale.ROOT, "%.2f", v), "How strong the glow is."));
+			}
+			case SKY -> {
+				this.list.addSmall(toggle("Sky and haze", Settings.sky, v -> Settings.sky = v,
+					"Our sky (Reimagined's colours, the sun's glow, sunsets, a blue night) and the air that fades distant land into it. Off: Minecraft's."),
+					slider("Air", 0, 3, 0.05f, Settings.haze, v -> Settings.haze = v, SettingsScreen::pct,
+						"How thick the air is: distant land turning blue, mist in the valleys at dawn and dusk, each biome's own air. 100% is Photon's."));
+				this.list.addSmall(toggle("Clouds", Settings.clouds, v -> Settings.clouds = v,
+					"Our clouds: Minecraft's cloud shapes as soft, rounded blocks, lit by the sun, coloured by the sky. Off: Minecraft's. (Minecraft's Clouds video setting must be on.)"),
+					open(Page.AURORA));
+			}
+			case AURORA -> {
+				this.list.addSmall(toggle("Aurora", Settings.aurora, v -> Settings.aurora = v, "Northern lights at night."),
+					cycle("When", new String[] {"Every night", "Cold biomes", "Full moon", "Cold biomes or full moon"}, Settings.auroraWhen,
+						v -> Settings.auroraWhen = v, "Which nights the aurora shows on."));
+				this.list.addSmall(cycle("Style", new String[] {"Smooth (Reimagined)", "Pixel (Reimagined)"}, Settings.auroraStyle,
+					v -> Settings.auroraStyle = v, "Reimagined's two aurora styles: soft curtains, or curtains in blocky steps."),
+					cycle("Colours", Aurora.NAMES, Settings.auroraColors, v -> Settings.auroraColors = v,
+						"The aurora's colours: below, where the curtains end, and above."));
+				this.list.addSmall(slider("Brightness", 0.25f, 3f, 0.05f, Settings.auroraBrightness, v -> Settings.auroraBrightness = v, SettingsScreen::pct,
+					"How bright the aurora is."),
+					slider("Influence", 0, 3, 0.05f, Settings.auroraInfluence, v -> Settings.auroraInfluence = v, v -> v == 0 ? "Off" : pct(v),
+						"How strongly the aurora's light tints the world below it (the snow turns its colour)."));
+			}
+			case SURFACES -> {
+				this.list.addSmall(toggle("PBR", Settings.pbr, v -> Settings.pbr = v,
+					"Sun highlights on every block by its texture, and reflections traced on screen: metal, gems and polished stone clearly, rough blocks at low angles."),
+					slider("Generated normals", 0, 4, 0.25f, Settings.normals, v -> Settings.normals = v, v -> v == 0 ? "Off" : pct(v),
+						"The edges between a texture's light and dark pixels bevel, so blocks look like raised pixel tiles. 100% is Reimagined's strength."));
+			}
+			case ADVANCED -> {
+				this.list.addHeader(Component.literal("Needs a restart"));
+				this.list.addSmall(toggle("Retina resolution*", Settings.retina, v -> Settings.retina = v,
+					"Draw every Retina pixel: sharper, much slower. " + RESTART),
+					CycleButton.<Integer>builder(v -> Component.literal(String.valueOf(v)), Settings.shadowRes)
+						.withValues(1024, 2048, 4096)
+						.withTooltip(v -> Tooltip.create(Component.literal("Shadow map size: sharper leaf shadows with more. " + RESTART)))
+						.create(0, 0, 150, 20, Component.literal("Shadow detail*"), (b, v) -> Settings.shadowRes = v));
+				this.list.addBig(toggle("Imagine Metal lighting*", Settings.terrain, v -> Settings.terrain = v,
+					"Off: vanilla's lighting on the terrain, for comparing. " + RESTART));
+				this.list.addHeader(Component.literal("Debug"));
+				String[] views = {"Off", "Light levels", "Normals", "Bloom glow only", "Coloured light grid"};
+				this.list.addBig(CycleButton.<Integer>builder(v -> Component.literal(views[v]), Settings.debug)
+					.withValues(0, 1, 2, 3, 4)
+					.withTooltip(v -> Tooltip.create(Component.literal("Shows one part of the picture on its own, to check it.")))
+					.create(0, 0, 310, 20, Component.literal("Debug view"), (b, v) -> Settings.debug = v));
+			}
+		}
+	}
 
-		this.list.addHeader(Component.literal("Sky"));
-		this.list.addSmall(toggle("Sky and haze", Settings.sky, v -> Settings.sky = v,
-			"Our sky (Reimagined's colours, the sun's glow, sunsets, a blue night) and the haze that fades distant land into it. Off: Minecraft's."),
-			slider("Air", 0, 3, 0.05f, Settings.haze, v -> Settings.haze = v, v -> Math.round(v * 100) + "%",
-				"How thick the air is: distant land turning blue, mist in the valleys at dawn and dusk, each biome's own air. 100% is Photon's."));
-
-		this.list.addSmall(toggle("Clouds", Settings.clouds, v -> Settings.clouds = v,
-			"Our clouds: Minecraft's cloud shapes as soft, rounded blocks, lit by the sun, coloured by the sky. Off: Minecraft's."),
-			toggle("Aurora", Settings.aurora, v -> Settings.aurora = v,
-				"Northern lights at night in cold biomes, tinting the snow below them."));
-
-		this.list.addHeader(Component.literal("Surfaces"));
-		this.list.addSmall(toggle("PBR", Settings.pbr, v -> Settings.pbr = v,
-			"Sun highlights on every block by its texture, and reflections traced on screen: metal, gems and polished stone clearly, rough blocks at low angles."),
-			slider("Generated normals", 0, 4, 0.25f, Settings.normals, v -> Settings.normals = v, v -> v == 0 ? "Off" : Math.round(v * 100) + "%",
-				"The edges between a texture's light and dark pixels bevel, so blocks look like raised pixel tiles. 100% is Reimagined's strength."));
-
-		this.list.addHeader(Component.literal("Light"));
-		this.list.addBig(toggle("Coloured light", Settings.coloredLight, v -> Settings.coloredLight = v,
-			"Light sources light the world in their own colours: soul fire blue, redstone red, lava orange."));
-
-		this.list.addHeader(Component.literal("Glow"));
-		this.list.addSmall(toggle("Bloom", Settings.bloom, v -> Settings.bloom = v, "The soft glow around bright things."),
-			slider("Bloom strength", 0, 2, 0.05f, Settings.bloomStrength, v -> Settings.bloomStrength = v, v -> String.format(java.util.Locale.ROOT, "%.2f", v),
-				"How strong the glow is."));
-
-		this.list.addHeader(Component.literal("Needs a restart"));
-		this.list.addSmall(toggle("Retina resolution*", Settings.retina, v -> Settings.retina = v,
-			"Draw every Retina pixel: sharper, much slower. " + RESTART),
-			CycleButton.<Integer>builder(v -> Component.literal(String.valueOf(v)), Settings.shadowRes)
-				.withValues(1024, 2048, 4096)
-				.withTooltip(v -> Tooltip.create(Component.literal("Shadow map size: sharper leaf shadows with more. " + RESTART)))
-				.create(0, 0, 150, 20, Component.literal("Shadow detail*"), (b, v) -> Settings.shadowRes = v));
-		this.list.addBig(toggle("Imagine Metal lighting*", Settings.terrain, v -> Settings.terrain = v,
-			"Off: vanilla's lighting on the terrain, for comparing. " + RESTART));
-
-		this.list.addHeader(Component.literal("Debug"));
-		String[] views = {"Off", "Light levels", "Normals", "Bloom glow only", "Coloured light grid"};
-		this.list.addBig(CycleButton.<Integer>builder(v -> Component.literal(views[v]), Settings.debug)
-			.withValues(0, 1, 2, 3, 4)
-			.withTooltip(v -> Tooltip.create(Component.literal("Shows one part of the picture on its own, to check it.")))
-			.create(0, 0, 310, 20, Component.literal("Debug view"), (b, v) -> Settings.debug = v));
+	private static AbstractWidget cycle(String name, String[] names, int value, Consumer<Integer> set, String tooltip) {
+		Integer[] values = new Integer[names.length];
+		for (int i = 0; i < names.length; i++) values[i] = i;
+		return CycleButton.<Integer>builder(v -> Component.literal(names[v]), Math.clamp(value, 0, names.length - 1))
+			.withValues(values)
+			.withTooltip(v -> Tooltip.create(Component.literal(tooltip)))
+			.create(0, 0, 150, 20, Component.literal(name), (b, v) -> set.accept(v));
 	}
 
 	@Override

@@ -103,7 +103,9 @@ static float3 imAurora(float3 d, constant ImFrame &f, texture2d<float> nt, sampl
 	for (int i = 0; i < N; i++) {
 		float cur = (float(i) + dither + 5.0) / float(N + 5);
 		cur *= cur;
-		float2 pp = (w * (0.8 + cur) * 11.0 + f.aurora.zw) * 0.0007;
+		float2 pp = w * (0.8 + cur) * 11.0 + f.aurora.zw;
+		if (f.auroraLow.w > 0.5) pp = floor(pp);  // (Reimagined's pixel style: curtains in blocky steps)
+		pp *= 0.0007;
 		float n = nt.sample(s, pp).r;
 		n = 1.0 - 2.0 * abs(n - 0.5);
 		n *= n;
@@ -114,9 +116,9 @@ static float3 imAurora(float3 d, constant ImFrame &f, texture2d<float> nt, sampl
 		n *= nt.sample(s, pp * 5.0 - f.aurora.y).b;
 		float cm = 1.0 - cur;
 		float cm2 = cm * cm;
-		acc += n * cm * mix(float3(7.0, 2.2, 12.0), float3(6.0, 16.0, 12.0), cm2 * cm2);
+		acc += n * cm * mix(f.auroraLow.rgb, f.auroraHigh.rgb, cm2 * cm2);
 	}
-	return acc * (1.8 * vis / float(N));
+	return acc * ((f.auroraLow.w > 0.5 ? 1.3 : 1.8) * f.auroraHigh.w * vis / float(N));
 }
 
 fragment float4 im_clouds_fs(ImSkyOut in [[stage_in]], constant ImFrame &f [[buffer(0)]], constant float4x4 &rot [[buffer(1)]],
