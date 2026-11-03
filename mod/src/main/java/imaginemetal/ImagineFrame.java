@@ -143,9 +143,12 @@ public final class ImagineFrame {
 			// the sky itself: the biome's sky hue (brightest channel 1, so time of day is ours alone), a deep blue overhead, paler
 			// toward the horizon; a dark blue night; a warm band along the horizon and a darker, dusky zenith at golden hour
 			float hm = Math.max(skyc[0], Math.max(skyc[1], skyc[2]));
+			float[] dzl = new float[3];
+			for (int i = 0; i < 3; i++) dzl[i] = (float) Math.pow(skyc[i] / hm, 2.2) * 0.80f;
+			float dzLuma = luma(dzl);
 			float skyDay = smoothstep(-0.20f, 0.20f, sy);
 			for (int i = 0; i < 3; i++) {
-				float dz = (float) Math.pow(skyc[i] / hm, 2.2) * 0.80f;
+				float dz = Math.max(dzLuma + 1.3f * (dzl[i] - dzLuma), 0.004f);  // (a richer blue than Minecraft's)
 				float dh = mix(dz, SKY_HAZE[i], 0.62f);
 				zenith[i] = mix(NIGHT_ZENITH[i], dz * (1f - 0.35f * golden), skyDay);
 				horizon[i] = mix(NIGHT_HORIZON[i], mix(dh, SUNSET_HORIZON[i], 0.55f * golden), skyDay);

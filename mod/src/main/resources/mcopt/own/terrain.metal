@@ -2273,10 +2273,14 @@ fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]],
 	float3 imFogColor = fog.FogColor.rgb;
 	float imFog = fogValue * fog.FogColor.a;
 	if (imf.sunGlow.w > 0.5) {
-		// our sky's: the distance fades into the sky behind it (its colour in this direction), with a light haze on the way
+		// our sky's: a blue atmospheric haze over distance (distant hills turn blue, not white), then at the edge of the render
+		// distance a fade into the sky exactly as it is behind them, so the edge doesn't show
 		float dist = length(in.imPos);
-		imFogColor = pow(min(imSkyColor(in.imPos / max(dist, 1e-3), imf), 1.5), 1.0 / 2.2);
-		imFog = max(fogValue, 1.0 - exp(-dist * imf.skySunset.w));
+		float3 skyHere = min(imSkyColor(in.imPos / max(dist, 1e-3), imf), 1.5);
+		float3 hazeColor = mix(skyHere, imf.skyZenith.rgb, 0.45);
+		float haze = 1.0 - exp(-dist * imf.skySunset.w);
+		color.rgb = pow(mix(pow(color.rgb, 2.2), hazeColor, haze), 1.0 / 2.2);
+		imFogColor = pow(skyHere, 1.0 / 2.2);
 	}
 	imFog = 1.0 - (1.0 - imFog) * (1.0 - imFade);
 	return float4(mix(color.rgb, imFogColor, imFog), color.a);
