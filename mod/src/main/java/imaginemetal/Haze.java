@@ -16,27 +16,30 @@ public final class Haze {
 	private static final float[] targetTint = {1f, 1f, 1f};
 	private static float targetDensity = 1f;
 	private static int counter;
+	private static boolean warned;
+	private static String lastName = "";
 
 	/** name fragment -> {r, g, b, density} */
 	private static final Object[][] BIOMES = {
-		{"mangrove", new float[] {0.80f, 0.92f, 0.62f, 2.4f}},
-		{"swamp", new float[] {0.78f, 0.90f, 0.60f, 2.4f}},
-		{"pale_garden", new float[] {0.88f, 0.88f, 0.90f, 2.2f}},
-		{"jungle", new float[] {0.86f, 1.00f, 0.84f, 1.7f}},
-		{"bamboo", new float[] {0.86f, 1.00f, 0.84f, 1.7f}},
-		{"dark_forest", new float[] {0.86f, 0.94f, 0.86f, 1.4f}},
-		{"cherry", new float[] {1.00f, 0.80f, 0.90f, 1.3f}},
-		{"badlands", new float[] {1.00f, 0.78f, 0.58f, 1.6f}},
-		{"desert", new float[] {1.00f, 0.86f, 0.66f, 1.6f}},
-		{"savanna", new float[] {1.00f, 0.90f, 0.74f, 1.3f}},
-		{"snowy", new float[] {0.92f, 0.97f, 1.05f, 1.4f}},
-		{"frozen", new float[] {0.92f, 0.97f, 1.05f, 1.4f}},
-		{"ice_spikes", new float[] {0.92f, 0.97f, 1.05f, 1.4f}},
-		{"grove", new float[] {0.92f, 0.97f, 1.05f, 1.3f}},
-		{"mushroom", new float[] {0.95f, 0.85f, 1.00f, 1.3f}},
-		{"ocean", new float[] {0.90f, 0.97f, 1.05f, 1.2f}},
-		{"peaks", new float[] {0.95f, 0.98f, 1.03f, 0.8f}},
+		{"mangrove", new float[] {0.55f, 0.78f, 0.38f, 2.6f}},
+		{"swamp", new float[] {0.52f, 0.75f, 0.36f, 2.6f}},
+		{"pale_garden", new float[] {0.72f, 0.72f, 0.76f, 2.6f}},
+		{"jungle", new float[] {0.62f, 1.00f, 0.62f, 2.0f}},
+		{"bamboo", new float[] {0.62f, 1.00f, 0.62f, 2.0f}},
+		{"dark_forest", new float[] {0.70f, 0.88f, 0.70f, 1.6f}},
+		{"cherry", new float[] {1.00f, 0.66f, 0.86f, 1.5f}},
+		{"badlands", new float[] {1.00f, 0.58f, 0.32f, 1.8f}},
+		{"desert", new float[] {1.00f, 0.74f, 0.45f, 1.8f}},
+		{"savanna", new float[] {1.00f, 0.82f, 0.58f, 1.4f}},
+		{"snowy", new float[] {0.86f, 0.95f, 1.12f, 1.5f}},
+		{"frozen", new float[] {0.86f, 0.95f, 1.12f, 1.5f}},
+		{"ice_spikes", new float[] {0.86f, 0.95f, 1.12f, 1.5f}},
+		{"grove", new float[] {0.88f, 0.96f, 1.10f, 1.3f}},
+		{"mushroom", new float[] {0.88f, 0.68f, 1.00f, 1.5f}},
+		{"ocean", new float[] {0.80f, 0.95f, 1.10f, 1.0f}},
+		{"peaks", new float[] {0.95f, 0.98f, 1.05f, 0.7f}},
 	};
+
 
 	private Haze() {
 	}
@@ -46,7 +49,13 @@ public final class Haze {
 			String name = "";
 			try {
 				name = level.getBiome(BlockPos.containing(cam)).getRegisteredName().toLowerCase(java.util.Locale.ROOT);
-			} catch (Throwable ignored) {
+			} catch (Throwable t) {
+				if (!warned) System.out.println("[Imagine Metal] haze: biome name unavailable: " + t);
+				warned = true;
+			}
+			if (!name.equals(lastName)) {
+				System.out.println("[Imagine Metal] haze: biome " + name);
+				lastName = name;
 			}
 			float[] t = {1f, 1f, 1f, 1f};
 			for (Object[] e : BIOMES) {

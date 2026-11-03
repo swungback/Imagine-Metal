@@ -575,7 +575,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		float fresnel = 1.0 - saturate(dot(N, V));
 		float ff = (1.0 - surf.d) * 0.7;
 		float fm = max(fresnel - ff, 0.0) / (1.0 - ff);
-		float intense = max(surf.metal, smoothstep(0.04, 0.2, surf.f0) * 0.6);
+		float intense = surf.metal;  // (Reimagined: only metals reflect strongly head-on; gems and obsidian mostly at an angle)
 		fm = mix(fm * fm, fm * 0.75 + 0.25, intense);
 		fm *= sqrt(surf.d);
 		if (fm > 0.01) {
@@ -594,6 +594,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			if (hit.a < 0.0) fm = 0.0;
 			// (texture kept: Reimagined keeps 70 % of the surface under its reflection)
 			refl = mix(refl, max(c, refl), 0.7);
+			if (surf.metal < 0.5) fm *= 0.75;  // (a dark gem or obsidian stays dark: its reflection a sheen over it)
 			refl *= mix(float3(1.0), base / max(max(max(base.r, base.g), base.b), 0.02), surf.metal);
 			c = mix(c, refl, saturate(fm));
 		}

@@ -2319,7 +2319,12 @@ fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]],
 		atm = saturate(atm * alt * imf.fogParams.z * imf.hazeTint.w * imf.fogParams.w);
 		if (atm > 0.002) {
 			// (a little deeper blue than Reimagined's: against our darker ground its pale haze read as white)
-			float3 atmColor = imPresent(imAtmFogColor(altRaw, dot(dir, imf.sunDir.xyz), imf) * imf.hazeTint.rgb * float3(0.78, 0.88, 1.0), imf);
+			// (its colour: the sky just above the horizon in this direction, so it is the air's own colour, warm toward the sun and blue
+			// away from it, deepened toward the colour overhead, Reimagined's below-horizon tone by night; the biome's tint on top)
+			float3 d2 = normalize(float3(dir.x, max(dir.y, 0.0) + 0.08, dir.z));
+			float3 air = mix(imSkyColor(d2, imf, false), imf.dayUp.rgb * 1.2, 0.35);
+			air = mix(imAtmFogColor(altRaw, dot(dir, imf.sunDir.xyz), imf), air, imf.dayMiddle.w);
+			float3 atmColor = imPresent(air * imf.hazeTint.rgb, imf);
 			color.rgb = pow(mix(pow(max(color.rgb, 0.0), 2.2), atmColor, atm), 1.0 / 2.2);
 		}
 		float bf = dist / max(imf.fogParams.x, 16.0);
