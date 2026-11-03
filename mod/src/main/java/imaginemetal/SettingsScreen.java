@@ -33,6 +33,12 @@ public final class SettingsScreen extends OptionsSubScreen {
 		this.list.addBig(toggle("Sky and haze", Settings.sky, v -> Settings.sky = v,
 			"Our sky (a gradient, the sun's glow, sunsets, a blue night) and the haze that fades distant land into it. Off: Minecraft's."));
 
+		this.list.addHeader(Component.literal("Surfaces"));
+		this.list.addSmall(toggle("Reflections", Settings.pbr, v -> Settings.pbr = v,
+			"Metal, polished stone, ice and gems reflect the sky and catch the sun; everything else gets a faint sheen."),
+			slider("Surface detail", 0, 4, 0.25f, Settings.normals, v -> Settings.normals = v, v -> v == 0 ? "Off" : String.format(java.util.Locale.ROOT, "%.2f", v),
+				"Generated normals: every brick, plank and pebble catches the light on its own. 0 turns them off."));
+
 		this.list.addHeader(Component.literal("Light"));
 		this.list.addBig(toggle("Coloured light", Settings.coloredLight, v -> Settings.coloredLight = v,
 			"Light sources light the world in their own colours: soul fire blue, redstone red, lava orange."));

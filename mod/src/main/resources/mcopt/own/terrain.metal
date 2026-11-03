@@ -1563,6 +1563,7 @@ struct VOut {
 	float3 imPos [[function_constant(F_VARY)]];
 	float2 imLight [[function_constant(F_VARY)]];
 	uint imMat [[flat]] [[function_constant(F_VARY)]];  // the face's material byte (OwnMaterials: bits 0-3 class, 4-7 upper corners)
+	float4 imRect [[flat]] [[function_constant(F_VARY)]]; // the face's texture rectangle in the atlas (uv min, max; 0 = unknown)
 #endif
 };
 
@@ -1613,6 +1614,9 @@ constant int VS_MODE [[function_constant(7)]];
 constant bool FAT [[function_constant(2)]];
 constant bool CPU_CLIP [[function_constant(3)]];
 
+#ifdef IM_SHADE
+static float2 ownUv(uint vi, device const void *arenaRaw);
+#endif
 static VOut ownVertex(uint vi, int3 origin, int uploadMs, constant DrawFrame &df, device const void *arenaRaw, constant Projection &proj,
 	constant Globals &g, constant Terrain &t, texture2d<float> lightmap, sampler lightSampler, thread float3 &rel);
 static VOut ownShade(Vtx v, int3 origin, int uploadMs, constant DrawFrame &df, constant Projection &proj, constant Globals &g,
@@ -1814,6 +1818,11 @@ vertex VOut own_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant Dr
 #ifdef IM_SHADE
 	// (Imagine Metal) the face's material byte: solid / cutout units of sections compiled with materials on
 	if (!TRANSLUCENT && !QUADS && imMatOff != 0xffffffffu) ov.imMat = ((device const uchar *) arenaRaw)[imMatOff + quad];
+	// (the face's texture rectangle: from this corner's uv and the opposite corner's, which span it; the generated normals wrap in it)
+	if (!QUADS && !F_POSONLY) {
+		float2 uvo = ownUv(vi ^ 2u, arenaRaw);
+		ov.imRect = float4(min(ov.texCoord0, uvo), max(ov.texCoord0, uvo));
+	}
 #endif
 	if (F_FV) {
 		// (F_FV: the fog value itself per vertex, in the spherical distance's place; with F_FOGVERT_ALL in rich pipelines also the
@@ -1842,6 +1851,22 @@ vertex VOut own_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant Dr
 }
 
 // one arena vertex as vanilla's terrain.vsh shades it (own_vs, own_mesh); rel: its section-relative position
+#ifdef IM_SHADE
+// (Imagine Metal) the uv alone of vertex vi, as ownVertex decodes it
+static float2 ownUv(uint vi, device const void *arenaRaw) {
+	if (OWN_REC && COMPACT && !TRANSLUCENT) return float2(ownQrec(arenaRaw, vi >> 2, vi & 3).uv0);
+	if (COMPACT && F_TIGHT) {
+		uint w = ((device const uint4 *) arenaRaw)[vi].w;
+		return float2(ushort(w), ushort(w >> 16)) / 65536.0;
+	}
+	if (COMPACT) {
+		CVtx c = ((device const CVtx *) arenaRaw)[vi];
+		return float2(c.u, c.v) / 65536.0;
+	}
+	return float2(((device const Vtx *) arenaRaw)[vi].uv0);
+}
+#endif
+
 static VOut ownVertex(uint vi, int3 origin, int uploadMs, constant DrawFrame &df, device const void *arenaRaw, constant Projection &proj,
 	constant Globals &g, constant Terrain &t, texture2d<float> lightmap, sampler lightSampler, thread float3 &rel) {
 	Vtx v;
@@ -1902,6 +1927,7 @@ static VOut ownShade(Vtx v, int3 origin, int uploadMs, constant DrawFrame &df, c
 	o.imPos = pos;
 	o.imLight = saturate(float2(int2(v.uv2)) / 240.0);
 	o.imMat = 0;  // (own_vs fills it in where the unit has material bytes)
+	o.imRect = float4(0);  // (own_vs fills it in)
 #else
 	float2 luv = clamp(float2(int2(v.uv2)) / 256.0 + 0.5 / 16.0, float2(0.5 / 16.0), float2(15.5 / 16.0));
 	putColor(o, VS_MODE == 1 ? float4(v.color) / 255.0 : float4(v.color) / 255.0 * lightmap.sample(lightSampler, luv, level(0.0)));
@@ -2269,7 +2295,8 @@ fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]],
 		if (F_RICH && !F_FV) fogValue = max(fogValue, linear_fog_value(in.cylindricalVertexDistance, fog.FogRenderDistanceStart, fog.FogRenderDistanceEnd));
 	}
 #ifdef IM_SHADE
-	color.rgb = imShade(color.rgb, texel.rgb, in.imPos, in.imLight, in.imMat, in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler); // (Imagine Metal)
+	color.rgb = imShade(color.rgb, texel.rgb, in.imPos, in.imLight, in.imMat, in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler,
+		in.texCoord0, in.imRect, atlas); // (Imagine Metal)
 	float3 imFogColor = fog.FogColor.rgb;
 	float imFog = fogValue * fog.FogColor.a;
 	if (imf.sunGlow.w > 0.5) {

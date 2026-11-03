@@ -28,9 +28,10 @@ struct ImFrame {
 	float4 env;          // x how far underground the player is (0..1, eased), y how much it's night (0..1)
 	float4x4 shadowNear; // camera-relative world -> the near cascade's light clip (orthographic)
 	float4x4 shadowFar;  // ... the far cascade's
-	float4 shadow;       // x near cascade normal offset (blocks), y 1 = the maps are valid this frame, z far cascade normal offset, w 0
+	float4 shadow;       // x near cascade normal offset (blocks), y 1 = the maps are valid this frame, z far cascade normal offset,
+	                     // w 1 = PBR (reflections and highlights) on
 	float4 lightVol;     // the coloured light grid (light.metal): xyz its low corner, camera-relative (blocks), w 1 = valid this frame
-	float4 lightSize;    // xyz its size in voxels (one a block)
+	float4 lightSize;    // xyz its size in voxels (one a block), w the generated normals' strength (0 off)
 	float4 skyZenith;    // the sky straight up (linear), w rain 0..1
 	float4 skyHorizon;   // the sky at the horizon (linear), w how much it's sunset or sunrise 0..1
 	float4 skySunset;    // the sunset band's colour (linear), w the distance haze's density (per block)
@@ -145,6 +146,9 @@ static float2 imShadow(float3 p, float3 n, float2 pixel, constant ImFrame &f, de
 #define IM_MAT_DIM 5       // a faint light (magma, sculk sensors, glow lichen...): its bright coloured parts glow
 #define IM_MAT_NETHER_ORE 6 // an ore in netherrack (nether quartz, nether gold, ancient debris)
 #define IM_MAT_SCULK 7     // sculk: its specks glow like stars
+#define IM_MAT_METAL 8     // metal blocks (iron, gold, copper, netherite; chains, anvils, bells...): coloured reflections
+#define IM_MAT_POLISHED 9  // polished and glazed stone, quartz, prismarine, concrete...: a smooth stone sheen
+#define IM_MAT_GLOSSY 10   // ice, obsidian, amethyst, gem blocks: a near-mirror finish
 
 // How much light a fragment of class cls gives off, as a multiple of its texture's colour (tex: the texel as sampled, before the
 // vertex colour's tint and Minecraft's corner shading, so every face of a block glows alike). The result goes on top of the
@@ -213,17 +217,87 @@ static float4 imBlockLight(float3 p, float3 n, constant ImFrame &f, texture3d<fl
 
 // One terrain fragment: albedo as sampled and tinted (display-encoded, vanilla's AO and face shade already in it through the
 // vertex colour), camera-relative position, light levels (x block, y sky; 0..1). Returns the display-encoded colour.
+// ---- PBR ----
+
+// The surface's height at texel t of its texture (wrapped inside the sprite's rectangle lo..hi, in texels): its brightness, so
+// the mortar between bricks and the cracks in stone sit lower than the faces around them. Clear texels count as low.
+static inline float imHeight(texture2d<float> atlas, float2 t, float2 lo, float2 size) {
+	float2 w = lo + fmod(fmod(t - lo, size) + size, size);
+	float4 c = atlas.read(uint2(w), 0);
+	return imLuma(c.rgb) * c.a;
+}
+
+// Generated normals (no resource pack needed): the texture's brightness read as a height map, its slope tilting the face's normal,
+// so every brick, plank and pebble catches the light on its own. Tangent space: x along the texture's u, y along its v, z out of
+// the face. Fades out with distance (where a texel is smaller than a pixel it would only shimmer).
+static float3 imGenNormal(texture2d<float> atlas, float2 uv, float4 rect, float strength, float2 texelsPerPixel) {
+	float2 asz = float2(atlas.get_width(), atlas.get_height());
+	float2 lo = floor(rect.xy * asz + 0.5), hi = floor(rect.zw * asz + 0.5);
+	float2 size = hi - lo;
+	if (strength <= 0.0 || any(size < 2.0) || any(size > 512.0)) return float3(0, 0, 1);
+	float fade = 1.0 - smoothstep(0.6, 1.5, max(texelsPerPixel.x, texelsPerPixel.y));
+	if (fade <= 0.0) return float3(0, 0, 1);
+	float2 t = floor(uv * asz) + 0.5;
+	float hx = imHeight(atlas, t + float2(1, 0), lo, size) - imHeight(atlas, t - float2(1, 0), lo, size);
+	float hy = imHeight(atlas, t + float2(0, 1), lo, size) - imHeight(atlas, t - float2(0, 1), lo, size);
+	float k = strength * fade;
+	return normalize(float3(-hx * k, -hy * k, 1.0));
+}
+
+// How each class reflects: x smoothness (0 rough .. 1 mirror), y metalness (0 or 1); tex the texture's own colour. Smoothness
+// follows the texture a little (bright parts of a block shinier than its dark seams), so it isn't one flat sheen.
+static float2 imSurface(uint cls, float3 tex) {
+	float l = imLuma(tex);
+	float hi = max(max(tex.r, tex.g), tex.b), lo = min(min(tex.r, tex.g), tex.b);
+	switch (cls) {
+		case IM_MAT_METAL: return float2(0.50 + 0.35 * l, 1.0);
+		case IM_MAT_POLISHED: return float2(0.55 + 0.2 * l, 0.0);
+		case IM_MAT_GLOSSY: return float2(0.82 + 0.1 * l, 0.0);
+		case IM_MAT_ORE: return float2(mix(0.2, 0.85, smoothstep(0.08, 0.2, hi - lo)), 0.0);  // the gems in it glint
+		case IM_MAT_LAVA: case IM_MAT_EMITTER: case IM_MAT_FLAME: return float2(0.0, 0.0);
+		default: return float2(0.12 + 0.18 * l, 0.0);  // everything else: a faint sheen at grazing angles
+	}
+}
+
+static inline float3 imFresnel(float3 f0, float c, float rough) {
+	float x = 1.0 - saturate(c);
+	float x2 = x * x;
+	return f0 + (max(float3(1.0 - rough), f0) - f0) * (x2 * x2 * x);
+}
+
 static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint mat, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp,
-	texture3d<float> lvol, sampler lsamp) {
+	texture3d<float> lvol, sampler lsamp, float2 uv, float4 rect, texture2d<float> atlas) {
 	if (f.flags.z == 0) return albedo * (0.2 + 0.8 * max(light.x, light.y)); // the engine hasn't filled a frame yet
 	bool slanted;
 	float3 n = imFaceNormal(p, slanted);
+	// the texture's tangent frame from the screen derivatives (Schüler 2013), taken before any branch
+	float3 dp1 = dfdx(p), dp2 = dfdy(p);
+	float2 duv1 = dfdx(uv), duv2 = dfdy(uv);
+	float2 asz = float2(atlas.get_width(), atlas.get_height());
+	float2 tpp = (abs(duv1) + abs(duv2)) * asz;  // texels a pixel covers
+	uint cls = mat & 15u;
+	float3 N = n;
+	if (f.lightSize.w > 0.0 && cls != IM_MAT_LAVA) {
+		float3 tn = imGenNormal(atlas, uv, rect, f.lightSize.w, tpp);
+		if (tn.z < 0.9999) {
+			float3 dp2perp = cross(dp2, n), dp1perp = cross(n, dp1);
+			float3 T = dp2perp * duv1.x + dp1perp * duv2.x;
+			float3 B = dp2perp * duv1.y + dp1perp * duv2.y;
+			float im = rsqrt(max(max(dot(T, T), dot(B, B)), 1e-30));
+			N = normalize(T * (tn.x * im) + B * (tn.y * im) + n * tn.z);
+		}
+	}
 	float3 base = pow(max(albedo, 0.0), 2.2);
+	float2 surf = f.shadow.w > 0.5 ? imSurface(cls, tex) : float2(0.0);
+	float metal = surf.y;
+	float rough = max((1.0 - surf.x) * (1.0 - surf.x), 0.03);
+	float3 f0 = mix(float3(0.04), base, metal);
+	float3 V = -normalize(p);
 	float block = light.x, sky = light.y;
 	float skyF = imSkyCurve(sky);
 
 	// direct light: wrapped N.L; until there are shadow maps, the sky light stands in for them (no sun under a roof)
-	float nl = dot(n, f.lightDir.xyz);
+	float nl = dot(N, f.lightDir.xyz);
 	float wrap = slanted ? 0.35 + 0.5 * abs(nl) : max(nl + 0.4, 0.0) * (1.0 / 1.4);
 	// sunlight: the shadow map where it reaches; the sky light stands in beyond it. Underground (no sky light at all) the sun is
 	// off regardless, so a cave never catches sunlight through an imprecision of the map.
@@ -233,7 +307,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	float3 direct = f.lightColor.rgb * (wrap * sun);
 
 	// sky light: blue from above, warmer and dimmer from below
-	float3 ambient = mix(f.ambientDown.rgb, f.ambientUp.rgb, n.y * 0.5 + 0.5) * skyF;
+	float3 ambient = mix(f.ambientDown.rgb, f.ambientUp.rgb, N.y * 0.5 + 0.5) * skyF;
 
 	// torches: warm, weaker in full daylight
 	float4 bl = imBlockLight(p, n, f, lvol, lsamp);
@@ -247,8 +321,32 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	float3 lit = sqrt(day * day + torch * torch + f.minLight.rgb * f.minLight.rgb);
 	float3 radiance = base * lit * face * f.minLight.w;
 
+	// reflections and highlights (PBR): the sun's highlight (GGX), the sky reflected (its colour in the mirror direction on smooth
+	// surfaces, the sky's light on rough ones; none where the sky can't be seen), a faint sheen of the torches' light
+	if (f.shadow.w > 0.5 && f.flags.y == 0) {
+		float nv = max(dot(N, V), 1e-3);
+		float3 F = imFresnel(f0, nv, rough);
+		radiance *= 1.0 - metal * 0.92;   // (a metal's colour is in its reflections; what's left is its tarnish)
+		radiance *= 1.0 - (1.0 - metal) * imLuma(F);
+		float3 H = normalize(V + f.lightDir.xyz);
+		float nlh = saturate(dot(N, f.lightDir.xyz)), nh = saturate(dot(N, H)), vh = saturate(dot(V, H));
+		float a2 = rough * rough;
+		float d = nh * nh * (a2 - 1.0) + 1.0;
+		float D = a2 / (3.14159 * d * d);
+		float k = rough * 0.5;
+		float vis = 0.25 / ((nlh * (1.0 - k) + k) * (nv * (1.0 - k) + k));
+		float3 Fs = f0 + (1.0 - f0) * pow(1.0 - vh, 5.0);
+		float3 highlight = min(D * vis * nlh, 24.0) * Fs * f.lightColor.rgb * sun * step(0.0, dot(n, f.lightDir.xyz));
+		float3 R = reflect(-V, N);
+		float3 blurry = mix(f.ambientDown.rgb, f.ambientUp.rgb, R.y * 0.5 + 0.5) * 2.2;
+		float3 sharp = f.flags.x == 0 ? imSkyColor(R, f) * (R.y < 0.0 ? 0.45 : 1.0) : blurry;
+		float3 env = mix(blurry, sharp, smoothstep(0.35, 0.85, surf.x)) * skyF;
+		env += torch * (0.25 * surf.x);
+		radiance += (highlight + env * F) * f.minLight.w;
+	}
+
 	if (f.flags.y == 1) return float3(light, 0.0);          // debug: light levels
-	if (f.flags.y == 2) return n * 0.5 + 0.5;               // debug: normals
+	if (f.flags.y == 2) return N * 0.5 + 0.5;               // debug: normals (with the generated ones)
 	if (f.flags.y == 4) {                                   // debug: the coloured light grid alone (its colour where light reaches)
 		if (f.lightVol.w < 0.5) return float3(0.25, 0.0, 0.25);
 		float3 uvw = (p + n * 0.5 - f.lightVol.xyz) / f.lightSize.xyz;
@@ -257,7 +355,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		float gm = max(max(gl.r, gl.g), gl.b);
 		return pow(gm > 1e-4 ? gl.rgb / gm * saturate(gl.a * 1.5) : float3(0.0), 1.0 / 2.2) * 0.9 + base * 0.1;
 	}
-	float emit = imEmission(mat & 15u, tex);
+	float emit = imEmission(cls, tex);
 
 	float3 c = imTonemap(radiance, f.tonemap);
 	// saturation and vibrance (vibrance lifts the colours that aren't saturated yet)

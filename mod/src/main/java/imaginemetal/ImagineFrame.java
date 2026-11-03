@@ -217,12 +217,12 @@ public final class ImagineFrame {
 		put(cave, night, 0f, 0f);
 		for (int c = 0; c < 2; c++) for (int i = 0; i < 16; i++) BUF.putFloat(Shadows.MATRIX[c][i]);
 		// shadow: near cascade normal offset, valid, far cascade normal offset
-		put(Shadows.normalOffset(0), Shadows.valid() ? 1f : 0f, Shadows.normalOffset(1), 0f);
+		put(Shadows.normalOffset(0), Shadows.valid() ? 1f : 0f, Shadows.normalOffset(1), Settings.pbr ? 1f : 0f);
 		// the coloured light grid: its low corner camera-relative, valid; its size
 		LightVolume.prepare();
 		var cam = Minecraft.getInstance().gameRenderer.mainCamera().position();
 		put((float) (LightVolume.originX() - cam.x), (float) (LightVolume.originY() - cam.y), (float) (LightVolume.originZ() - cam.z), LightVolume.valid() ? 1f : 0f);
-		put(LightVolume.SX, LightVolume.SY, LightVolume.SZ, 0f);
+		put(LightVolume.SX, LightVolume.SY, LightVolume.SZ, Settings.normals);
 		// the sky and the haze (ours only in the overworld with the eyes in air: in water, lava or snow Minecraft's fog stays)
 		boolean ourFog = dim == 0 && Settings.sky && camera.fogType == net.minecraft.world.level.material.FogType.NONE;
 		float haze = 0.0011f * (1f + 3f * rain) * (1f - cave);

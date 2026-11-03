@@ -34,6 +34,11 @@ public final class Config {
 		# Our sky and distance haze (false: Minecraft's sky and fog).
 		imaginemetal.sky=true
 		#
+		# Surfaces: reflections and highlights (metal, polished stone, ice...), and generated normals' strength (0 off, up to 4):
+		# every texture's light and dark read as bumps.
+		imaginemetal.pbr=true
+		imaginemetal.normals=1.5
+		#
 		# Coloured light: torches, soul fire, redstone, lava and other light sources light the world in their own colours.
 		imaginemetal.coloredLight=true
 		#
