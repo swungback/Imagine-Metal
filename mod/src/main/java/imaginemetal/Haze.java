@@ -28,7 +28,8 @@ public final class Haze {
 	private static final float[] TAIGA = {0.31f, 0.85f, 1.00f, 0.0006f};
 	private static final float[] JUNGLE = {0.40f, 0.95f, 1.00f, 0.0013f};
 	private static final float[] SWAMP = {0.67f, 1.00f, 0.94f, 0.0014f};
-	private static final float[] PALE_GARDEN = {0.90f, 0.80f, 1.00f, 0.0300f};
+	// (Photon's is 0.03: a wall of grey; a fifth of it keeps the pale garden misty without drowning it)
+	private static final float[] PALE_GARDEN = {0.90f, 0.86f, 1.00f, 0.0060f};
 
 	private Haze() {
 	}

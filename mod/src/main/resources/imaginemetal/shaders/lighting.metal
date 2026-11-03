@@ -502,7 +502,7 @@ static float3 imAirFog(float3 p, float skyLight, constant ImFrame &f, thread flo
 	trans = float3(1.0);
 	if (f.sunDir.w < 0.5 || f.fogParams.w <= 0.0) return float3(0.0);
 	float len = length(p);
-	if (len < 0.5) return float3(0.0);
+	if (len < 6.0) return float3(0.0);  // (too thin to see this close: most of the screen skips the rest)
 	float3 dir = p / len;
 	// heights clamped at Photon's volume floor (sea level - 24): the air doesn't keep thickening down into caves
 	float y0 = max(f.fogParams.y, 39.0), y1 = max(f.fogParams.y + p.y, 39.0);
@@ -524,13 +524,11 @@ static float3 imAirFog(float3 p, float skyLight, constant ImFrame &f, thread flo
 	float LoV = dot(dir, f.lightDir.xyz);
 	const float iso = 0.0795775;
 	float3 sc = 2.0 * (rs + ms) * iso * f.ambientUp.rgb;
-	float amount = 1.0, an = 1.0;
-	for (int i = 0; i < 4; i++) {
-		float ph = 0.7 * imHg(LoV, 0.5 * an) + 0.3 * imHg(LoV, -0.2 * an);
-		sc += amount * (rs * iso + ms * ph) * f.lightColor.rgb;
-		amount *= 0.5;
-		an *= 0.7;
-	}
+	// (Photon's four scattering orders: the first with its full phase, the other three, nearly even by then, folded into one
+	// even term; one phase evaluation instead of four)
+	float ph = 0.7 * imHg(LoV, 0.5) + 0.3 * imHg(LoV, -0.2);
+	float phMulti = 0.5 * (0.7 * imHg(LoV, 0.35) + 0.3 * imHg(LoV, -0.14)) + 0.375 * iso;
+	sc += (rs * (1.875 * iso) + ms * (ph + phMulti)) * f.lightColor.rgb;
 	sc *= max(skyLight, f.fogParams.z);
 	float sy = f.sunDir.y + 0.02;
 	sc *= 1.0 + 0.75 * saturate((exp(-300.0 * sy * sy) - 0.05) / 0.95);  // (Photon: brighter in the early morning and evening)
