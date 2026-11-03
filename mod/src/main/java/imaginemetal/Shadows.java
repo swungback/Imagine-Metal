@@ -33,10 +33,11 @@ public final class Shadows {
 	private static final float MIN_ELEVATION = 0.08f;
 	private static final int FRAME_BYTES = 128;
 	/**
-	 * The light direction the map uses moves in steps of this angle (radians; the sun crosses one in ~0.8 s): drawn from a direction
-	 * that changed every frame, the map's texels (leaf holes above all) shifted every frame and shadows shimmered even standing still.
+	 * The light direction the map uses moves in steps of this angle (radians; the sun crosses one in ~0.15 s). Not every frame (the
+	 * map re-rasterized every frame shimmered), and not in big steps either (0.25 degrees: the leaf pattern visibly hopped every
+	 * ~0.8 s): small steps that, with the receivers' wide filter, read as the shadows creeping with the sun.
 	 */
-	private static final double ANGLE_STEP = Math.toRadians(0.25);
+	private static final double ANGLE_STEP = Math.toRadians(0.045);
 
 	/** This frame's light clip (camera-relative world -> light clip, before the warp), column-major. */
 	static final float[] MATRIX = new float[16];

@@ -84,13 +84,19 @@ static float2 imShadow(float3 p, float3 n, float2 pixel, constant ImFrame &f, de
 	float2 uv = float2(0.5 + 0.5 * xy.x, 0.5 - 0.5 * xy.y);
 	float texel = 1.0 / float(smap.get_width());
 	float ref = c.z - 0.00012;
-	// a fixed 5-tap pattern (centre + 4 diagonals), each tap 2x2 filtered by the compare sampler: soft edges that stay still when
-	// the view turns (a per-pixel rotated pattern crawled without temporal filtering)
-	float o = 1.2 * texel;
-	float lit = 2.0 * smap.sample_compare(cmp, uv, ref)
-		+ smap.sample_compare(cmp, uv + float2(o, o), ref) + smap.sample_compare(cmp, uv + float2(-o, o), ref)
-		+ smap.sample_compare(cmp, uv + float2(o, -o), ref) + smap.sample_compare(cmp, uv + float2(-o, -o), ref);
-	return float2(lit / 6.0, 1.0 - smoothstep(0.9, 0.98, edge));
+	// a fixed 3x3 pattern, each tap 2x2 filtered by the compare sampler (tent weights): soft edges that stay still when the view
+	// turns (a per-pixel rotated pattern crawled), wide enough that single leaf holes fade in and out as the sun moves instead of
+	// popping
+	float o = 1.5 * texel;
+	float lit = 0.0, wsum = 0.0;
+	for (int j = -1; j <= 1; j++) {
+		for (int i = -1; i <= 1; i++) {
+			float w = (2.0 - abs(float(i))) * (2.0 - abs(float(j)));
+			lit += w * smap.sample_compare(cmp, uv + float2(i, j) * o, ref);
+			wsum += w;
+		}
+	}
+	return float2(lit / wsum, 1.0 - smoothstep(0.9, 0.98, edge));
 }
 
 // One terrain fragment: albedo as sampled and tinted (display-encoded, vanilla's AO and face shade already in it through the
