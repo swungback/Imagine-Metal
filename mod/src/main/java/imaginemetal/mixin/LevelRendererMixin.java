@@ -3,6 +3,7 @@ package imaginemetal.mixin;
 import com.mojang.blaze3d.resource.GraphicsResourceAllocator;
 import com.mojang.renderpearl.api.buffers.GpuBufferSlice;
 import imaginemetal.Bloom;
+import imaginemetal.Reflections;
 import imaginemetal.Hdr;
 import imaginemetal.ImagineFrame;
 import imaginemetal.LightVolume;
