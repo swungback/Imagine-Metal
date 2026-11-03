@@ -1,0 +1,103 @@
+// Imagine Metal: bloom.
+//
+// Run once per frame right after the level is drawn (before the hand and the HUD), on the game's main image (imbloom.m):
+//  1. prefilter: the main image at half size, linear light, the bright parts kept (a soft threshold) plus a faint share of
+//     everything (the overall soft glow Complementary Reimagined has). A Karis average (each tap weighted 1 / (1 + luma)) keeps
+//     single bright pixels (a far torch, a sun glint) from flickering the glow on and off as they move.
+//  2. down: a chain of half-size copies, each a 13-tap filter of the one before (wide, soft, no square artefacts).
+//  3. up: back up the chain, each level adding a 3x3 tent of the smaller one to itself, so the top level holds every size of
+//     glow, from a tight halo to a wide haze.
+//  4. composite: the glow added to the main image in linear light. The main image is read with Apple GPUs' programmable
+//     blending ([[color(0)]]: the pixel's current value straight from tile memory), so nothing is copied.
+//
+// The main image is display-encoded (gamma 2.2: the terrain's shading writes it that way, vanilla's passes too).
+#include <metal_stdlib>
+using namespace metal;
+
+struct ImBloomParams {
+	float4 texel;  // xy 1 / the source's size; z threshold (linear luma), w soft knee
+	float4 mix;    // x strength, y number of levels (the chain's sum is divided by it), z haze (share of all light), w 0
+};
+
+struct ImBloomOut {
+	float4 pos [[position]];
+	float2 uv;
+};
+
+// one triangle covering the target
+vertex ImBloomOut im_bloom_vs(uint vid [[vertex_id]]) {
+	float2 p = float2((vid << 1) & 2, vid & 2);
+	ImBloomOut o;
+	o.pos = float4(p * 2.0 - 1.0, 0.0, 1.0);
+	o.uv = float2(p.x, 1.0 - p.y);
+	return o;
+}
+
+static inline float3 imbLinear(float3 c) {
+	return pow(max(c, 0.0), 2.2);
+}
+
+static inline float imbLuma(float3 c) {
+	return dot(c, float3(0.2126, 0.7152, 0.0722));
+}
+
+fragment float4 im_bloom_prefilter(ImBloomOut in [[stage_in]], texture2d<float> src [[texture(0)]], sampler s [[sampler(0)]],
+	constant ImBloomParams &p [[buffer(0)]]) {
+	float2 t = p.texel.xy;
+	// four bilinear taps one texel out: the 4x4 source pixels behind each output pixel
+	float3 a = imbLinear(src.sample(s, in.uv + t * float2(-1.0, -1.0)).rgb);
+	float3 b = imbLinear(src.sample(s, in.uv + t * float2(1.0, -1.0)).rgb);
+	float3 c = imbLinear(src.sample(s, in.uv + t * float2(-1.0, 1.0)).rgb);
+	float3 d = imbLinear(src.sample(s, in.uv + t * float2(1.0, 1.0)).rgb);
+	float wa = 1.0 / (1.0 + imbLuma(a)), wb = 1.0 / (1.0 + imbLuma(b)), wc = 1.0 / (1.0 + imbLuma(c)), wd = 1.0 / (1.0 + imbLuma(d));
+	float3 col = (a * wa + b * wb + c * wc + d * wd) / (wa + wb + wc + wd);
+	// soft threshold: nothing below threshold - knee, a smooth curve through the knee, everything above threshold in full
+	float l = imbLuma(col);
+	float th = p.texel.z, knee = p.texel.w;
+	float soft = clamp(l - th + knee, 0.0, 2.0 * knee);
+	soft = soft * soft / (4.0 * knee + 1e-5);
+	float keep = max(soft, l - th) / max(l, 1e-5);
+	return float4(col * (keep + p.mix.z), 1.0);
+}
+
+fragment float4 im_bloom_down(ImBloomOut in [[stage_in]], texture2d<float> src [[texture(0)]], sampler s [[sampler(0)]],
+	constant ImBloomParams &p [[buffer(0)]]) {
+	float2 t = p.texel.xy, uv = in.uv;
+	float3 a = src.sample(s, uv + t * float2(-2.0, -2.0)).rgb;
+	float3 b = src.sample(s, uv + t * float2(0.0, -2.0)).rgb;
+	float3 c = src.sample(s, uv + t * float2(2.0, -2.0)).rgb;
+	float3 d = src.sample(s, uv + t * float2(-1.0, -1.0)).rgb;
+	float3 e = src.sample(s, uv + t * float2(1.0, -1.0)).rgb;
+	float3 f = src.sample(s, uv + t * float2(-2.0, 0.0)).rgb;
+	float3 g = src.sample(s, uv).rgb;
+	float3 h = src.sample(s, uv + t * float2(2.0, 0.0)).rgb;
+	float3 i = src.sample(s, uv + t * float2(-1.0, 1.0)).rgb;
+	float3 j = src.sample(s, uv + t * float2(1.0, 1.0)).rgb;
+	float3 k = src.sample(s, uv + t * float2(-2.0, 2.0)).rgb;
+	float3 l = src.sample(s, uv + t * float2(0.0, 2.0)).rgb;
+	float3 m = src.sample(s, uv + t * float2(2.0, 2.0)).rgb;
+	float3 r = g * 0.125 + (a + c + k + m) * 0.03125 + (b + f + h + l) * 0.0625 + (d + e + i + j) * 0.125;
+	return float4(r, 1.0);
+}
+
+static inline float3 imbTent(texture2d<float> src, sampler s, float2 uv, float2 t) {
+	float3 r = src.sample(s, uv).rgb * 4.0;
+	r += (src.sample(s, uv + float2(-t.x, 0.0)).rgb + src.sample(s, uv + float2(t.x, 0.0)).rgb + src.sample(s, uv + float2(0.0, -t.y)).rgb
+		+ src.sample(s, uv + float2(0.0, t.y)).rgb) * 2.0;
+	r += src.sample(s, uv + float2(-t.x, -t.y)).rgb + src.sample(s, uv + float2(t.x, -t.y)).rgb + src.sample(s, uv + float2(-t.x, t.y)).rgb
+		+ src.sample(s, uv + t).rgb;
+	return r * (1.0 / 16.0);
+}
+
+// drawn with additive blending onto the level's own downsampled copy
+fragment float4 im_bloom_up(ImBloomOut in [[stage_in]], texture2d<float> src [[texture(0)]], sampler s [[sampler(0)]],
+	constant ImBloomParams &p [[buffer(0)]]) {
+	return float4(imbTent(src, s, in.uv, p.texel.xy), 1.0);
+}
+
+fragment float4 im_bloom_composite(ImBloomOut in [[stage_in]], float4 dst [[color(0)]], texture2d<float> src [[texture(0)]],
+	sampler s [[sampler(0)]], constant ImBloomParams &p [[buffer(0)]]) {
+	float3 glow = imbTent(src, s, in.uv, p.texel.xy) / p.mix.y;
+	float3 c = imbLinear(dst.rgb) + glow * p.mix.x;
+	return float4(pow(saturate(c), 1.0 / 2.2), dst.a);
+}

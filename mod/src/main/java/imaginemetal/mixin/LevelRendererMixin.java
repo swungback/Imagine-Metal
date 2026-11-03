@@ -2,6 +2,7 @@ package imaginemetal.mixin;
 
 import com.mojang.blaze3d.resource.GraphicsResourceAllocator;
 import com.mojang.renderpearl.api.buffers.GpuBufferSlice;
+import imaginemetal.Bloom;
 import imaginemetal.ImagineFrame;
 import imaginemetal.Shadows;
 import net.minecraft.client.renderer.LevelRenderer;
@@ -12,7 +13,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** The engine's per-frame values, and the shadow map before the level's passes. */
+/** The engine's per-frame values, the shadow map before the level's passes, bloom after them. */
 @Mixin(LevelRenderer.class)
 abstract class LevelRendererMixin {
 	@Inject(method = "render", at = @At("HEAD"))
@@ -25,5 +26,11 @@ abstract class LevelRendererMixin {
 	@Inject(method = "render", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/framegraph/FrameGraphBuilder;execute(Lcom/mojang/blaze3d/resource/GraphicsResourceAllocator;Lcom/mojang/blaze3d/framegraph/FrameGraphBuilder$Inspector;)V"))
 	private void imaginemetal$shadows(CallbackInfo ci) {
 		Shadows.render();
+	}
+
+	/** Bloom, once the level's passes have drawn the world (the hand and the HUD come after, so they don't glow). */
+	@Inject(method = "render", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/framegraph/FrameGraphBuilder;execute(Lcom/mojang/blaze3d/resource/GraphicsResourceAllocator;Lcom/mojang/blaze3d/framegraph/FrameGraphBuilder$Inspector;)V", shift = At.Shift.AFTER))
+	private void imaginemetal$bloom(CallbackInfo ci) {
+		Bloom.render();
 	}
 }

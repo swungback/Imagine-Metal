@@ -30,6 +30,11 @@ public final class Config {
 		imaginemetal.shadowRes=2048
 		# How far around you shadows reach, in blocks (64 to 256). Less is faster: fewer blocks to draw into the map.
 		imaginemetal.shadowRange=160
+		#
+		# Bloom: the soft glow around bright things (the sun, lava, torches, glowing blocks) and a faint haze over everything.
+		imaginemetal.bloom=true
+		# How strong the glow is (0 to 1).
+		imaginemetal.bloomStrength=0.18
 		""";
 
 	private Config() {
