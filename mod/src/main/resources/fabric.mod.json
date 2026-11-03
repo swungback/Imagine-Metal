@@ -1,0 +1,52 @@
+{
+	"schemaVersion": 1,
+	"id": "imaginemetal",
+	"version": "${version}",
+	"name": "Imagine Metal",
+	"description": "Complementary Reimagined style shaders with PBR and coloured lighting, rendered natively on Apple Metal. Rendering backend: mcopt by Noah Dunnagan (Apache-2.0).",
+	"authors": [
+		"swungback"
+	],
+	"contributors": [
+		"Claude (Anthropic)",
+		"Noah Dunnagan (mcopt, the Metal backend)"
+	],
+	"contact": {
+		"sources": "https://github.com/swungback/Imagine-Metal"
+	},
+	"environment": "client",
+	"entrypoints": {
+		"preLaunch": [
+			"mcopt.metal.Preload"
+		],
+		"client": [
+			"imaginemetal.ImagineMetal"
+		]
+	},
+	"mixins": [
+		"mcopt-metal.mixins.json",
+		"mcopt-metal-lod.mixins.json",
+		"mcopt-metal-gen.mixins.json",
+		"mcopt-metal-own.mixins.json",
+		"mcopt-metal-ownmesh.mixins.json",
+		"mcopt-metal-startup.mixins.json",
+		"mcopt-metal-qos.mixins.json",
+		"mcopt-metal-cpu.mixins.json",
+		"mcopt-metal-chunk.mixins.json",
+		"mcopt-metal-alloc.mixins.json",
+		"mcopt-metal-chunkio.mixins.json",
+		"mcopt-metal-edge.mixins.json",
+		"mcopt-metal-compat.mixins.json"
+	],
+	"provides": [
+		"mcopt-metal"
+	],
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.3",
+		"java": ">=25"
+	},
+	"breaks": {
+		"sodium": "*"
+	}
+}

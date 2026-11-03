@@ -1,0 +1,20 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Game runs and logs
+run/
+logs/
+crash-reports/
+
+# Native build output
+*.dylib
+*.o
+
+# IDEs and OS
+.idea/
+*.iml
+out/
+.vscode/
+.DS_Store

@@ -1,0 +1,12 @@
+{
+	"required": true,
+	"package": "mcopt.metal.mixin.chunkio",
+	"plugin": "mcopt.metal.mixin.chunkio.ChunkIoMixinPlugin",
+	"compatibilityLevel": "JAVA_25",
+	"client": [
+		"RegionFileStorageMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}
