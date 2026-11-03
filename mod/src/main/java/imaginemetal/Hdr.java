@@ -73,6 +73,11 @@ public final class Hdr {
 		end();
 	}
 
+	/** Whether texture is the HDR image (FrontendRenderPassMixin). */
+	public static boolean isHdrImage(GpuTexture t) {
+		return t != null && t == texture;
+	}
+
 	/** Whether the level is drawing into the HDR image right now. */
 	static boolean active() {
 		return target != null;
