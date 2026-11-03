@@ -13,7 +13,7 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// Per-frame values, written by imaginemetal.ImagineFrame (same layout, 304 bytes) and bound at fragment buffer 30.
+// Per-frame values, written by imaginemetal.ImagineFrame (same layout, 336 bytes) and bound at fragment buffer 30.
 struct ImFrame {
 	float4 lightDir;     // xyz unit direction toward the light that casts this frame's light (sun by day, moon by night), w 1 = sun
 	float4 lightColor;   // rgb direct light (linear), w rain 0..1
@@ -28,6 +28,8 @@ struct ImFrame {
 	float4x4 shadowNear; // camera-relative world -> the near cascade's light clip (orthographic)
 	float4x4 shadowFar;  // ... the far cascade's
 	float4 shadow;       // x near cascade normal offset (blocks), y 1 = the maps are valid this frame, z far cascade normal offset, w 0
+	float4 lightVol;     // the coloured light grid (light.metal): xyz its low corner, camera-relative (blocks), w 1 = valid this frame
+	float4 lightSize;    // xyz its size in voxels (one a block)
 };
 
 static inline float imLuma(float3 c) {
@@ -133,9 +135,26 @@ static float imEmission(uint cls, float3 albedo) {
 	}
 }
 
+// The colour of block light at p (camera-relative, n its face normal): the hue of the coloured light grid in front of the face,
+// at the torch light's strength; the warm default where the grid has nothing (outside it, or no light source it knows of).
+static float3 imBlockLightColor(float3 p, float3 n, constant ImFrame &f, texture3d<float> vol, sampler vs) {
+	float3 warm = f.blockColor.rgb;
+	if (f.lightVol.w < 0.5) return warm;
+	float3 uvw = (p + n * 0.5 - f.lightVol.xyz) / f.lightSize.xyz;
+	float3 e = min(uvw, 1.0 - uvw) * f.lightSize.xyz;  // blocks to the grid's nearest side
+	float inside = smoothstep(1.0, 6.0, min(min(e.x, e.y), e.z));
+	if (inside <= 0.0) return warm;
+	float3 c = vol.sample(vs, uvw).rgb;
+	float m = max(max(c.r, c.g), c.b);
+	if (m < 1e-5) return warm;
+	float3 hue = c / m * max(max(warm.r, warm.g), warm.b);
+	return mix(warm, hue, inside);
+}
+
 // One terrain fragment: albedo as sampled and tinted (display-encoded, vanilla's AO and face shade already in it through the
 // vertex colour), camera-relative position, light levels (x block, y sky; 0..1). Returns the display-encoded colour.
-static float3 imShade(float3 albedo, float3 p, float2 light, uint mat, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp) {
+static float3 imShade(float3 albedo, float3 p, float2 light, uint mat, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp,
+	texture3d<float> lvol, sampler lsamp) {
 	if (f.flags.z == 0) return albedo * (0.2 + 0.8 * max(light.x, light.y)); // the engine hasn't filled a frame yet
 	bool slanted;
 	float3 n = imFaceNormal(p, slanted);
@@ -157,7 +176,7 @@ static float3 imShade(float3 albedo, float3 p, float2 light, uint mat, float2 pi
 	float3 ambient = mix(f.ambientDown.rgb, f.ambientUp.rgb, n.y * 0.5 + 0.5) * skyF;
 
 	// torches: warm, weaker in full daylight
-	float3 torch = f.blockColor.rgb * imBlockCurve(block) * (1.0 - 0.45 * f.blockColor.w * smoothstep(0.5, 1.0, sky));
+	float3 torch = (block > 0.0 ? imBlockLightColor(p, n, f, lvol, lsamp) : f.blockColor.rgb) * imBlockCurve(block) * (1.0 - 0.45 * f.blockColor.w * smoothstep(0.5, 1.0, sky));
 
 	// directional face shading (vanilla's is taken out of the vertex colours, FlatFaceShadeMixin): tops full, bottoms 60 %,
 	// north/south a little brighter than east/west, so every block reads as a solid shape even in flat light

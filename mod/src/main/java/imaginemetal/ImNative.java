@@ -21,6 +21,12 @@ final class ImNative {
 	private static final MethodHandle BLOOM_NEW = fn("im_bloom_new", FunctionDescriptor.of(JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT), false);
 	private static final MethodHandle BLOOM_RENDER = fn("im_bloom_render", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG,
 		JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT, JAVA_LONG, JAVA_INT), false);
+	private static final MethodHandle LIGHT_NEW = fn("im_light_new", FunctionDescriptor.of(JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_INT,
+		JAVA_LONG, JAVA_INT), false);
+	private static final MethodHandle LIGHT_UPLOAD = fn("im_light_upload", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT,
+		JAVA_INT, JAVA_INT, JAVA_LONG), false);
+	private static final MethodHandle LIGHT_STEP = fn("im_light_step", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_INT,
+		JAVA_INT), false);
 
 	private static MethodHandle fn(String name, FunctionDescriptor d, boolean critical) {
 		var symbol = MetalBridge.library().find(name).orElseThrow(() -> new IllegalStateException("missing native symbol " + name));
@@ -65,6 +71,30 @@ final class ImNative {
 	static int bloomRender(long enc, long state, long src, long dst, float strength, float threshold, float knee, float haze, long err, int errCap) {
 		try {
 			return (int) BLOOM_RENDER.invokeExact(enc, state, src, dst, strength, threshold, knee, haze, err, errCap);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
+	static long lightNew(long ctx, long source, int sx, int sy, int sz, long err, int errCap) {
+		try {
+			return (long) LIGHT_NEW.invokeExact(ctx, source, sx, sy, sz, err, errCap);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
+	static void lightUpload(long state, int x, int y, int z, int w, int h, int d, long bytes) {
+		try {
+			LIGHT_UPLOAD.invokeExact(state, x, y, z, w, h, d, bytes);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
+	static void lightStep(long enc, long state, int dx, int dy, int dz, boolean reset) {
+		try {
+			LIGHT_STEP.invokeExact(enc, state, dx, dy, dz, reset ? 1 : 0);
 		} catch (Throwable t) {
 			throw new IllegalStateException(t);
 		}

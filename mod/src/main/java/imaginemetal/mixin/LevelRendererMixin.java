@@ -5,6 +5,7 @@ import com.mojang.renderpearl.api.buffers.GpuBufferSlice;
 import imaginemetal.Bloom;
 import imaginemetal.Hdr;
 import imaginemetal.ImagineFrame;
+import imaginemetal.LightVolume;
 import imaginemetal.Shadows;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
@@ -34,6 +35,7 @@ abstract class LevelRendererMixin {
 	@Inject(method = "render", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/framegraph/FrameGraphBuilder;execute(Lcom/mojang/blaze3d/resource/GraphicsResourceAllocator;Lcom/mojang/blaze3d/framegraph/FrameGraphBuilder$Inspector;)V"))
 	private void imaginemetal$shadows(CallbackInfo ci) {
 		Shadows.render();
+		LightVolume.render();
 	}
 
 	/** Bloom and the HDR resolve, once the level's passes have drawn the world (the hand and the HUD come after, so they don't glow). */

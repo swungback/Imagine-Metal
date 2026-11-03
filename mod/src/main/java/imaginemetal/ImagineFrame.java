@@ -14,7 +14,7 @@ import org.joml.Vector4f;
 import org.lwjgl.system.MemoryUtil;
 
 /**
- * The lighting's per-frame values (lighting.metal ImFrame, 304 bytes): where the sun or moon is, the colours of its light, of
+ * The lighting's per-frame values (lighting.metal ImFrame, 336 bytes): where the sun or moon is, the colours of its light, of
  * the sky's light and of torches for this time of day and weather, the cave floor, the tone curve. Made once per frame at
  * LevelRenderer.render's start (LevelRendererMixin) and handed to the backend, which binds it on every terrain draw.
  *
@@ -22,7 +22,7 @@ import org.lwjgl.system.MemoryUtil;
  * a deep orange golden hour, blue-violet nights), tuned for our pipeline.
  */
 public final class ImagineFrame {
-	static final int SIZE = 304;
+	static final int SIZE = 336;
 	private static final ByteBuffer BUF = MemoryUtil.memAlloc(SIZE).order(ByteOrder.LITTLE_ENDIAN);
 	private static final long ADDRESS = MemoryUtil.memAddress(BUF);
 	private static int frame;
@@ -159,6 +159,11 @@ public final class ImagineFrame {
 		for (int c = 0; c < 2; c++) for (int i = 0; i < 16; i++) BUF.putFloat(Shadows.MATRIX[c][i]);
 		// shadow: near cascade normal offset, valid, far cascade normal offset
 		put(Shadows.normalOffset(0), Shadows.valid() ? 1f : 0f, Shadows.normalOffset(1), 0f);
+		// the coloured light grid: its low corner camera-relative, valid; its size
+		LightVolume.prepare();
+		var cam = Minecraft.getInstance().gameRenderer.mainCamera().position();
+		put((float) (LightVolume.originX() - cam.x), (float) (LightVolume.originY() - cam.y), (float) (LightVolume.originZ() - cam.z), LightVolume.valid() ? 1f : 0f);
+		put(LightVolume.SX, LightVolume.SY, LightVolume.SZ, 0f);
 	}
 
 	private static void put(float x, float y, float z, float w) {

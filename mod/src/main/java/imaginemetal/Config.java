@@ -31,6 +31,9 @@ public final class Config {
 		# How far around you shadows reach, in blocks (64 to 256). Less is faster: fewer blocks to draw into the map.
 		imaginemetal.shadowRange=160
 		#
+		# Coloured light: torches, soul fire, redstone, lava and other light sources light the world in their own colours.
+		imaginemetal.coloredLight=true
+		#
 		# Bloom: the soft glow around bright things (the sun, lava, torches, glowing blocks) and a faint haze over everything.
 		imaginemetal.bloom=true
 		# How strong the glow is (0 off, 0.5 default, up to 2).

@@ -41,6 +41,7 @@ jobs:
           xcrun -sdk macosx metal -std=metal3.1 -c build/msl/terrain_im_plain.metal -o build/msl/terrain_im_plain.air
           xcrun -sdk macosx metal -std=metal3.1 -c $R/mcopt/own/terrain.metal -o build/msl/terrain.air
           xcrun -sdk macosx metal -std=metal3.0 -c $R/imaginemetal/shaders/bloom.metal -o build/msl/bloom.air
+          xcrun -sdk macosx metal -std=metal3.0 -c $R/imaginemetal/shaders/light.metal -o build/msl/light.air
           echo "Metal shaders compile"
 
       - name: Build the mod

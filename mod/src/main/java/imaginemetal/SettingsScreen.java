@@ -29,6 +29,10 @@ public final class SettingsScreen extends OptionsSubScreen {
 			slider("Shadow distance", 64, 256, 16, Settings.shadowRange, v -> Settings.shadowRange = v, v -> Math.round(v) + " blocks",
 				"How far around you shadows reach. Less is faster."));
 
+		this.list.addHeader(Component.literal("Light"));
+		this.list.addBig(toggle("Coloured light", Settings.coloredLight, v -> Settings.coloredLight = v,
+			"Light sources light the world in their own colours: soul fire blue, redstone red, lava orange."));
+
 		this.list.addHeader(Component.literal("Glow"));
 		this.list.addSmall(toggle("Bloom", Settings.bloom, v -> Settings.bloom = v, "The soft glow around bright things."),
 			slider("Bloom strength", 0, 2, 0.05f, Settings.bloomStrength, v -> Settings.bloomStrength = v, v -> String.format(java.util.Locale.ROOT, "%.2f", v),

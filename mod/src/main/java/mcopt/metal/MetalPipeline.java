@@ -213,10 +213,13 @@ final class MetalPipeline implements BackendRenderPipeline {
 		return describe(stack, info, hasDepth, vertexInput, false);
 	}
 
-	/** (Imagine Metal) whether a pipeline draws into an 8-bit colour target (it then gets an HDR twin). */
+	/**
+	 * (Imagine Metal) whether a pipeline's first colour target is 8-bit (it then gets an HDR twin with that one 16-bit float: the
+	 * main image is a pass's first attachment; any others keep their formats).
+	 */
 	private static boolean hasLdrTarget(CreateInfo info) {
-		for (@Nullable ColorTargetState c : info.colorTargetStates()) if (c != null && c.format() == com.mojang.renderpearl.api.GpuFormat.RGBA8_UNORM) return true;
-		return false;
+		var targets = info.colorTargetStates();
+		return !targets.isEmpty() && targets.get(0) != null && targets.get(0).format() == com.mojang.renderpearl.api.GpuFormat.RGBA8_UNORM;
 	}
 
 	/** The pipeline state for a pass with or without depth, into the HDR image (Imagine Metal) or not. */
@@ -239,14 +242,17 @@ final class MetalPipeline implements BackendRenderPipeline {
 			d.put(a.location()).put(MetalConst.VERTEX_BUFFER_BASE + a.bufferSlot()).put(a.offset()).put(MetalConst.vertexFormat(a.format()));
 		}
 		d.put(info.colorTargetStates().size());
+		boolean first = true;
 		for (@Nullable ColorTargetState c : info.colorTargetStates()) {
+			boolean hdrHere = hdr && first;
+			first = false;
 			if (c == null) {
 				d.put(new int[9]);
 				continue;
 			}
 			// MTLColorWriteMask is ABGR-ordered (red = 8), renderpearl's is RGBA-ordered (red = 1).
 			int mask = (c.writeRed() ? 8 : 0) | (c.writeGreen() ? 4 : 0) | (c.writeBlue() ? 2 : 0) | (c.writeAlpha() ? 1 : 0);
-			var format = hdr && c.format() == com.mojang.renderpearl.api.GpuFormat.RGBA8_UNORM ? com.mojang.renderpearl.api.GpuFormat.RGBA16_FLOAT : c.format();
+			var format = hdrHere && c.format() == com.mojang.renderpearl.api.GpuFormat.RGBA8_UNORM ? com.mojang.renderpearl.api.GpuFormat.RGBA16_FLOAT : c.format();
 			d.put(MetalConst.pixelFormat(format)).put(mask);
 			if (c.blendFunction().isPresent()) {
 				var b = c.blendFunction().get();

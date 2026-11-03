@@ -23,6 +23,7 @@ public final class OwnMaterials {
 	/** The compiler's block at section-relative position (x, y, z & 15): its class into this thread's grid. */
 	public static void block(int x, int y, int z, BlockState state) {
 		GRID.get()[(y & 15) << 8 | (z & 15) << 4 | x & 15] = imaginemetal.Materials.of(state);
+		imaginemetal.LightVolume.block(x, y, z, state);  // (Imagine Metal: the coloured light grid's seeds)
 	}
 
 	/** Whether this thread is inside a section compile (OwnIntCompilerMixin brackets it). */
@@ -32,6 +33,7 @@ public final class OwnMaterials {
 
 	public static void compiling(boolean on) {
 		COMPILING.get()[0] = on;
+		imaginemetal.LightVolume.compiling(on);
 	}
 
 	static byte[] grid() {

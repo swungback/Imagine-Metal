@@ -2234,6 +2234,7 @@ fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]],
 	texture2d<float> atlas [[texture(16)]], sampler atlasSampler [[sampler(14)]]
 #ifdef IM_SHADE
 	, constant ImFrame &imf [[buffer(30)]], depth2d_array<float> imShadowMap [[texture(20)]], sampler imShadowCmp [[sampler(13)]]
+	, texture3d<float> imLightVol [[texture(21)]], sampler imLightSampler [[sampler(12)]]
 #endif
 	) {
 #ifdef OWN_TPROBE
@@ -2259,7 +2260,7 @@ fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]],
 		if (F_RICH && !F_FV) fogValue = max(fogValue, linear_fog_value(in.cylindricalVertexDistance, fog.FogRenderDistanceStart, fog.FogRenderDistanceEnd));
 	}
 #ifdef IM_SHADE
-	color.rgb = imShade(color.rgb, in.imPos, in.imLight, in.imMat, in.pos.xy, imf, imShadowMap, imShadowCmp); // (Imagine Metal)
+	color.rgb = imShade(color.rgb, in.imPos, in.imLight, in.imMat, in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler); // (Imagine Metal)
 #endif
 	return float4(mix(color.rgb, fog.FogColor.rgb, fogValue * fog.FogColor.a), color.a);
 }

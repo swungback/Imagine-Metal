@@ -16,6 +16,7 @@ public final class Settings {
 	// live
 	public static volatile boolean shadows = Engine.flag("imaginemetal.shadows", true);
 	public static volatile float shadowRange = Config.number("imaginemetal.shadowRange", 160, 64, 256);
+	public static volatile boolean coloredLight = Engine.flag("imaginemetal.coloredLight", true);
 	public static volatile boolean bloom = Engine.flag("imaginemetal.bloom", true);
 	public static volatile float bloomStrength = Config.number("imaginemetal.bloomStrength", 0.5f, 0f, 2f);
 	/** 0 the picture, 1 light levels, 2 normals, 3 the bloom's glow alone. */
@@ -36,6 +37,7 @@ public final class Settings {
 		v.put("imaginemetal.shadows", String.valueOf(shadows));
 		v.put("imaginemetal.shadowRes", String.valueOf(shadowRes));
 		v.put("imaginemetal.shadowRange", String.valueOf(Math.round(shadowRange)));
+		v.put("imaginemetal.coloredLight", String.valueOf(coloredLight));
 		v.put("imaginemetal.bloom", String.valueOf(bloom));
 		v.put("imaginemetal.bloomStrength", String.format(java.util.Locale.ROOT, "%.2f", bloomStrength));
 		v.put("imaginemetal.debug", String.valueOf(debug));
