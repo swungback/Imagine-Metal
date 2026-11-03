@@ -86,9 +86,6 @@ public final class Sky {
 		return new Matrix4f(BOB).mul(m).invert();
 	}
 
-		return Minecraft.getInstance().gameRenderer.mainCamera().getViewRotationProjectionMatrix(proj).invert();
-	}
-
 	/** At the end of Minecraft's sky pass (after its sun, moon and stars): our clouds and the aurora over them. */
 	public static void drawAfter() {
 		if (!active || cloudsFailed || state == 0) return;
