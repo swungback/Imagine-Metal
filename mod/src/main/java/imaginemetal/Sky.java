@@ -50,7 +50,7 @@ public final class Sky {
 				Matrix4f rot = mc.gameRenderer.mainCamera().getViewRotationProjectionMatrix(new Matrix4f()).invert();
 				long m = stack.nmalloc(16, 64);
 				rot.getToAddress(m);
-				if (ImNative.skyDraw(MetalBridge.enc(encoder), state, MetalBridge.textureHandle(target), ImagineFrame.address(), ImagineFrame.SIZE, m, err, 1024) != 0)
+				if (ImNative.skyDraw(MetalBridge.enc(encoder), state, MetalBridge.textureHandle(target), ImagineFrame.address(), ImagineFrame.SIZE, m, 0, err, 1024) != 0)
 					throw new IllegalStateException(MemoryUtil.memUTF8(err));
 			}
 			active = true;
@@ -58,6 +58,45 @@ public final class Sky {
 			failed = true;
 			active = false;
 			System.out.println("[Imagine Metal] sky off: " + t);
+		}
+	}
+
+	private static boolean cloudsFailed, texturesSet;
+
+	/** At the end of Minecraft's sky pass (after its sun, moon and stars): our clouds and the aurora over them. */
+	public static void drawAfter() {
+		if (!active || cloudsFailed || state == 0) return;
+		boolean clouds = Clouds.wanted(), aurora = ImagineFrame.auroraVisible();
+		if (!clouds && !aurora) return;
+		try {
+			Object encoder = MetalBridge.encoder(((FrontendCommandEncoder) RenderSystem.getDevice().createCommandEncoder()).backend());
+			if (encoder == null) return;
+			Minecraft mc = Minecraft.getInstance();
+			var target = mc.gameRenderer.mainRenderTarget().getColorTexture();
+			if (target == null) return;
+			if (!texturesSet) {
+				if (!Clouds.load()) {
+					cloudsFailed = true;
+					return;
+				}
+				if (ImNative.skyTextures(state, MemoryUtil.memAddress(Clouds.cloudMap), Clouds.mapW, Clouds.mapH, MemoryUtil.memAddress(Clouds.noise),
+					Clouds.NOISE, Clouds.NOISE) != 0) throw new IllegalStateException("cloud textures");
+				texturesSet = true;
+				System.out.println("[Imagine Metal] clouds on (" + Clouds.mapW + "x" + Clouds.mapH + " map)");
+			}
+			MetalBridge.flushClear(encoder, target);
+			try (MemoryStack stack = MemoryStack.stackPush()) {
+				long err = stack.ncalloc(1, 1024, 1);
+				Matrix4f rot = mc.gameRenderer.mainCamera().getViewRotationProjectionMatrix(new Matrix4f()).invert();
+				long m = stack.nmalloc(16, 64);
+				rot.getToAddress(m);
+				if (ImNative.skyDraw(MetalBridge.enc(encoder), state, MetalBridge.textureHandle(target), ImagineFrame.address(), ImagineFrame.SIZE, m, 1, err, 1024) != 0)
+					throw new IllegalStateException(MemoryUtil.memUTF8(err));
+			}
+			if (clouds) Clouds.markDrawn();
+		} catch (Throwable t) {
+			cloudsFailed = true;
+			System.out.println("[Imagine Metal] clouds off: " + t);
 		}
 	}
 }

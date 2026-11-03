@@ -39,6 +39,10 @@ public final class Config {
 		# Surfaces: reflections and highlights (every block family by its texture, as Complementary Reimagined and Photon do), and
 		# generated normals' strength (0 off; 1 is Reimagined's default strength, up to 4): edges between texels bevel.
 		imaginemetal.pbr=true
+		#
+		# Our clouds (Reimagined's blocky clouds; false: Minecraft's) and the aurora (at night in cold biomes, tinting the snow).
+		imaginemetal.clouds=true
+		imaginemetal.aurora=true
 		imaginemetal.generatedNormals=0
 		#
 		# Coloured light: torches, soul fire, redstone, lava and other light sources light the world in their own colours.

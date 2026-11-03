@@ -16,6 +16,11 @@ abstract class SkyRendererMixin {
 		Sky.draw(state);
 	}
 
+	@Inject(method = "render", at = @At("RETURN"))
+	private void imaginemetal$clouds(com.mojang.renderpearl.api.buffers.GpuBufferSlice fog, SkyRenderState state, CallbackInfo ci) {
+		Sky.drawAfter();
+	}
+
 	@Inject(method = "renderSkyDisc", at = @At("HEAD"), cancellable = true)
 	private void imaginemetal$noDisc(CallbackInfo ci) {
 		if (Sky.active) ci.cancel();

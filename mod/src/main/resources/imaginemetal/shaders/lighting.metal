@@ -46,6 +46,9 @@ struct ImFrame {
 	float4x4 histClip;   // the reflections' history (the last frame's picture and depth): camera-relative world (then) -> clip
 	float4x4 histClipInv;
 	float4 histShift;    // xyz the camera's move since (now - then: a camera-relative position now + this = then), w 1 = valid
+	float4 cloudPos;     // our clouds: xy the camera's place on the cloud map (texels, wind included), z their height, w 1 = on
+	float4 aurora;       // x the aurora's visibility (night, cold biome), y its drift, zw the camera's place on its plane
+	float4 world;        // xyz the camera's world position (wrapped every 4096 blocks), w time in seconds (wrapped hourly)
 };
 
 static inline float imSqrt2(float x) { x = 1.0 - x; x *= x; x *= x; return 1.0 - x; }
@@ -617,6 +620,16 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		return pow(gm > 1e-4 ? gl.rgb / gm * saturate(gl.a * 1.5) : float3(0.0), 1.0 / 2.2) * 0.9 + base * 0.1;
 	}
 	float emit = imEmission(cls, tex);
+	if (cls == IM_MAT_SCULK && emit > 0.0) {
+		// sculk's specks pulse (after Euphoria Patches): each speck its own slow breathing, from its block and its place in the
+		// texture, so a field of sculk twinkles instead of glowing flat
+		float3 bp = floor(p + f.world.xyz - n * 0.01);
+		float2 tx = floor(uv * asz);
+		float h = fract(sin(dot(bp, float3(12.9898, 78.233, 37.719)) + dot(tx, float2(4.898, 7.23))) * 43758.5453);
+		float h2 = fract(h * 7.31 + 0.17);
+		float w = 0.5 + 0.5 * sin(f.world.w * (0.5 + 0.9 * h2) + h * 6.2832);
+		emit *= 0.15 + 0.85 * smoothstep(0.15, 1.0, w);
+	}
 
 	float3 c = imGrade(imTonemap(radiance, f.tonemap), f);
 

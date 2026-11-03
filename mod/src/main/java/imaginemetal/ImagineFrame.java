@@ -14,7 +14,7 @@ import org.joml.Vector4f;
 import org.lwjgl.system.MemoryUtil;
 
 /**
- * The lighting's per-frame values (lighting.metal ImFrame, 640 bytes): where the sun or moon is, the colours of its light, of
+ * The lighting's per-frame values (lighting.metal ImFrame, 688 bytes): where the sun or moon is, the colours of its light, of
  * the sky's light and of torches for this time of day and weather, the cave floor, the tone curve. Made once per frame at
  * LevelRenderer.render's start (LevelRendererMixin) and handed to the backend, which binds it on every terrain draw.
  *
@@ -22,7 +22,7 @@ import org.lwjgl.system.MemoryUtil;
  * a deep orange golden hour, blue-violet nights), tuned for our pipeline.
  */
 public final class ImagineFrame {
-	static final int SIZE = 640;
+	static final int SIZE = 688;
 	private static final ByteBuffer BUF = MemoryUtil.memAlloc(SIZE).order(ByteOrder.LITTLE_ENDIAN);
 	private static final long ADDRESS = MemoryUtil.memAddress(BUF);
 	private static int frame;
@@ -63,8 +63,22 @@ public final class ImagineFrame {
 		return ADDRESS;
 	}
 
+	/** the aurora's visibility this frame (0: none; the clouds pass then skips it) */
+	private static float auroraVis;
+
+	private static float sunY;
+
+	private static float lightDirSunY() {
+		return sunY;
+	}
+
+	static boolean auroraVisible() {
+		return auroraVis > 0.001f;
+	}
+
 	public static void update(CameraRenderState camera) {
 		Sky.active = false;
+		Clouds.frameStart();
 		if (failed || !Engine.TERRAIN) return;
 		try {
 			long t0 = Perf.start();
@@ -99,6 +113,7 @@ public final class ImagineFrame {
 		if (dim == 0) {
 			double sa = sky.sunAngle, ma = sky.moonAngle;
 			float sx = (float) -Math.sin(sa), sy = (float) Math.cos(sa);
+			sunY = sy;
 			float mx = (float) -Math.sin(ma), my = (float) Math.cos(ma);
 			boolean sunUp = sy > -0.05f;
 			sunFlag = sunUp ? 1f : 0f;
@@ -211,6 +226,15 @@ public final class ImagineFrame {
 		Shadows.prepare(lightDir, dim);
 		// the light bounced up from the ground: the sky's, dimmer, and a little of the sun's
 		for (int i = 0; i < 3; i++) down[i] = (dim == 1 ? 1.1f : 0.6f) * up[i] + 0.10f * light[i];
+		// the aurora: at night in cold biomes, out of rain; its pink-violet and green light added to the sky's (aurora influence)
+		auroraVis = dim == 0 && Settings.aurora && Settings.sky ? Haze.cold * (1f - smoothstep(-0.12f, 0.02f, lightDirSunY())) * (1f - rain) : 0f;
+		if (auroraVis > 0f) {
+			float[] tint = {0.050f, 0.020f, 0.060f};
+			for (int i = 0; i < 3; i++) {
+				up[i] += tint[i] * auroraVis;
+				down[i] += tint[i] * 0.8f * auroraVis;
+			}
+		}
 
 		var lightmap = game.lightmapRenderState;
 		float brightness = lightmap.brightness, nightVision = lightmap.nightVisionEffectIntensity;
@@ -269,6 +293,17 @@ public final class ImagineFrame {
 		for (int c = 0; c < 4; c++) for (int r = 0; r < 4; r++) BUF.putFloat(Reflections.CLIP_INV.get(c, r));
 		boolean ssr = Reflections.valid && Settings.pbr;
 		put((float) (cam.x - Reflections.camX), (float) (cam.y - Reflections.camY), (float) (cam.z - Reflections.camZ), ssr ? 1f : 0f);
+		// our clouds: the camera's place on the cloud map, their height, on; the aurora: visibility, drift, the camera on its plane
+		boolean cloudsOn = Clouds.wanted() && dim == 0 && ourFog;
+		float[] co = Clouds.mapW > 0 ? Clouds.offset(cam.x, cam.z) : new float[2];
+		put(co[0], co[1], Clouds.height, cloudsOn && Clouds.mapW > 0 ? 1f : 0f);
+		double secs = (System.nanoTime() / 1e9) % 100000.0;
+		double ax = cam.x * 0.0075 + secs * 0.8 * 0.04, az = cam.z * 0.0075;
+		ax -= Math.floor(ax / 1000.0) * 1000.0;
+		az -= Math.floor(az / 1000.0) * 1000.0;
+		put(auroraVis, (float) ((secs * 0.001) % 1000.0), (float) ax, (float) az);
+		put((float) (cam.x - Math.floor(cam.x / 4096.0) * 4096.0), (float) (cam.y), (float) (cam.z - Math.floor(cam.z / 4096.0) * 4096.0),
+			(float) (secs % 3600.0));
 		if (BUF.position() != SIZE) throw new IllegalStateException("ImFrame is " + BUF.position() + " bytes, not " + SIZE);
 	}
 

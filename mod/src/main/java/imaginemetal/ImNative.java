@@ -29,7 +29,9 @@ final class ImNative {
 		JAVA_INT), false);
 	private static final MethodHandle SKY_NEW = fn("im_sky_new", FunctionDescriptor.of(JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT), false);
 	private static final MethodHandle SKY_DRAW = fn("im_sky_draw", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT,
-		JAVA_LONG, JAVA_LONG, JAVA_INT), false);
+		JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_INT), false);
+	private static final MethodHandle SKY_TEXTURES = fn("im_sky_textures", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_INT,
+		JAVA_LONG, JAVA_INT, JAVA_INT), false);
 
 	private static final MethodHandle SSR_NEW = fn("im_ssr_new", FunctionDescriptor.of(JAVA_LONG, JAVA_LONG), false);
 	private static final MethodHandle SSR_CAPTURE = fn("im_ssr_capture", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG,
@@ -132,9 +134,17 @@ final class ImNative {
 		}
 	}
 
-	static int skyDraw(long enc, long state, long target, long frame, int frameBytes, long rot, long err, int errCap) {
+	static int skyTextures(long state, long clouds, int w, int h, long noise, int nw, int nh) {
 		try {
-			return (int) SKY_DRAW.invokeExact(enc, state, target, frame, frameBytes, rot, err, errCap);
+			return (int) SKY_TEXTURES.invokeExact(state, clouds, w, h, noise, nw, nh);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
+	static int skyDraw(long enc, long state, long target, long frame, int frameBytes, long rot, int mode, long err, int errCap) {
+		try {
+			return (int) SKY_DRAW.invokeExact(enc, state, target, frame, frameBytes, rot, mode, err, errCap);
 		} catch (Throwable t) {
 			throw new IllegalStateException(t);
 		}

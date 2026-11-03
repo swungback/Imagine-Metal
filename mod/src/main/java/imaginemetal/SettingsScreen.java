@@ -35,6 +35,11 @@ public final class SettingsScreen extends OptionsSubScreen {
 			slider("Air", 0, 3, 0.05f, Settings.haze, v -> Settings.haze = v, v -> Math.round(v * 100) + "%",
 				"How thick the air is: distant land turning blue, mist in the valleys at dawn and dusk, each biome's own air. 100% is Photon's."));
 
+		this.list.addSmall(toggle("Clouds", Settings.clouds, v -> Settings.clouds = v,
+			"Our clouds: Minecraft's cloud shapes as soft, rounded blocks, lit by the sun, coloured by the sky. Off: Minecraft's."),
+			toggle("Aurora", Settings.aurora, v -> Settings.aurora = v,
+				"Northern lights at night in cold biomes, tinting the snow below them."));
+
 		this.list.addHeader(Component.literal("Surfaces"));
 		this.list.addSmall(toggle("PBR", Settings.pbr, v -> Settings.pbr = v,
 			"Sun highlights on every block by its texture, and reflections traced on screen: metal, gems and polished stone clearly, rough blocks at low angles."),

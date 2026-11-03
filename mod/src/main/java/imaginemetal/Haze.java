@@ -15,8 +15,10 @@ public final class Haze {
 	static final float[] rayleigh = new float[3];
 	/** extra Mie from humidity (jungles, swamps), per block */
 	static float humidMie;
+	/** how much the camera is in a cold (snowy) biome, eased: the aurora shows there */
+	static float cold;
 	private static final float[] target = new float[3];
-	private static float targetHumid;
+	private static float targetHumid, targetCold;
 	private static int counter;
 	private static boolean warned, started;
 	private static String lastName = "";
@@ -60,11 +62,13 @@ public final class Haze {
 			float[] b = biome(name);
 			for (int i = 0; i < 3; i++) target[i] = (float) Math.pow(b[i], 2.2) * b[3];
 			targetHumid = b == JUNGLE || b == SWAMP ? 8f * 0.0001f : 0f;
+			targetCold = b == SNOWY ? 1f : 0f;
 		}
 		float k = started ? 1f - (float) Math.exp(-dt / 2.5f) : 1f;
 		started = true;
 		for (int i = 0; i < 3; i++) rayleigh[i] += (target[i] - rayleigh[i]) * k;
 		humidMie += (targetHumid - humidMie) * k;
+		cold += (targetCold - cold) * k;
 	}
 
 	/** Photon's Mie density for this time of day (sunY, sunX: the sun's direction) and rain. */
