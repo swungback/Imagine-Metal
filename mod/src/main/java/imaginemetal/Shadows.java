@@ -32,6 +32,11 @@ public final class Shadows {
 	/** The light is kept at least this high for the projection (shadows of a grazing sun would stretch to infinity). */
 	private static final float MIN_ELEVATION = 0.08f;
 	private static final int FRAME_BYTES = 128;
+	/**
+	 * The light direction the map uses moves in steps of this angle (radians; the sun crosses one in ~0.8 s): drawn from a direction
+	 * that changed every frame, the map's texels (leaf holes above all) shifted every frame and shadows shimmered even standing still.
+	 */
+	private static final double ANGLE_STEP = Math.toRadians(0.25);
 
 	/** This frame's light clip (camera-relative world -> light clip, before the warp), column-major. */
 	static final float[] MATRIX = new float[16];
@@ -61,7 +66,11 @@ public final class Shadows {
 		prepared = false;
 		if (!ON || failed || dim == 1) return;
 		Vec3 cam = Minecraft.getInstance().gameRenderer.mainCamera().position();
-		double lx = lightDir[0], ly = Math.max(lightDir[1], MIN_ELEVATION), lz = lightDir[2];
+		// the sun and moon move in the x-y plane (the End's light is fixed): quantize the angle there
+		double angle = Math.atan2(lightDir[1], lightDir[0]);
+		angle = Math.round(angle / ANGLE_STEP) * ANGLE_STEP;
+		double r = Math.hypot(lightDir[0], lightDir[1]);
+		double lx = r * Math.cos(angle), ly = Math.max(r * Math.sin(angle), MIN_ELEVATION), lz = lightDir[2];
 		double ll = Math.sqrt(lx * lx + ly * ly + lz * lz);
 		lx /= ll;
 		ly /= ll;

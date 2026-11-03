@@ -114,7 +114,7 @@ public final class ImagineFrame {
 			}
 			float[] sunsetTint = {1.21f, 0.92f, 0.76f};
 			for (int i = 0; i < 3; i++) {
-				float dayAmb = (float) Math.pow(Math.max(skyc[i], 0f), 1.65) * 0.95f * mix(1f, sunsetTint[i], golden);
+				float dayAmb = (float) Math.pow(Math.max(skyc[i], 0f), 1.65) * 0.62f * mix(1f, sunsetTint[i], golden);
 				up[i] = mix(NIGHT_SKY[i], dayAmb, day);
 			}
 			float grey = luma(up) * 0.85f;
@@ -151,9 +151,9 @@ public final class ImagineFrame {
 		put(up[0], up[1], up[2], 0f);
 		put(down[0], down[1], down[2], 0f);
 		put(TORCH[0], TORCH[1], TORCH[2], dim == 0 ? day * (1f - 0.5f * rain) : 0f);
-		put(floor[0], floor[1], floor[2], 1f); // w: exposure
+		put(floor[0], floor[1], floor[2], 0.9f); // w: exposure
 		put(TM_A, TM_D, TM_B, TM_C);
-		put(1.0f, 0.08f, 0f, 0f); // saturation, vibrance (vanilla's foliage is saturated already)
+		put(1.04f, 0.08f, 0f, 0f); // saturation, vibrance (the blue sky light greys the greens a little)
 		BUF.putInt(dim).putInt(Integer.getInteger("imaginemetal.debug", 0)).putInt(1).putInt(frame++);
 		put(0f, 0f, 0f, 0f);
 		for (int i = 0; i < 16; i++) BUF.putFloat(Shadows.MATRIX[i]);
