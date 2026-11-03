@@ -36,7 +36,8 @@
 		"mcopt-metal-alloc.mixins.json",
 		"mcopt-metal-chunkio.mixins.json",
 		"mcopt-metal-edge.mixins.json",
-		"mcopt-metal-compat.mixins.json"
+		"mcopt-metal-compat.mixins.json",
+		"imaginemetal.mixins.json"
 	],
 	"provides": [
 		"mcopt-metal"

@@ -2,7 +2,17 @@
 // buffer, as the far terrain's) and the two instanced indirect draws (solid, cutout) into the level's open render encoder.
 // Only called with -Dmcopt.own; the backend's own paths never reach it.
 #import "mcmetal.h"
+
 #include <string.h>
+
+// (Imagine Metal) the shader engine's per-frame values (imaginemetal.ImagineFrame, terrain.metal / lighting.metal ImFrame,
+// 160 bytes), bound at fragment buffer 30 on every terrain draw. All zero until the engine's first frame: imShade then falls
+// back to a plain light-level look (ImFrame.flags.z == 0).
+static uint8_t imFrame[160];
+void mc_im_frame(const void *bytes, int length) {
+	if (length > (int) sizeof imFrame) length = (int) sizeof imFrame;
+	if (length > 0) memcpy(imFrame, bytes, (size_t) length);
+}
 
 #define OWN_MAX_LAYOUTS 64
 
@@ -807,6 +817,8 @@ int mco_draw(Own *w, Enc *enc, int cutout, const void *frame, int frameLength, i
 	[r setFragmentTexture:atlas atIndex:16];
 	[r setFragmentSamplerState:atlasSampler atIndex:14];
 drawCall:
+	// (Imagine Metal) the shader engine's per-frame values for own_fs (terrain.metal IM_SHADE, buffer 30)
+	[r setFragmentBytes:imFrame length:sizeof imFrame atIndex:30];
 	if (w->vcount && !mesh) [r setVertexBuffer:w->vcount offset:0 atIndex:28];
 	if (cutout & (1 << 30)) {
 		// the visibility oracle: the drawn units (vertex stage) and the units with a visible pixel (fragment stage), this sample's number

@@ -1,0 +1,99 @@
+// Imagine Metal: the lighting model.
+//
+// Prepended to mcopt's terrain library (mcopt/own/terrain.metal) with IM_SHADE defined; own_fs calls imShade for every terrain
+// fragment. Written for Imagine Metal; the ideas follow Complementary Reimagined's look (studied, not copied):
+//  - the sun wraps 0.4 past the terminator, so a block's side turned a little away still catches some light;
+//  - daylight (sun + sky) and block light combine in quadrature, sqrt(day^2 + block^2 + floor^2), so a torch in sunlight barely
+//    shows, a torch in a dark cave shows in full, and nothing blows out where they meet;
+//  - sky-coloured (blue) shadows, warm torches that give way to daylight, a faint cool floor in caves;
+//  - no auto-exposure: the colours themselves keep the brightness steady; a Lottes curve rolls the highlights off.
+//
+// Spaces: positions camera-relative world (blocks, +y up). Colours: linear light; the result is display-encoded (gamma 2.2)
+// because the terrain pass writes straight into the game's 8-bit target.
+#include <metal_stdlib>
+using namespace metal;
+
+// Per-frame values, written by imaginemetal.ImagineFrame (same layout, 160 bytes) and bound at fragment buffer 30.
+struct ImFrame {
+	float4 lightDir;     // xyz unit direction toward the light that casts this frame's light (sun by day, moon by night), w 1 = sun
+	float4 lightColor;   // rgb direct light (linear), w rain 0..1
+	float4 ambientUp;    // rgb sky light from above (linear)
+	float4 ambientDown;  // rgb light bounced up from the ground (linear)
+	float4 blockColor;   // rgb torch light at level 15 (linear), w how much daylight there is 0..1 (torches give way to it)
+	float4 minLight;     // rgb the least light anything gets (caves), w exposure
+	float4 tonemap;      // Lottes 2016: y = x^a / (x^(a d) b + c); x a, y d, z b, w c
+	float4 grade;        // x saturation, y vibrance, zw 0
+	int4 flags;          // x dimension (0 overworld, 1 Nether, 2 End), y debug view, z 1 = the engine filled this frame, w frame index
+	float4 reserved;
+};
+
+static inline float imLuma(float3 c) {
+	return dot(c, float3(0.2126, 0.7152, 0.0722));
+}
+
+// Block light level 0..1 -> intensity: very bright right next to the source, dropping fast (1 at level 15).
+static inline float imBlockCurve(float b) {
+	float b2 = b * b, b4 = b2 * b2, b8 = b4 * b4;
+	return pow(0.55 * b8 + 0.45 * b, 2.25);
+}
+
+// Sky light level 0..1 -> how much of the sky's light reaches the surface.
+static inline float imSkyCurve(float s) {
+	return s * s * (3.0 - 2.0 * s);
+}
+
+static inline float3 imTonemap(float3 x, float4 t) {
+	float3 xa = pow(max(x, 1e-6), float3(t.x));
+	float3 xad = pow(max(x, 1e-6), float3(t.x * t.y));
+	return xa / (xad * t.z + t.w);
+}
+
+// The face normal from the position's screen derivatives (a 2x2 quad always shades one triangle), turned toward the camera and
+// snapped to its axis on the axis-aligned faces that make up nearly all of Minecraft.
+static inline float3 imFaceNormal(float3 p, thread bool &slanted) {
+	float3 n = cross(dfdx(p), dfdy(p));
+	n *= rsqrt(max(dot(n, n), 1e-30));
+	if (dot(n, p) > 0.0) n = -n;
+	float3 a = abs(n);
+	float m = max(max(a.x, a.y), a.z);
+	slanted = m < 0.9; // crossed plants and other slanted cutouts
+	if (slanted) return n;
+	return a.x == m ? float3(sign(n.x), 0, 0) : a.y == m ? float3(0, sign(n.y), 0) : float3(0, 0, sign(n.z));
+}
+
+// One terrain fragment: albedo as sampled and tinted (display-encoded, vanilla's AO and face shade already in it through the
+// vertex colour), camera-relative position, light levels (x block, y sky; 0..1). Returns the display-encoded colour.
+static float3 imShade(float3 albedo, float3 p, float2 light, constant ImFrame &f) {
+	if (f.flags.z == 0) return albedo * (0.2 + 0.8 * max(light.x, light.y)); // the engine hasn't filled a frame yet
+	bool slanted;
+	float3 n = imFaceNormal(p, slanted);
+	float3 base = pow(max(albedo, 0.0), 2.2);
+	float block = light.x, sky = light.y;
+	float skyF = imSkyCurve(sky);
+
+	// direct light: wrapped N.L; until there are shadow maps, the sky light stands in for them (no sun under a roof)
+	float nl = dot(n, f.lightDir.xyz);
+	float wrap = slanted ? 0.35 + 0.5 * abs(nl) : max(nl + 0.4, 0.0) * (1.0 / 1.4);
+	float open = smoothstep(0.55, 0.95, sky);
+	float3 direct = f.lightColor.rgb * (wrap * open);
+
+	// sky light: blue from above, warmer and dimmer from below
+	float3 ambient = mix(f.ambientDown.rgb, f.ambientUp.rgb, n.y * 0.5 + 0.5) * skyF;
+
+	// torches: warm, weaker in full daylight
+	float3 torch = f.blockColor.rgb * imBlockCurve(block) * (1.0 - 0.45 * f.blockColor.w * smoothstep(0.5, 1.0, sky));
+
+	float3 day = direct + ambient;
+	float3 lit = sqrt(day * day + torch * torch + f.minLight.rgb * f.minLight.rgb);
+	float3 radiance = base * lit * f.minLight.w;
+
+	if (f.flags.y == 1) return float3(light, 0.0);          // debug: light levels
+	if (f.flags.y == 2) return n * 0.5 + 0.5;               // debug: normals
+
+	float3 c = imTonemap(radiance, f.tonemap);
+	// saturation and vibrance (vibrance lifts the colours that aren't saturated yet)
+	float l = imLuma(c);
+	float sat = max(max(c.r, c.g), c.b) - min(min(c.r, c.g), c.b);
+	c = mix(float3(l), c, f.grade.x + f.grade.y * (1.0 - sat));
+	return pow(saturate(c), 1.0 / 2.2);
+}

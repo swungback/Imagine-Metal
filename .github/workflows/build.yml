@@ -26,6 +26,17 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      # The game compiles its Metal shaders at runtime: compile them here too, so a shader error fails the build instead of the game
+      - name: Check the Metal shaders
+        run: |
+          xcrun -sdk macosx metal --version >/dev/null 2>&1 || xcodebuild -downloadComponent MetalToolchain
+          R=mod/src/main/resources
+          mkdir -p build/msl
+          { echo '#define IM_SHADE 1'; cat $R/imaginemetal/shaders/lighting.metal; echo; cat $R/mcopt/own/terrain.metal; } > build/msl/terrain_im.metal
+          xcrun -sdk macosx metal -std=metal3.1 -c build/msl/terrain_im.metal -o build/msl/terrain_im.air
+          xcrun -sdk macosx metal -std=metal3.1 -c $R/mcopt/own/terrain.metal -o build/msl/terrain.air
+          echo "Metal shaders compile"
+
       - name: Build the mod
         run: ./gradlew :mod:build --stacktrace
 

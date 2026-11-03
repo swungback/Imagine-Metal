@@ -1558,6 +1558,11 @@ struct VOut {
 	uint oracleUnit [[flat]] [[function_constant(F_ORACLE)]];
 	float fogF [[function_constant(F_FVT)]];
 	uint fogIn [[flat]] [[function_constant(F_FVT)]];
+#ifdef IM_SHADE
+	// (Imagine Metal) for imShade: camera-relative position and the raw light levels (x block, y sky; 0..1)
+	float3 imPos [[function_constant(F_VARY)]];
+	float2 imLight [[function_constant(F_VARY)]];
+#endif
 };
 
 static void putColor(thread VOut &o, float4 c) {
@@ -1880,7 +1885,14 @@ static VOut ownShade(Vtx v, int3 origin, int uploadMs, constant DrawFrame &df, c
 	}
 	o.sphericalVertexDistance = length(pos);
 	float2 luv = clamp(float2(int2(v.uv2)) / 256.0 + 0.5 / 16.0, float2(0.5 / 16.0), float2(15.5 / 16.0));
+#ifdef IM_SHADE
+	// (Imagine Metal) the fragment stage lights the surface itself (imShade): the vertex colour without vanilla's lightmap
+	putColor(o, float4(v.color) / 255.0);
+	o.imPos = pos;
+	o.imLight = saturate(float2(int2(v.uv2)) / 240.0);
+#else
 	putColor(o, VS_MODE == 1 ? float4(v.color) / 255.0 : float4(v.color) / 255.0 * lightmap.sample(lightSampler, luv, level(0.0)));
+#endif
 	o.texCoord0 = float2(v.uv0);
 #ifdef OWN_TPROBE
 	if (TRANSLUCENT && OWN_TPROBE == 5) {
@@ -2206,7 +2218,11 @@ constant bool CUTOUT [[function_constant(0)]];
 constant float CUTOUT_LIMIT [[function_constant(5)]];  // vanilla's ALPHA_CUTOUT: 0.5 cutout, 0.1 translucent
 
 fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]], constant Terrain &t [[buffer(23)]], constant Fog &fog [[buffer(24)]],
-	texture2d<float> atlas [[texture(16)]], sampler atlasSampler [[sampler(14)]]) {
+	texture2d<float> atlas [[texture(16)]], sampler atlasSampler [[sampler(14)]]
+#ifdef IM_SHADE
+	, constant ImFrame &imf [[buffer(30)]]
+#endif
+	) {
 #ifdef OWN_TPROBE
 	// (probes 1 and 3: the translucent fragment stage returns a constant, blending kept; translucent = cutout at limit 0.1)
 	if ((OWN_TPROBE == 1 || OWN_TPROBE == 3) && CUTOUT && CUTOUT_LIMIT < 0.2) return float4(0.2, 0.3, 0.8, 0.5);
@@ -2229,6 +2245,9 @@ fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]],
 		fogValue = F_FV ? in.sphericalVertexDistance : linear_fog_value(in.sphericalVertexDistance, fog.FogEnvironmentalStart, fog.FogEnvironmentalEnd);
 		if (F_RICH && !F_FV) fogValue = max(fogValue, linear_fog_value(in.cylindricalVertexDistance, fog.FogRenderDistanceStart, fog.FogRenderDistanceEnd));
 	}
+#ifdef IM_SHADE
+	color.rgb = imShade(color.rgb, in.imPos, in.imLight, imf); // (Imagine Metal)
+#endif
 	return float4(mix(color.rgb, fog.FogColor.rgb, fogValue * fog.FogColor.a), color.a);
 }
 

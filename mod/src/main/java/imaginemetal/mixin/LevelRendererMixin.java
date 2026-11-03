@@ -1,0 +1,22 @@
+package imaginemetal.mixin;
+
+import com.mojang.blaze3d.resource.GraphicsResourceAllocator;
+import com.mojang.renderpearl.api.buffers.GpuBufferSlice;
+import imaginemetal.ImagineFrame;
+import net.minecraft.client.renderer.LevelRenderer;
+import net.minecraft.client.renderer.state.level.CameraRenderState;
+import org.joml.Vector4f;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+/** The engine's per-frame values, before the level draws anything. */
+@Mixin(LevelRenderer.class)
+abstract class LevelRendererMixin {
+	@Inject(method = "render", at = @At("HEAD"))
+	private void imaginemetal$frame(GraphicsResourceAllocator resourceAllocator, boolean renderOutline, CameraRenderState cameraState,
+		GpuBufferSlice terrainFog, Vector4f fogColor, boolean shouldRenderSky, boolean consistentDepthRequired, CallbackInfo ci) {
+		ImagineFrame.update(cameraState);
+	}
+}
