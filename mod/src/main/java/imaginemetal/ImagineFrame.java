@@ -42,9 +42,9 @@ public final class ImagineFrame {
 	// the palette (linear)
 	private static final float[] SUN_NOON = {1.30f, 1.12f, 0.80f};
 	private static final float[] SUN_GOLDEN = {1.65f, 0.78f, 0.36f};
-	private static final float[] MOON = {0.10f, 0.115f, 0.18f};
-	private static final float[] NIGHT_SKY = {0.035f, 0.042f, 0.075f};
-	private static final float[] TORCH = {1.85f, 0.98f, 0.46f};
+	private static final float[] MOON = {0.17f, 0.20f, 0.32f};
+	private static final float[] NIGHT_SKY = {0.065f, 0.08f, 0.14f};
+	private static final float[] TORCH = {1.30f, 0.70f, 0.33f};
 	private static final float[] CAVE = {0.0055f, 0.0060f, 0.0085f};
 	private static final float[] END_LIGHT = {0.40f, 0.30f, 0.62f};
 	private static final float[] END_SKY = {0.10f, 0.07f, 0.15f};
@@ -114,7 +114,7 @@ public final class ImagineFrame {
 			}
 			float[] sunsetTint = {1.21f, 0.92f, 0.76f};
 			for (int i = 0; i < 3; i++) {
-				float dayAmb = (float) Math.pow(Math.max(skyc[i], 0f), 1.65) * 0.70f * mix(1f, sunsetTint[i], golden);
+				float dayAmb = (float) Math.pow(Math.max(skyc[i], 0f), 1.65) * 0.95f * mix(1f, sunsetTint[i], golden);
 				up[i] = mix(NIGHT_SKY[i], dayAmb, day);
 			}
 			float grey = luma(up) * 0.85f;
@@ -136,7 +136,7 @@ public final class ImagineFrame {
 			}
 		}
 		// the light bounced up from the ground: the sky's, dimmer, and a little of the sun's
-		for (int i = 0; i < 3; i++) down[i] = (dim == 1 ? 1.1f : 0.45f) * up[i] + 0.06f * light[i];
+		for (int i = 0; i < 3; i++) down[i] = (dim == 1 ? 1.1f : 0.6f) * up[i] + 0.10f * light[i];
 
 		var lightmap = game.lightmapRenderState;
 		float brightness = lightmap.brightness, nightVision = lightmap.nightVisionEffectIntensity;

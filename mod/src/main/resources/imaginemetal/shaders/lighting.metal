@@ -31,10 +31,12 @@ static inline float imLuma(float3 c) {
 	return dot(c, float3(0.2126, 0.7152, 0.0722));
 }
 
-// Block light level 0..1 -> intensity: very bright right next to the source, dropping fast (1 at level 15).
+// Block light level 0..1 -> intensity: a hot core right next to the source on top of a long, soft reach (2.8 at level 15,
+// 1.7 at 14, 0.23 at 10, 0.05 at 7), so a room lit by one torch reads as lit, and the torch itself glows.
 static inline float imBlockCurve(float b) {
+	float v = b / (4.0 - 3.0 * b);
 	float b2 = b * b, b4 = b2 * b2, b8 = b4 * b4;
-	return pow(0.55 * b8 + 0.45 * b, 2.25);
+	return 1.6 * v * v + 1.2 * b8;
 }
 
 // Sky light level 0..1 -> how much of the sky's light reaches the surface.
@@ -74,7 +76,7 @@ static float3 imShade(float3 albedo, float3 p, float2 light, constant ImFrame &f
 	// direct light: wrapped N.L; until there are shadow maps, the sky light stands in for them (no sun under a roof)
 	float nl = dot(n, f.lightDir.xyz);
 	float wrap = slanted ? 0.35 + 0.5 * abs(nl) : max(nl + 0.4, 0.0) * (1.0 / 1.4);
-	float open = smoothstep(0.55, 0.95, sky);
+	float open = smoothstep(0.45, 0.9, sky);
 	float3 direct = f.lightColor.rgb * (wrap * open);
 
 	// sky light: blue from above, warmer and dimmer from below
@@ -83,9 +85,13 @@ static float3 imShade(float3 albedo, float3 p, float2 light, constant ImFrame &f
 	// torches: warm, weaker in full daylight
 	float3 torch = f.blockColor.rgb * imBlockCurve(block) * (1.0 - 0.45 * f.blockColor.w * smoothstep(0.5, 1.0, sky));
 
+	// directional face shading (vanilla's is taken out of the vertex colours, FlatFaceShadeMixin): tops full, bottoms 60 %,
+	// north/south a little brighter than east/west, so every block reads as a solid shape even in flat light
+	float face = slanted ? 0.9 : (n.y >= 0.0 ? 1.0 : 1.0 + 0.4 * n.y) * (1.0 + 0.05 * abs(n.z) - 0.1 * abs(n.x));
+
 	float3 day = direct + ambient;
 	float3 lit = sqrt(day * day + torch * torch + f.minLight.rgb * f.minLight.rgb);
-	float3 radiance = base * lit * f.minLight.w;
+	float3 radiance = base * lit * face * f.minLight.w;
 
 	if (f.flags.y == 1) return float3(light, 0.0);          // debug: light levels
 	if (f.flags.y == 2) return n * 0.5 + 0.5;               // debug: normals
