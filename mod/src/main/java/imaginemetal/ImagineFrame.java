@@ -199,7 +199,7 @@ public final class ImagineFrame {
 		put(TORCH[0], TORCH[1], TORCH[2], dim == 0 ? day * (1f - 0.5f * rain) : 0f);
 		put(floor[0], floor[1], floor[2], 0.9f); // w: exposure
 		put(TM_A, TM_D, TM_B, TM_C);
-		put(1.04f, 0.08f, 0f, 0f); // saturation, vibrance (the blue sky light greys the greens a little)
+		put(1.08f, 0.12f, 0f, 0f); // saturation, vibrance (the blue sky light greys the greens a little)
 		BUF.putInt(dim).putInt(Settings.debug).putInt(1).putInt(frame++);
 		// how far underground the player is (by the sky light at their eyes, eased so walking into a cave fades) and how much it's
 		// night: the picture's grade (Bloom's resolve) darkens the dark parts more in both

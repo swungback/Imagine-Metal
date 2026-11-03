@@ -362,7 +362,9 @@ static float imHighlight(float3 N, float3 V, float3 L, float nl, float smooth) {
 
 // Screen-space reflection through the last frame's picture and depth (Reflections): march from p (camera-relative, now) along
 // R, in the last frame's screen, until the ray passes just behind what was drawn there; then a few halving steps to the surface.
-// rgba: the colour there (linear; blurred by lod) and how much to trust it (0 = nothing found).
+// rgba: the colour there (linear; blurred by lod) and how much to trust it; a = 0: the ray left the screen or ran out without
+// passing behind anything (it escaped: the sky is a fair guess); a = -1: it went behind something whose far side the screen
+// doesn't show (blocked: nothing is known, the surface keeps its own colour).
 static float4 imReflect(float3 p, float3 n, float3 R, float lod, float dither, constant ImFrame &f, texture2d<float> hc, depth2d<float> hd,
 	sampler hs) {
 	float dist = length(p);
@@ -380,7 +382,9 @@ static float4 imReflect(float3 p, float3 n, float3 R, float lod, float dither, c
 		float4 sp = f.histClipInv * float4(ndc, d, 1.0);
 		float diff = length(r) - length(sp.xyz / sp.w);
 		if (diff > 0.0) {
-			if (diff > stepLen * 3.0 + 0.3) return float4(0.0);  // (behind something: what's reflected there isn't on screen)
+			// (only just behind a surface counts as reaching it: far behind is passing behind something thin in front, a torch, a
+			// fence, whose back the screen doesn't show)
+			if (diff > 0.15 + stepLen * 0.6) return float4(0.0, 0.0, 0.0, -1.0);
 			float a = tPrev, b = t;
 			float2 uv = float2(0.0);
 			for (int j = 0; j < 5; j++) {
@@ -392,9 +396,13 @@ static float4 imReflect(float3 p, float3 n, float3 R, float lod, float dither, c
 				float4 spm = f.histClipInv * float4(nm, dm, 1.0);
 				if (length(rm) > length(spm.xyz / spm.w)) b = m; else a = m;
 			}
-			float4 cb = f.histClip * float4(q + R * b, 1.0);
+			float3 rb = q + R * b;
+			float4 cb = f.histClip * float4(rb, 1.0);
 			float2 nb = cb.xy / cb.w;
 			uv = nb * 0.5 + 0.5;
+			float db = hd.read(uint2(clamp(uv, 0.0, 0.9999) * size));
+			float4 spb = f.histClipInv * float4(nb, db, 1.0);
+			if (abs(length(rb) - length(spb.xyz / spb.w)) > 0.1 + 0.01 * length(rb)) return float4(0.0, 0.0, 0.0, -1.0);
 			float2 e = abs(nb);
 			float edge = saturate(1.0 - pow(max(e.x, e.y), 24.0));
 			float3 col = hc.sample(hs, uv, level(lod)).rgb;
@@ -471,6 +479,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			hlt *= 1.0 - fr * fr;
 		}
 		float3 tint = mix(float3(1.0), base / max(max(max(base.r, base.g), base.b), 0.02), surf.metal);
+		hlt *= mix(0.3, 1.0, max(surf.metal, smoothstep(0.04, 0.2, surf.f0)));  // (a dielectric's: a glint, not a white wash)
 		radiance += f.lightColor.rgb * (hlt * sun) * tint * f.minLight.w;
 	}
 
@@ -506,10 +515,12 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			float3 R = reflect(-V, N);
 			if (dot(R, n) < 0.02) R = normalize(R - n * (dot(R, n) - 0.02));  // (a bumped normal can't reflect into the face)
 			float lod = (1.0 - surf.d) * 5.0;
-			float dither = fract(dot(pixel, float2(0.06711056, 0.00583715)) * 52.9829189 + float(f.flags.w & 63) * 0.618034);
+			// (a fixed dither: without TAA a per-frame one would only shimmer)
+			float dither = fract(dot(pixel, float2(0.06711056, 0.00583715)) * 52.9829189);
 			float4 hit = f.histShift.w > 0.5 ? imReflect(p, n, R, lod, dither, f, hc, hd, hs) : float4(0.0);
-			float3 skyR = (f.flags.x == 0 ? imSkyColor(R, f) * (R.y < 0.0 ? 0.4 : 1.0) : f.ambientUp.rgb * 2.0) * skyF;
-			float3 refl = mix(skyR, hit.rgb, hit.a);
+			float3 skyR = (f.flags.x == 0 ? imSkyColor(R, f) : f.ambientUp.rgb * 2.0) * (skyF * skyF) * smoothstep(-0.1, 0.2, R.y);
+			float3 refl = hit.a > 0.0 ? mix(skyR, hit.rgb, hit.a) : skyR;
+			if (hit.a < 0.0) fm = 0.0;
 			// (texture kept: Reimagined keeps 70 % of the surface under its reflection)
 			refl = mix(refl, max(c, refl), 0.7);
 			refl *= mix(float3(1.0), base / max(max(max(base.r, base.g), base.b), 0.02), surf.metal);
