@@ -7,6 +7,10 @@ on:
       classes:
         description: 'Space-separated class names, e.g. com.mojang.blaze3d.platform.Window'
         required: true
+      list:
+        description: 'Optional regex: list the class files in the game jars whose path matches it'
+        required: false
+        default: ''
 
 jobs:
   javap:
@@ -23,6 +27,10 @@ jobs:
       - name: javap
         env:
           CLASSES: ${{ inputs.classes }}
+          LIST: ${{ inputs.list }}
         run: |
           CP=$(find ~/.gradle/caches .gradle mod/.gradle -name '*.jar' \( -path '*minecraft*' -o -path '*blaze3d*' -o -path '*lwjgl*' \) 2>/dev/null | tr '\n' ':')
+          if [ -n "$LIST" ]; then
+            for j in $(echo "$CP" | tr ':' ' '); do case "$j" in *minecraft*) unzip -l "$j" 2>/dev/null | awk '{print $4}' | grep -E "$LIST" | grep -v '\$[0-9]' ;; esac; done | sort -u | head -400
+          fi
           for c in $CLASSES; do echo "===== $c"; javap -p -cp "$CP" "$c" || echo "not found: $c"; done
