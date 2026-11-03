@@ -1,0 +1,28 @@
+name: API lookup
+
+# Prints the signatures of Minecraft / library classes as this project compiles against them (Mojang names), for writing mixins.
+on:
+  workflow_dispatch:
+    inputs:
+      classes:
+        description: 'Space-separated class names, e.g. com.mojang.blaze3d.platform.Window'
+        required: true
+
+jobs:
+  javap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Resolve the game's classes
+        run: ./gradlew :mod:compileJava -x compileNative --stacktrace || true
+      - name: javap
+        env:
+          CLASSES: ${{ inputs.classes }}
+        run: |
+          CP=$(find ~/.gradle/caches .gradle mod/.gradle -name '*.jar' \( -path '*minecraft*' -o -path '*blaze3d*' -o -path '*lwjgl*' \) 2>/dev/null | tr '\n' ':')
+          for c in $CLASSES; do echo "===== $c"; javap -p -cp "$CP" "$c" || echo "not found: $c"; done
