@@ -79,11 +79,7 @@ public final class ImagineFrame {
 		return auroraVis > 0.001f;
 	}
 
-	/** this frame's view rotation (the sky pass: Sky.skyRot) */
-	static org.joml.Matrix4f viewRot;
-
 	public static void update(CameraRenderState camera) {
-		viewRot = camera.viewRotationMatrix != null ? new org.joml.Matrix4f(camera.viewRotationMatrix) : null;
 		Sky.active = false;
 		Clouds.frameStart();
 		if (failed || !Engine.TERRAIN) return;

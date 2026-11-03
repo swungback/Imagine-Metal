@@ -64,17 +64,28 @@ public final class Sky {
 	private static boolean cloudsFailed, texturesSet;
 
 	/**
-	 * Clip -> view direction for this frame, from the same projection the level draws with (its buffer carries view bobbing, the
-	 * hurt tilt and nausea, which the camera's own matrix doesn't: with that the sky and clouds stayed still while the land bobbed).
+	 * The terrain's projection relative to the camera's own (view bobbing, hurt tilt, nausea, FOV effects), measured where the
+	 * terrain draws (Reflections.noteClip) and carried to the next frame's sky: bobbing changes slowly, the camera's turn doesn't,
+	 * so the sky takes the camera's current matrix and only the bob from the frame before.
 	 */
+	static final Matrix4f BOB = new Matrix4f();
+
+	static void noteTerrainClip(org.joml.Matrix4fc clip) {
+		Matrix4f cam = Minecraft.getInstance().gameRenderer.mainCamera().getViewRotationProjectionMatrix(new Matrix4f());
+		Matrix4f r = new Matrix4f(clip).mul(cam.invert());
+		// (a bob is a small turn and shift; anything far from that is a projection this doesn't understand: no bob then)
+		boolean small = r.isFinite();
+		Matrix4f id = new Matrix4f();
+		for (int c = 0; c < 4 && small; c++) for (int k = 0; k < 4; k++) if (Math.abs(r.get(c, k) - id.get(c, k)) > 0.35f) small = false;
+		BOB.set(small ? r : id);
+	}
+
+	/** Clip -> view direction for this frame: the camera's matrix with the terrain's bob. */
 	private static Matrix4f skyRot() {
-		Matrix4f proj = new Matrix4f();
-		var pb = RenderSystem.getProjectionMatrixBuffer();
-		long pa = pb != null ? MetalBridge.bufferAddress(pb.buffer()) : 0;
-		if (pa != 0 && ImagineFrame.viewRot != null) {
-			proj.setFromAddress(pa + pb.offset());
-			return proj.mul(ImagineFrame.viewRot).invert();
-		}
+		Matrix4f m = Minecraft.getInstance().gameRenderer.mainCamera().getViewRotationProjectionMatrix(new Matrix4f());
+		return new Matrix4f(BOB).mul(m).invert();
+	}
+
 		return Minecraft.getInstance().gameRenderer.mainCamera().getViewRotationProjectionMatrix(proj).invert();
 	}
 
