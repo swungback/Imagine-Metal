@@ -1884,13 +1884,13 @@ static VOut ownShade(Vtx v, int3 origin, int uploadMs, constant DrawFrame &df, c
 		return o;
 	}
 	o.sphericalVertexDistance = length(pos);
-	float2 luv = clamp(float2(int2(v.uv2)) / 256.0 + 0.5 / 16.0, float2(0.5 / 16.0), float2(15.5 / 16.0));
 #ifdef IM_SHADE
 	// (Imagine Metal) the fragment stage lights the surface itself (imShade): the vertex colour without vanilla's lightmap
 	putColor(o, float4(v.color) / 255.0);
 	o.imPos = pos;
 	o.imLight = saturate(float2(int2(v.uv2)) / 240.0);
 #else
+	float2 luv = clamp(float2(int2(v.uv2)) / 256.0 + 0.5 / 16.0, float2(0.5 / 16.0), float2(15.5 / 16.0));
 	putColor(o, VS_MODE == 1 ? float4(v.color) / 255.0 : float4(v.color) / 255.0 * lightmap.sample(lightSampler, luv, level(0.0)));
 #endif
 	o.texCoord0 = float2(v.uv0);
