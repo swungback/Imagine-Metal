@@ -32,8 +32,13 @@ jobs:
           xcrun -sdk macosx metal --version >/dev/null 2>&1 || xcodebuild -downloadComponent MetalToolchain
           R=mod/src/main/resources
           mkdir -p build/msl
-          { echo '#define IM_SHADE 1'; cat $R/imaginemetal/shaders/lighting.metal; echo; cat $R/mcopt/own/terrain.metal; } > build/msl/terrain_im.metal
+          # as the game builds it: the indie profile's defines, our lighting before mcopt's terrain, our shadow casters after it
+          { echo '#define OWN_EXACT_POS 1'; echo '#define OWN_QREC 1'; echo '#define IM_SHADE 1'; cat $R/imaginemetal/shaders/lighting.metal; echo
+            cat $R/mcopt/own/terrain.metal; echo; cat $R/imaginemetal/shaders/shadow.metal; } > build/msl/terrain_im.metal
           xcrun -sdk macosx metal -std=metal3.1 -c build/msl/terrain_im.metal -o build/msl/terrain_im.air
+          { echo '#define IM_SHADE 1'; cat $R/imaginemetal/shaders/lighting.metal; echo
+            cat $R/mcopt/own/terrain.metal; echo; cat $R/imaginemetal/shaders/shadow.metal; } > build/msl/terrain_im_plain.metal
+          xcrun -sdk macosx metal -std=metal3.1 -c build/msl/terrain_im_plain.metal -o build/msl/terrain_im_plain.air
           xcrun -sdk macosx metal -std=metal3.1 -c $R/mcopt/own/terrain.metal -o build/msl/terrain.air
           echo "Metal shaders compile"
 

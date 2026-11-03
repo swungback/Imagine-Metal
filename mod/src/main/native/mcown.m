@@ -6,9 +6,17 @@
 #include <string.h>
 
 // (Imagine Metal) the shader engine's per-frame values (imaginemetal.ImagineFrame, terrain.metal / lighting.metal ImFrame,
-// 160 bytes), bound at fragment buffer 30 on every terrain draw. All zero until the engine's first frame: imShade then falls
+// 240 bytes), bound at fragment buffer 30 on every terrain draw. All zero until the engine's first frame: imShade then falls
 // back to a plain light-level look (ImFrame.flags.z == 0).
-static uint8_t imFrame[160];
+static uint8_t imFrame[240];
+// (Imagine Metal) the shadow map and its compare sampler (imshadow.m), bound at fragment texture 20 / sampler 13 once it exists;
+// own_fs only samples it when ImFrame.shadow.y says this frame's map is valid
+static id<MTLTexture> imShadowTex;
+static id<MTLSamplerState> imShadowCmp;
+void mc_im_shadow_bind(id<MTLTexture> map, id<MTLSamplerState> cmp) {
+	imShadowTex = map;
+	imShadowCmp = cmp;
+}
 void mc_im_frame(const void *bytes, int length) {
 	if (length > (int) sizeof imFrame) length = (int) sizeof imFrame;
 	if (length > 0) memcpy(imFrame, bytes, (size_t) length);
@@ -819,6 +827,10 @@ int mco_draw(Own *w, Enc *enc, int cutout, const void *frame, int frameLength, i
 drawCall:
 	// (Imagine Metal) the shader engine's per-frame values for own_fs (terrain.metal IM_SHADE, buffer 30)
 	[r setFragmentBytes:imFrame length:sizeof imFrame atIndex:30];
+	if (imShadowTex) {
+		[r setFragmentTexture:imShadowTex atIndex:20];
+		[r setFragmentSamplerState:imShadowCmp atIndex:13];
+	}
 	if (w->vcount && !mesh) [r setVertexBuffer:w->vcount offset:0 atIndex:28];
 	if (cutout & (1 << 30)) {
 		// the visibility oracle: the drawn units (vertex stage) and the units with a visible pixel (fragment stage), this sample's number
@@ -2095,4 +2107,9 @@ int mco_tl_a1split_req(Own *w, id<MTLBuffer> out, int list, int num, int den) {
 // tl.a1Split halves drawn grouped, class draws drawn ungrouped while requested (totals since start)
 void mco_vgroup_stats(Own *w, uint64_t *out) {
 	for (int i = 0; i < 6; i++) out[i] = w->vgStat[i];
+}
+
+// (Imagine Metal) the terrain library (not retained), for the shadow casters' pipelines (imshadow.m, im_shadow_vs)
+id<MTLLibrary> mco_library(Own *w) {
+	return w ? w->library : nil;
 }

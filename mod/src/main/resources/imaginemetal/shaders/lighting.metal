@@ -13,7 +13,7 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// Per-frame values, written by imaginemetal.ImagineFrame (same layout, 160 bytes) and bound at fragment buffer 30.
+// Per-frame values, written by imaginemetal.ImagineFrame (same layout, 240 bytes) and bound at fragment buffer 30.
 struct ImFrame {
 	float4 lightDir;     // xyz unit direction toward the light that casts this frame's light (sun by day, moon by night), w 1 = sun
 	float4 lightColor;   // rgb direct light (linear), w rain 0..1
@@ -25,47 +25,41 @@ struct ImFrame {
 	float4 grade;        // x saturation, y vibrance, zw 0
 	int4 flags;          // x dimension (0 overworld, 1 Nether, 2 End), y debug view, z 1 = the engine filled this frame, w frame index
 	float4 reserved;
+	float4x4 shadowMat;  // camera-relative world -> the shadow map's light clip (orthographic, before the warp)
+	float4 shadow;       // x warp strength, y 1 = the map is valid this frame, z normal offset at the camera (blocks), w its growth per block
 };
 
-static inline float imLuma(float3 c) {
-	return dot(c, float3(0.2126, 0.7152, 0.0722));
+// The shadow map's radial warp (shadow.metal's casters use the same): most texels near the player.
+static inline float2 imWarp(float2 xy, float b) {
+	return xy / (length(xy) * b + (1.0 - b));
 }
 
-// Block light level 0..1 -> intensity: a hot core right next to the source on top of a long, soft reach (2.8 at level 15,
-// 1.7 at 14, 0.23 at 10, 0.05 at 7), so a room lit by one torch reads as lit, and the torch itself glows.
-static inline float imBlockCurve(float b) {
-	float v = b / (4.0 - 3.0 * b);
-	float b2 = b * b, b4 = b2 * b2, b8 = b4 * b4;
-	return 1.6 * v * v + 1.2 * b8;
-}
-
-// Sky light level 0..1 -> how much of the sky's light reaches the surface.
-static inline float imSkyCurve(float s) {
-	return s * s * (3.0 - 2.0 * s);
-}
-
-static inline float3 imTonemap(float3 x, float4 t) {
-	float3 xa = pow(max(x, 1e-6), float3(t.x));
-	float3 xad = pow(max(x, 1e-6), float3(t.x * t.y));
-	return xa / (xad * t.z + t.w);
-}
-
-// The face normal from the position's screen derivatives (a 2x2 quad always shades one triangle), turned toward the camera and
-// snapped to its axis on the axis-aligned faces that make up nearly all of Minecraft.
-static inline float3 imFaceNormal(float3 p, thread bool &slanted) {
-	float3 n = cross(dfdx(p), dfdy(p));
-	n *= rsqrt(max(dot(n, n), 1e-30));
-	if (dot(n, p) > 0.0) n = -n;
-	float3 a = abs(n);
-	float m = max(max(a.x, a.y), a.z);
-	slanted = m < 0.9; // crossed plants and other slanted cutouts
-	if (slanted) return n;
-	return a.x == m ? float3(sign(n.x), 0, 0) : a.y == m ? float3(0, sign(n.y), 0) : float3(0, 0, sign(n.z));
+// How much of the sun reaches p (camera-relative, n its face normal): 4 hardware-filtered taps of the shadow map around the
+// point, rotated per pixel. x: 1 lit, 0 shadowed; y: how much the map covers p (1 inside, fading to 0 at its edge, 0 outside or
+// with no map this frame), so the caller blends to its sky-light fallback without a visible seam.
+static float2 imShadow(float3 p, float3 n, float2 pixel, constant ImFrame &f, depth2d<float> smap, sampler cmp) {
+	if (f.shadow.y < 0.5) return float2(1.0, 0.0);
+	float dist = length(p);
+	float3 q = p + n * (f.shadow.z + f.shadow.w * dist);
+	float4 c = f.shadowMat * float4(q, 1.0);
+	float2 xy = imWarp(c.xy, f.shadow.x);
+	float edge = max(abs(xy.x), abs(xy.y));
+	if (edge > 0.98 || c.z > 1.0 || c.z < 0.0) return float2(1.0, 0.0);
+	float2 uv = float2(0.5 + 0.5 * xy.x, 0.5 - 0.5 * xy.y);
+	float texel = 1.0 / float(smap.get_width());
+	float ref = c.z - 0.00012;
+	// a rotated 4-tap pattern (interleaved gradient noise), each tap 2x2 filtered by the compare sampler
+	float a = fract(52.9829189 * fract(dot(pixel, float2(0.06711056, 0.00583715)))) * 6.2831853;
+	float2 r = float2(cos(a), sin(a)) * (1.5 * texel);
+	float2 t = float2(-r.y, r.x);
+	float lit = smap.sample_compare(cmp, uv + r, ref) + smap.sample_compare(cmp, uv - r, ref)
+		+ smap.sample_compare(cmp, uv + t, ref) + smap.sample_compare(cmp, uv - t, ref);
+	return float2(lit * 0.25, 1.0 - smoothstep(0.9, 0.98, edge));
 }
 
 // One terrain fragment: albedo as sampled and tinted (display-encoded, vanilla's AO and face shade already in it through the
 // vertex colour), camera-relative position, light levels (x block, y sky; 0..1). Returns the display-encoded colour.
-static float3 imShade(float3 albedo, float3 p, float2 light, constant ImFrame &f) {
+static float3 imShade(float3 albedo, float3 p, float2 light, float2 pixel, constant ImFrame &f, depth2d<float> smap, sampler cmp) {
 	if (f.flags.z == 0) return albedo * (0.2 + 0.8 * max(light.x, light.y)); // the engine hasn't filled a frame yet
 	bool slanted;
 	float3 n = imFaceNormal(p, slanted);
@@ -76,8 +70,12 @@ static float3 imShade(float3 albedo, float3 p, float2 light, constant ImFrame &f
 	// direct light: wrapped N.L; until there are shadow maps, the sky light stands in for them (no sun under a roof)
 	float nl = dot(n, f.lightDir.xyz);
 	float wrap = slanted ? 0.35 + 0.5 * abs(nl) : max(nl + 0.4, 0.0) * (1.0 / 1.4);
+	// sunlight: the shadow map where it reaches; the sky light stands in beyond it. Underground (no sky light at all) the sun is
+	// off regardless, so a cave never catches sunlight through an imprecision of the map.
+	float2 sm = imShadow(p, n, pixel, f, smap, cmp);
 	float open = smoothstep(0.45, 0.9, sky);
-	float3 direct = f.lightColor.rgb * (wrap * open);
+	float sun = mix(open, sm.x, sm.y) * smoothstep(0.02, 0.3, sky);
+	float3 direct = f.lightColor.rgb * (wrap * sun);
 
 	// sky light: blue from above, warmer and dimmer from below
 	float3 ambient = mix(f.ambientDown.rgb, f.ambientUp.rgb, n.y * 0.5 + 0.5) * skyF;

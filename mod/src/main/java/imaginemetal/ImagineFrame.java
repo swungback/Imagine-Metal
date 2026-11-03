@@ -22,7 +22,7 @@ import org.lwjgl.system.MemoryUtil;
  * a deep orange golden hour, blue-violet nights), tuned for our pipeline.
  */
 public final class ImagineFrame {
-	static final int SIZE = 160;
+	static final int SIZE = 240;
 	private static final ByteBuffer BUF = MemoryUtil.memAlloc(SIZE).order(ByteOrder.LITTLE_ENDIAN);
 	private static final long ADDRESS = MemoryUtil.memAddress(BUF);
 	private static int frame;
@@ -135,6 +135,7 @@ public final class ImagineFrame {
 				up[i] = END_SKY[i];
 			}
 		}
+		Shadows.prepare(lightDir, dim);
 		// the light bounced up from the ground: the sky's, dimmer, and a little of the sun's
 		for (int i = 0; i < 3; i++) down[i] = (dim == 1 ? 1.1f : 0.6f) * up[i] + 0.10f * light[i];
 
@@ -155,6 +156,9 @@ public final class ImagineFrame {
 		put(1.0f, 0.08f, 0f, 0f); // saturation, vibrance (vanilla's foliage is saturated already)
 		BUF.putInt(dim).putInt(Integer.getInteger("imaginemetal.debug", 0)).putInt(1).putInt(frame++);
 		put(0f, 0f, 0f, 0f);
+		for (int i = 0; i < 16; i++) BUF.putFloat(Shadows.MATRIX[i]);
+		// shadow: warp, valid, normal offset at the camera (blocks) and its growth per block (the warp's texels grow with distance)
+		put(Shadows.WARP, Shadows.valid() ? 1f : 0f, 0.035f, 0.006f);
 	}
 
 	private static void put(float x, float y, float z, float w) {

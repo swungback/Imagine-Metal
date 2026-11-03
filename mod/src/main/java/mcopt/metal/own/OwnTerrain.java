@@ -449,7 +449,7 @@ public final class OwnTerrain {
 		this.encoder = encoder;
 		this.ctx = MetalBridge.ctx(encoder);
 		this.enc = MetalBridge.enc(encoder);
-		this.own = OwnNative.create(this.ctx, (OwnPosTable.ON ? "#define OWN_EXACT_POS 1\n" : "") + (OwnQrec.ON ? "#define OWN_QREC 1\n" : "") + (VCOUNT ? "#define OWN_VCOUNT 1\n" : "") + (TFLAT ? "#define OWN_TFLAT 1\n" : "") + (TPROBE > 0 ? "#define OWN_TPROBE " + TPROBE + "\n" : "") + (OwnFrag.EXACT_SHIFT != 2 ? "#define A1_SH " + OwnFrag.EXACT_SHIFT + "\n" : "") + imaginemetal.Engine.terrainPrelude() + resource("/mcopt/own/terrain.metal"), COMPACT, FAT, CPU_CLIP);
+		this.own = OwnNative.create(this.ctx, (OwnPosTable.ON ? "#define OWN_EXACT_POS 1\n" : "") + (OwnQrec.ON ? "#define OWN_QREC 1\n" : "") + (VCOUNT ? "#define OWN_VCOUNT 1\n" : "") + (TFLAT ? "#define OWN_TFLAT 1\n" : "") + (TPROBE > 0 ? "#define OWN_TPROBE " + TPROBE + "\n" : "") + (OwnFrag.EXACT_SHIFT != 2 ? "#define A1_SH " + OwnFrag.EXACT_SHIFT + "\n" : "") + imaginemetal.Engine.terrainPrelude() + resource("/mcopt/own/terrain.metal") + imaginemetal.Engine.terrainEpilogue(), COMPACT, FAT, CPU_CLIP);
 		// -Dmcopt.own.hizTile=true: the per-quad path's pyramid in one tiled pass for its first five levels (padded to 32 texels)
 		applyNativeFlags();
 		// -Dmcopt.own.gputime=true: GPU timestamps of our compute encoders (cull, list build, pyramid + test), logged per 500 frames
@@ -518,6 +518,11 @@ public final class OwnTerrain {
 
 	public static @Nullable OwnTerrain get() {
 		return instance;
+	}
+
+	/** (Imagine Metal) the native terrain state, for its library (the shadow casters' pipelines). */
+	public long ownHandle() {
+		return this.own;
 	}
 
 	/** AnimCopy's compute copy: the native state (its library and pipelines) and the backend encoder. */
@@ -2033,6 +2038,7 @@ public final class OwnTerrain {
 		List<SectionRenderDispatcher.RenderSection> visible) {
 		if (!MetalBridge.inRenderPass(this.encoder)) return false;
 		if (NO_FADE) fadeMs = 0;
+		imaginemetal.Shadows.atlas(MetalBridge.viewHandle(atlas)); // (Imagine Metal: the shadow casters' cutout test)
 		this.beginFrame();
 		String mode = PROBE_MS > 0 ? this.probe() : "draw";
 		if (mode.startsWith("x-")) {

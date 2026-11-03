@@ -19,6 +19,12 @@ public final class Engine {
 		return v == null ? def : !"false".equalsIgnoreCase(v.trim());
 	}
 
+	/** Appended to mcopt's terrain library (OwnTerrain): the shadow map's casters, which use the terrain's own vertex fetch. */
+	public static String terrainEpilogue() {
+		if (!TERRAIN) return "";
+		return "\n" + resource("/imaginemetal/shaders/shadow.metal");
+	}
+
 	/** Prepended to mcopt's terrain library (OwnTerrain): our lighting with IM_SHADE defined, or nothing with the engine off. */
 	public static String terrainPrelude() {
 		if (!TERRAIN) return "";
