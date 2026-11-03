@@ -4,7 +4,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
- * The colour of the light each light source gives off (linear, brightest channel 1). Vanilla's lights by name; anything else that
+ * The colour of the light each light source gives off (linear; brightest channel 1, or less for a dimmer light). Vanilla's lights by name; anything else that
  * gives off light (modded blocks included) gets a colour from its name's hints, or the warm default of a flame.
  */
 public final class LightColors {
@@ -36,8 +36,10 @@ public final class LightColors {
 		{"sculk", new float[] {0.20f, 0.65f, 0.90f}},
 		{"shroomlight", new float[] {1.00f, 0.55f, 0.28f}},
 		{"glowstone", new float[] {1.00f, 0.75f, 0.42f}},
-		{"magma", new float[] {1.00f, 0.32f, 0.08f}},
-		{"lava", new float[] {1.00f, 0.38f, 0.08f}},
+		// (lava and magma at about half strength: a lava pool is dozens of level-15 lights at once and drowned whole rooms in orange;
+		// a colour's brightest channel below 1 makes that light dimmer, lighting.metal imBlockLight)
+		{"magma", new float[] {0.50f, 0.20f, 0.06f}},
+		{"lava", new float[] {0.55f, 0.25f, 0.07f}},
 		{"enchanting_table", new float[] {0.70f, 0.50f, 1.00f}},
 		{"ender_chest", new float[] {0.40f, 0.80f, 0.70f}},
 		{"brewing_stand", new float[] {1.00f, 0.80f, 0.45f}},

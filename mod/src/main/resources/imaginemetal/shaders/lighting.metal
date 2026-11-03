@@ -238,7 +238,7 @@ static float imEmission(uint cls, float3 tex) {
 	float sat = hi - lo;
 	switch (cls) {
 		case IM_MAT_EMITTER: return 2.6 * l * l + 0.25;
-		case IM_MAT_LAVA: return 2.4 + 1.8 * l;
+		case IM_MAT_LAVA: return 1.9 + 1.4 * l;
 		case IM_MAT_FLAME: return 4.0 * smoothstep(0.62, 0.92, hi) * smoothstep(0.15, 0.4, sat);
 		// ores: every pixel with clear colour against the grey stone around it (the whole speck, its coloured edge too; iron's pale
 		// specks count; a speck's near-grey highlights and coal's black specks don't), at a faint glow that keeps the texture's own
@@ -289,7 +289,8 @@ static float4 imBlockLight(float3 p, float3 n, constant ImFrame &f, texture3d<fl
 	float3 hue = c.rgb / m;
 	float hl = imLuma(hue);
 	hue = max(hl + (hue - hl) * 1.6, 0.0);
-	hue *= max(max(warm.r, warm.g), warm.b) / max(max(max(hue.r, hue.g), hue.b), 1e-4);
+	// (as bright as the torch colour, times how bright the sources here are: 1 for most, about half near lava)
+	hue *= max(max(warm.r, warm.g), warm.b) / max(max(max(hue.r, hue.g), hue.b), 1e-4) * min(m, 1.0);
 	float w = inside * smoothstep(0.0, 0.1, c.a);
 	return float4(mix(warm, hue, w), c.a * inside);
 }
