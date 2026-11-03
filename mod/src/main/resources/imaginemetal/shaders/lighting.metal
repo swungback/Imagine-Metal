@@ -118,7 +118,7 @@ static float2 imShadow(float3 p, float3 n, float2 pixel, constant ImFrame &f, de
 #define IM_MAT_LAVA 2
 #define IM_MAT_FLAME 3     // a small light with a flame or a lit part (torch, lantern, candle, fire, campfire)
 #define IM_MAT_ORE 4       // an ore: its coloured specks glow faintly
-#define IM_MAT_DIM 5       // a faint light (magma, sculk, ...)
+#define IM_MAT_DIM 5       // a faint light (magma, sculk sensors, glow lichen...): its bright coloured parts glow
 
 // How much light a fragment of class cls gives off, as a multiple of its own colour (albedo display-encoded, as sampled). The
 // result goes on top of the tone-mapped picture, so values past 1 are real HDR: the bloom picks them up.
@@ -129,8 +129,11 @@ static float imEmission(uint cls, float3 albedo) {
 		case IM_MAT_EMITTER: return 2.6 * l * l + 0.25;
 		case IM_MAT_LAVA: return 0.9 + 1.4 * l;
 		case IM_MAT_FLAME: return 4.0 * smoothstep(0.62, 0.92, hi) * smoothstep(0.15, 0.4, hi - lo);
-		case IM_MAT_ORE: return 1.4 * smoothstep(0.18, 0.42, hi - lo) * smoothstep(0.25, 0.55, hi);
-		case IM_MAT_DIM: return 0.9 * l * l + 0.1;
+		// ores: a faint glow of the coloured specks, following the texture's own shading (brighter texels glow more), well under a
+		// light source's, so the specks read as catching light in the dark rather than as stickers
+		case IM_MAT_ORE: return 0.55 * smoothstep(0.18, 0.42, hi - lo) * smoothstep(0.3, 0.75, hi) * hi;
+		// faint lights (sculk sensors and catalysts, magma, glow lichen): only their bright, coloured parts glow, as a flame's
+		case IM_MAT_DIM: return 1.6 * smoothstep(0.5, 0.85, hi) * smoothstep(0.12, 0.35, hi - lo);
 		default: return 0.0;
 	}
 }

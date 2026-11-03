@@ -115,8 +115,11 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 		if (p.mix.x < 0.0) return float4(pow(saturate(glow * -p.mix.x * 4.0), 1.0 / 2.2), 1.0);
 		c += glow * p.mix.x;
 	}
-	// past white: scaled back keeping the hue (mixing toward white turned lava pink once gamma-encoded)
+	// the top of the range rolled off keeping the hue (mixing toward white turned lava pink once gamma-encoded): up to 0.85 as
+	// it is, above that a soft shoulder that reaches white only far past it, so a glowing surface keeps its texture's light and
+	// dark instead of every bright pixel landing on the same white
 	float m = max(max(c.r, c.g), c.b);
-	if (m > 1.0) c /= m;
+	const float t = 0.85;
+	if (m > t) c *= (t + (1.0 - t) * (m - t) / ((m - t) + (1.0 - t))) / m;
 	return float4(pow(saturate(c), 1.0 / 2.2), h.a);
 }
