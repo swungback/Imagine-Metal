@@ -476,7 +476,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		if (cls == IM_MAT_FOLIAGE) {
 			float fr = 1.0 - saturate(dot(N, V));
 			fr *= fr;
-			hlt *= 1.0 - fr * fr;
+			hlt *= (1.0 - fr * fr) * 0.5;  // (fields of grass at a low angle: a sheen, not a glare)
 		}
 		float3 tint = mix(float3(1.0), base / max(max(max(base.r, base.g), base.b), 0.02), surf.metal);
 		hlt *= mix(0.3, 1.0, max(surf.metal, smoothstep(0.04, 0.2, surf.f0)));  // (a dielectric's: a glint, not a white wash)

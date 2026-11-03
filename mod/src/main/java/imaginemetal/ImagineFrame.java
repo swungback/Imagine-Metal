@@ -44,7 +44,7 @@ public final class ImagineFrame {
 	}
 
 	// the palette (linear)
-	private static final float[] SUN_NOON = {1.12f, 0.98f, 0.72f};
+	private static final float[] SUN_NOON = {1.22f, 1.05f, 0.74f};
 	private static final float[] SUN_GOLDEN = {1.65f, 0.78f, 0.36f};
 	private static final float[] MOON = {0.17f, 0.20f, 0.32f};
 	private static final float[] NIGHT_SKY = {0.065f, 0.08f, 0.14f};
@@ -134,7 +134,7 @@ public final class ImagineFrame {
 			}
 			float[] sunsetTint = {1.21f, 0.92f, 0.76f};
 			for (int i = 0; i < 3; i++) {
-				float dayAmb = (float) Math.pow(Math.max(skyc[i], 0f), 1.65) * 0.62f * mix(1f, sunsetTint[i], golden);
+				float dayAmb = (float) Math.pow(Math.max(skyc[i], 0f), 1.65) * 0.52f * mix(1f, sunsetTint[i], golden);
 				up[i] = mix(NIGHT_SKY[i], dayAmb, day);
 			}
 			float grey = luma(up) * 0.85f;
