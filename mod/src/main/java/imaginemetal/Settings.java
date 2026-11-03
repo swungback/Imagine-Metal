@@ -19,7 +19,7 @@ public final class Settings {
 	public static volatile boolean coloredLight = Engine.flag("imaginemetal.coloredLight", true);
 	public static volatile boolean sky = Engine.flag("imaginemetal.sky", true);
 	public static volatile boolean pbr = Engine.flag("imaginemetal.pbr", true);
-	public static volatile float normals = Config.number("imaginemetal.normals", 1.5f, 0f, 4f);
+	public static volatile float normals = Config.number("imaginemetal.surfaceDetail", 0.75f, 0f, 4f);
 	public static volatile boolean bloom = Engine.flag("imaginemetal.bloom", true);
 	public static volatile float bloomStrength = Config.number("imaginemetal.bloomStrength", 0.5f, 0f, 2f);
 	/** 0 the picture, 1 light levels, 2 normals, 3 the bloom's glow alone, 4 the coloured light grid alone. */
@@ -43,7 +43,7 @@ public final class Settings {
 		v.put("imaginemetal.coloredLight", String.valueOf(coloredLight));
 		v.put("imaginemetal.sky", String.valueOf(sky));
 		v.put("imaginemetal.pbr", String.valueOf(pbr));
-		v.put("imaginemetal.normals", String.format(java.util.Locale.ROOT, "%.2f", normals));
+		v.put("imaginemetal.surfaceDetail", String.format(java.util.Locale.ROOT, "%.2f", normals));
 		v.put("imaginemetal.bloom", String.valueOf(bloom));
 		v.put("imaginemetal.bloomStrength", String.format(java.util.Locale.ROOT, "%.2f", bloomStrength));
 		v.put("imaginemetal.debug", String.valueOf(debug));
