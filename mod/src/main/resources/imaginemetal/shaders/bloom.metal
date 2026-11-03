@@ -55,8 +55,9 @@ fragment float4 im_bloom_prefilter(ImBloomOut in [[stage_in]], texture2d<float> 
 	float3 d = imbLinear(src.sample(s, in.uv + t * float2(1.0, 1.0)).rgb);
 	float wa = 1.0 / (1.0 + imbLuma(a)), wb = 1.0 / (1.0 + imbLuma(b)), wc = 1.0 / (1.0 + imbLuma(c)), wd = 1.0 / (1.0 + imbLuma(d));
 	float3 col = (a * wa + b * wb + c * wc + d * wd) / (wa + wb + wc + wd);
-	// soft threshold: nothing below threshold - knee, a smooth curve through the knee, everything above threshold in full
-	float l = imbLuma(col);
+	// soft threshold: nothing below threshold - knee, a smooth curve through the knee, everything above threshold in full.
+	// Measured on the strongest channel, not luma: a red or blue light (lava, redstone, soul fire) glows as much as a white one
+	float l = max(max(col.r, col.g), col.b);
 	float th = p.texel.z, knee = p.texel.w;
 	float soft = clamp(l - th + knee, 0.0, 2.0 * knee);
 	soft = soft * soft / (4.0 * knee + 1e-5);

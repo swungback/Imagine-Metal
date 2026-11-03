@@ -762,8 +762,22 @@ public final class OwnQuads {
 		return c & 0xFF00FF00 | (c & 0xFF0000) >> 16 | (c & 0xFF) << 16;
 	}
 
+	/**
+	 * (Imagine Metal) FluidRenderer pulls each side face 0.001 inside its block, so where a taller fluid block meets a shorter one
+	 * a 0.001-block crack runs between the taller one's side and the shorter one's top: dotted lines of whatever is behind (a dark
+	 * cave behind glowing lava shows them plainly). Coordinates that close to a block boundary go onto it: the faces then meet.
+	 * Two faces that end up in one plane there face opposite ways, so back-face culling keeps them from fighting.
+	 */
+	private static float snapFluid(float c) {
+		float r = Math.round(c);
+		return Math.abs(c - r) < 0.0015F ? r : c;
+	}
+
 	private void fluidVertex(int layer, float x, float y, float z, int color, float u, float v, int lightCoords) {
 		int k = this.fluidVertex;
+		x = snapFluid(x);
+		y = snapFluid(y);
+		z = snapFluid(z);
 		this.p[k * 3] = x;
 		this.p[k * 3 + 1] = y;
 		this.p[k * 3 + 2] = z;

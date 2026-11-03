@@ -36,13 +36,12 @@ static inline float imLuma(float3 c) {
 	return dot(c, float3(0.2126, 0.7152, 0.0722));
 }
 
-// Block light level 0..1 -> intensity: a hot core right next to the source and a reach that falls off fast (3.0 at level 15,
-// 1.5 at 14, 0.43 at 12, 0.11 at 10, 0.01 at 7; before: 2.8, 1.7, 0.6, 0.23, 0.05), so light pools around torches and lanterns and the space between them stays dark,
-// as in Photon's caves; the colour stays a warm flame's.
+// Block light level 0..1 -> intensity: a hot core next to the source and a long reach (3.0 at level 15, 2.2 at 14, 1.1 at 12,
+// 0.57 at 10, 0.15 at 7, 0.05 at 5), so weak lights still light their surroundings: a redstone torch (level 7) or a soul torch
+// (10) colours the wall it's on. The dark between lights comes from the grade (Bloom's resolve), not from cutting the reach.
 static inline float imBlockCurve(float b) {
-	float v = b / (4.0 - 3.0 * b);
 	float b2 = b * b, b4 = b2 * b2, b8 = b4 * b4;
-	return 1.8 * v * v * v + 1.2 * b8;
+	return 2.2 * pow(b, 3.5) + 0.8 * b8;
 }
 
 // Sky light level 0..1 -> how much of the sky's light reaches the surface.
@@ -132,7 +131,7 @@ static float imEmission(uint cls, float3 tex) {
 	float sat = hi - lo;
 	switch (cls) {
 		case IM_MAT_EMITTER: return 2.6 * l * l + 0.25;
-		case IM_MAT_LAVA: return 0.9 + 1.4 * l;
+		case IM_MAT_LAVA: return 2.4 + 1.8 * l;
 		case IM_MAT_FLAME: return 4.0 * smoothstep(0.62, 0.92, hi) * smoothstep(0.15, 0.4, sat);
 		// ores: every pixel with clear colour against the grey stone around it (the whole speck, its coloured edge too; iron's pale
 		// specks count; a speck's near-grey highlights and coal's black specks don't), at a faint glow that keeps the texture's own
