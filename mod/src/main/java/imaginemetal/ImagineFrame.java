@@ -154,7 +154,7 @@ public final class ImagineFrame {
 		put(floor[0], floor[1], floor[2], 0.9f); // w: exposure
 		put(TM_A, TM_D, TM_B, TM_C);
 		put(1.04f, 0.08f, 0f, 0f); // saturation, vibrance (the blue sky light greys the greens a little)
-		BUF.putInt(dim).putInt(Integer.getInteger("imaginemetal.debug", 0)).putInt(1).putInt(frame++);
+		BUF.putInt(dim).putInt(Settings.debug).putInt(1).putInt(frame++);
 		put(0f, 0f, 0f, 0f);
 		for (int c = 0; c < 2; c++) for (int i = 0; i < 16; i++) BUF.putFloat(Shadows.MATRIX[c][i]);
 		// shadow: near cascade normal offset, valid, far cascade normal offset

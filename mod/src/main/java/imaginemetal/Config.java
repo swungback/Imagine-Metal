@@ -35,6 +35,12 @@ public final class Config {
 		imaginemetal.bloom=true
 		# How strong the glow is (0 off, 0.5 default, up to 2).
 		imaginemetal.bloomStrength=0.5
+		#
+		# Imagine Metal's lighting on the terrain (false: vanilla's lighting, for comparing). A restart applies it.
+		imaginemetal.terrain=true
+		#
+		# Debug view: 0 the picture, 1 light levels, 2 normals, 3 the bloom's glow alone.
+		imaginemetal.debug=0
 		""";
 
 	private Config() {
@@ -59,6 +65,38 @@ public final class Config {
 			}
 		} catch (IOException | RuntimeException e) {
 			System.out.println("[Imagine Metal] config: " + e + " (using the defaults)");
+		}
+	}
+
+	/**
+	 * Writes values (key -> value) to the file: the defaults' layout and comments with these values in place, then any other
+	 * imaginemetal keys the file had, as they were.
+	 */
+	public static synchronized void save(java.util.Map<String, String> values) {
+		try {
+			Path file = FabricLoader.getInstance().getConfigDir().resolve("imaginemetal.properties");
+			Properties old = new Properties();
+			if (Files.exists(file)) {
+				try (Reader r = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+					old.load(r);
+				}
+			}
+			String text = DEFAULTS;
+			StringBuilder extra = new StringBuilder();
+			for (var e : values.entrySet()) {
+				String line = e.getKey() + "=" + e.getValue();
+				var m = java.util.regex.Pattern.compile("(?m)^" + java.util.regex.Pattern.quote(e.getKey()) + "=.*$").matcher(text);
+				if (m.find()) text = m.replaceFirst(java.util.regex.Matcher.quoteReplacement(line));
+				else extra.append(line).append('\n');
+				System.setProperty(e.getKey(), e.getValue());
+			}
+			for (String k : old.stringPropertyNames()) {
+				if (k.startsWith("imaginemetal.") && !values.containsKey(k) && !text.contains("\n" + k + "=")) extra.append(k).append('=').append(old.getProperty(k)).append('\n');
+			}
+			Files.createDirectories(file.getParent());
+			Files.writeString(file, text + extra, StandardCharsets.UTF_8);
+		} catch (IOException | RuntimeException e) {
+			System.out.println("[Imagine Metal] couldn't save the settings: " + e);
 		}
 	}
 

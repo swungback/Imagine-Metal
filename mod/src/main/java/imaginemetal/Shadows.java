@@ -12,7 +12,7 @@ import org.lwjgl.system.MemoryUtil;
 
 /**
  * The sun/moon shadows: two cascades, each an orthographic view along the light around the camera. The near one covers
- * {@link #NEAR_RANGE} blocks each way at full sharpness, the far one {@link #RANGE}. Each is snapped to its own world-fixed texel
+ * {@link #NEAR_RANGE} blocks each way at full sharpness, the far one Settings.shadowRange. Each is snapped to its own world-fixed texel
  * grid, so a block casts the same texels wherever the player stands and however they look around: shadows don't shimmer while
  * walking (the earlier single map with a radial warp re-centred on the player re-rasterized every leaf at every step).
  *
@@ -22,11 +22,8 @@ import org.lwjgl.system.MemoryUtil;
  * Terrain drawn after it samples both.
  */
 public final class Shadows {
-	/** imaginemetal.shadows (true). */
-	public static final boolean ON = Engine.TERRAIN && Engine.flag("imaginemetal.shadows", true);
-	/** Each cascade's size (texels) and the half-width the far one covers (blocks). */
+	/** Each cascade's size (texels; read at startup). The far cascade's half-width is Settings.shadowRange (live). */
 	static final int RES = (int) Config.number("imaginemetal.shadowRes", 2048, 512, 8192);
-	static final float RANGE = Config.number("imaginemetal.shadowRange", 160, 64, 256);
 	/** The near cascade's half-width (blocks): 32 at 2048 texels is 32 texels per block, two per texture pixel. */
 	static final float NEAR_RANGE = 32f;
 	/** Depth range along the light (blocks before and behind the camera). */
@@ -58,7 +55,7 @@ public final class Shadows {
 
 	/** The receivers' normal offset for cascade c (blocks): about one and a half of its texels. */
 	static float normalOffset(int c) {
-		return 1.5f * 2f * (c == 0 ? NEAR_RANGE : RANGE) / RES;
+		return 1.5f * 2f * (c == 0 ? NEAR_RANGE : Settings.shadowRange) / RES;
 	}
 
 	/** The block atlas as the terrain's last opaque draw bound it (the cutout casters' test reads it). */
@@ -68,7 +65,7 @@ public final class Shadows {
 
 	/** Whether the receivers may sample the map this frame (ImFrame.shadow.y). */
 	static boolean valid() {
-		return ON && prepared && everRendered && !failed;
+		return Engine.TERRAIN && Settings.shadows && prepared && everRendered && !failed;
 	}
 
 	/**
@@ -76,7 +73,7 @@ public final class Shadows {
 	 */
 	static void prepare(float[] lightDir, int dim) {
 		prepared = false;
-		if (!ON || failed || dim == 1) return;
+		if (!Engine.TERRAIN || !Settings.shadows || failed || dim == 1) return;
 		Vec3 cam = Minecraft.getInstance().gameRenderer.mainCamera().position();
 		// the sun and moon move in the x-y plane (the End's light is fixed): quantize the shadows' run along x per block of height
 		double ly0 = Math.max(lightDir[1], MIN_ELEVATION);
@@ -97,7 +94,7 @@ public final class Shadows {
 		// edge re-rasterized at each step; through a point next to the player only what's above or below it moves, by the true
 		// amount the shadows move.
 		for (int c = 0; c < 2; c++) {
-			float range = c == 0 ? NEAR_RANGE : RANGE;
+			float range = c == 0 ? NEAR_RANGE : Settings.shadowRange;
 			double step = 2.0 * range / RES;
 			double[] a = ANCHOR[c];
 			if (a == null) {
