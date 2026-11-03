@@ -148,21 +148,27 @@ static float imEmission(uint cls, float3 tex) {
 	}
 }
 
-// The colour of block light at p (camera-relative, n its face normal): the hue of the coloured light grid in front of the face,
-// at the torch light's strength; the warm default where the grid has nothing (outside it, or no light source it knows of).
-static float3 imBlockLightColor(float3 p, float3 n, constant ImFrame &f, texture3d<float> vol, sampler vs) {
+// Block light at p (camera-relative, n its face normal) from the coloured light grid in front of the face: rgb its colour at the
+// torch light's strength (the warm default where the grid has nothing: outside it, or no light source it knows of), a the grid's
+// light level there (0..1; it spreads each source 4 levels stronger than Minecraft does, so coloured lights read clearly).
+// The colour's saturation is pushed past the source's own, since lighting grey stone and the tone curve wash a light's colour
+// out; on screen it then reads as the colour it is.
+static float4 imBlockLight(float3 p, float3 n, constant ImFrame &f, texture3d<float> vol, sampler vs) {
 	float3 warm = f.blockColor.rgb;
-	if (f.lightVol.w < 0.5) return warm;
+	if (f.lightVol.w < 0.5) return float4(warm, 0.0);
 	float3 uvw = (p + n * 0.5 - f.lightVol.xyz) / f.lightSize.xyz;
 	float3 e = min(uvw, 1.0 - uvw) * f.lightSize.xyz;  // blocks to the grid's nearest side
 	float inside = smoothstep(1.0, 6.0, min(min(e.x, e.y), e.z));
-	if (inside <= 0.0) return warm;
+	if (inside <= 0.0) return float4(warm, 0.0);
 	float4 c = vol.sample(vs, uvw);
 	float m = max(max(c.r, c.g), c.b);
-	if (m < 1e-4) return warm;
-	float3 hue = c.rgb / m * max(max(warm.r, warm.g), warm.b);
-	// (the grid's strength fades it in: where its light runs out, Minecraft's has too)
-	return mix(warm, hue, inside * smoothstep(0.0, 0.1, c.a));
+	if (m < 1e-4) return float4(warm, 0.0);
+	float3 hue = c.rgb / m;
+	float hl = imLuma(hue);
+	hue = max(hl + (hue - hl) * 1.6, 0.0);
+	hue *= max(max(warm.r, warm.g), warm.b) / max(max(max(hue.r, hue.g), hue.b), 1e-4);
+	float w = inside * smoothstep(0.0, 0.1, c.a);
+	return float4(mix(warm, hue, w), c.a * inside);
 }
 
 // One terrain fragment: albedo as sampled and tinted (display-encoded, vanilla's AO and face shade already in it through the
@@ -190,7 +196,8 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	float3 ambient = mix(f.ambientDown.rgb, f.ambientUp.rgb, n.y * 0.5 + 0.5) * skyF;
 
 	// torches: warm, weaker in full daylight
-	float3 torch = (block > 0.0 ? imBlockLightColor(p, n, f, lvol, lsamp) : f.blockColor.rgb) * imBlockCurve(block) * (1.0 - 0.45 * f.blockColor.w * smoothstep(0.5, 1.0, sky));
+	float4 bl = imBlockLight(p, n, f, lvol, lsamp);
+	float3 torch = bl.rgb * imBlockCurve(max(block, bl.a)) * (1.0 - 0.45 * f.blockColor.w * smoothstep(0.5, 1.0, sky));
 
 	// directional face shading (vanilla's is taken out of the vertex colours, FlatFaceShadeMixin): tops full, bottoms 60 %,
 	// north/south a little brighter than east/west, so every block reads as a solid shape even in flat light

@@ -87,7 +87,8 @@ public final class LightVolume {
 			float[] col = LightColors.of(state);
 			int r = Math.round(col[0] * 255f), g = Math.round(col[1] * 255f), b = Math.round(col[2] * 255f);
 			c.sources[c.count++] = i;
-			c.sources[c.count++] = r | g << 8 | b << 16 | Math.min(light, 15) << 24;
+			// 4 levels stronger than Minecraft's: coloured lights read clearly (a redstone torch lights like an 11)
+			c.sources[c.count++] = r | g << 8 | b << 16 | Math.min(light + 4, 15) << 24;
 		}
 	}
 

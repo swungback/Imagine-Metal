@@ -13,13 +13,13 @@ public final class LightColors {
 		{"soul", new float[] {0.25f, 0.80f, 1.00f}},
 		{"redstone_lamp", new float[] {1.00f, 0.68f, 0.38f}},
 		{"redstone", new float[] {1.00f, 0.12f, 0.06f}},
-		{"copper_torch", new float[] {0.45f, 1.00f, 0.50f}},
-		{"copper_lantern", new float[] {0.45f, 1.00f, 0.50f}},
+		{"copper_torch", new float[] {0.30f, 1.00f, 0.35f}},
+		{"copper_lantern", new float[] {0.30f, 1.00f, 0.35f}},
 		{"copper_bulb", new float[] {1.00f, 0.70f, 0.40f}},
 		{"sea_lantern", new float[] {0.60f, 0.90f, 1.00f}},
 		{"sea_pickle", new float[] {0.55f, 0.95f, 0.70f}},
 		{"conduit", new float[] {0.55f, 0.85f, 1.00f}},
-		{"beacon", new float[] {0.70f, 0.90f, 1.00f}},
+		{"beacon", new float[] {0.30f, 0.80f, 1.00f}},
 		{"end_rod", new float[] {0.90f, 0.85f, 1.00f}},
 		{"end_gateway", new float[] {0.60f, 0.40f, 1.00f}},
 		{"end_portal", new float[] {0.40f, 0.70f, 0.60f}},
@@ -45,7 +45,7 @@ public final class LightColors {
 	};
 	/** A flame: torches, lanterns, campfires, fire, candles, furnaces, and the default for unknown lights. */
 	private static final float[] FLAME = {1.00f, 0.55f, 0.22f};
-	private static final float[] SOUL = {0.25f, 0.80f, 1.00f}, RED = {1.00f, 0.12f, 0.06f}, COPPER = {0.45f, 1.00f, 0.50f};
+	private static final float[] SOUL = {0.20f, 0.75f, 1.00f}, RED = {1.00f, 0.08f, 0.04f}, COPPER = {0.30f, 1.00f, 0.35f};
 	private static final ConcurrentHashMap<BlockState, float[]> CACHE = new ConcurrentHashMap<>();
 
 	private LightColors() {
