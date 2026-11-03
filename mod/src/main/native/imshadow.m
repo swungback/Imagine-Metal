@@ -1,6 +1,6 @@
 // Imagine Metal: the sun/moon shadow map (imaginemetal.Shadows on the Java side).
 //
-// One Depth32Float map, drawn every frame in a depth-only render encoder of its own on the frame's command buffer, before the
+// Two cascades in one Depth32Float 2D array (slice 0 near, slice 1 far), each drawn every frame in a depth-only render encoder of its own on the frame's command buffer, before the
 // level's passes: the terrain units OwnTerrain.shadowCull listed for the light (its lists and indirect arguments: solid at 0,
 // cutout at 20 bytes), through im_shadow_vs / im_shadow_cutout_fs (shadow.metal, built into the terrain library). Receivers
 // (own_fs, lighting.metal imShadow) bind the map at fragment texture 20 with the compare sampler at sampler 13 (mcown.m).
@@ -33,6 +33,8 @@ ImShadow *im_shadow_new(Ctx *ctx, int resolution, char *err, int errCap) {
 		s->resolution = resolution;
 		MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float width:resolution
 			height:resolution mipmapped:NO];
+		td.textureType = MTLTextureType2DArray;
+		td.arrayLength = 2;
 		td.storageMode = MTLStorageModePrivate;
 		td.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
 		s->map = [ctx->device newTextureWithDescriptor:td];
@@ -114,15 +116,16 @@ int im_shadow_pipelines(ImShadow *s, id<MTLLibrary> lib, int compact, int fat, c
 	return 0;
 }
 
-// The frame's shadow pass. frame: ImShadowFrame (shadow.metal) with listBase 0; the terrain's buffers from shadowBuffers; atlas
+// One cascade's shadow pass (cascade: the map's slice). frame: ImShadowFrame (shadow.metal) with listBase 0; the terrain's buffers from shadowBuffers; atlas
 // the block atlas (nil: the cutout layer is drawn as solid). Binds the map for the terrain's receivers afterwards.
 void im_shadow_render(Enc *enc, ImShadow *s, const void *frame, int frameBytes, id<MTLBuffer> arena, id<MTLBuffer> sections,
-	id<MTLBuffer> recs, id<MTLBuffer> lists, id<MTLBuffer> args, int listCap, id<MTLTexture> atlas, float slopeScale) {
-	if (!s || !s->solid || !arena || !args || frameBytes > 256) return;
+	id<MTLBuffer> recs, id<MTLBuffer> lists, id<MTLBuffer> args, int listCap, id<MTLTexture> atlas, float slopeScale, int cascade) {
+	if (!s || !s->solid || !arena || !args || frameBytes > 256 || cascade < 0 || cascade > 1) return;
 	id<MTLCommandBuffer> cmd = mc_frame_cmd(enc);
 	@autoreleasepool {
 		MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
 		rp.depthAttachment.texture = s->map;
+		rp.depthAttachment.slice = (NSUInteger) cascade;
 		rp.depthAttachment.loadAction = MTLLoadActionClear;
 		rp.depthAttachment.clearDepth = 1.0;
 		rp.depthAttachment.storeAction = MTLStoreActionStore;
@@ -146,7 +149,7 @@ void im_shadow_render(Enc *enc, ImShadow *s, const void *frame, int frameBytes, 
 		uint8_t f[256];
 		memcpy(f, frame, (size_t) frameBytes);
 		for (int layer = 0; layer < 2; layer++) {
-			// ImShadowFrame.listBase sits after the matrix (64), camBlock (16), camOffset (16), warp (16)
+			// ImShadowFrame.listBase sits after the matrix (64), camBlock (16), camOffset (16), reserved (16)
 			uint32_t listBase = (uint32_t) (layer * listCap);
 			memcpy(f + 112, &listBase, 4);
 			[r setRenderPipelineState:layer == 1 && atlas ? s->cutout : s->solid];

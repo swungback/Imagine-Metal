@@ -2220,7 +2220,7 @@ constant float CUTOUT_LIMIT [[function_constant(5)]];  // vanilla's ALPHA_CUTOUT
 fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]], constant Terrain &t [[buffer(23)]], constant Fog &fog [[buffer(24)]],
 	texture2d<float> atlas [[texture(16)]], sampler atlasSampler [[sampler(14)]]
 #ifdef IM_SHADE
-	, constant ImFrame &imf [[buffer(30)]], depth2d<float> imShadowMap [[texture(20)]], sampler imShadowCmp [[sampler(13)]]
+	, constant ImFrame &imf [[buffer(30)]], depth2d_array<float> imShadowMap [[texture(20)]], sampler imShadowCmp [[sampler(13)]]
 #endif
 	) {
 #ifdef OWN_TPROBE

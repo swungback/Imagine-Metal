@@ -14,7 +14,7 @@ import org.joml.Vector4f;
 import org.lwjgl.system.MemoryUtil;
 
 /**
- * The lighting's per-frame values (lighting.metal ImFrame, 160 bytes): where the sun or moon is, the colours of its light, of
+ * The lighting's per-frame values (lighting.metal ImFrame, 304 bytes): where the sun or moon is, the colours of its light, of
  * the sky's light and of torches for this time of day and weather, the cave floor, the tone curve. Made once per frame at
  * LevelRenderer.render's start (LevelRendererMixin) and handed to the backend, which binds it on every terrain draw.
  *
@@ -22,7 +22,7 @@ import org.lwjgl.system.MemoryUtil;
  * a deep orange golden hour, blue-violet nights), tuned for our pipeline.
  */
 public final class ImagineFrame {
-	static final int SIZE = 240;
+	static final int SIZE = 304;
 	private static final ByteBuffer BUF = MemoryUtil.memAlloc(SIZE).order(ByteOrder.LITTLE_ENDIAN);
 	private static final long ADDRESS = MemoryUtil.memAddress(BUF);
 	private static int frame;
@@ -156,9 +156,9 @@ public final class ImagineFrame {
 		put(1.04f, 0.08f, 0f, 0f); // saturation, vibrance (the blue sky light greys the greens a little)
 		BUF.putInt(dim).putInt(Integer.getInteger("imaginemetal.debug", 0)).putInt(1).putInt(frame++);
 		put(0f, 0f, 0f, 0f);
-		for (int i = 0; i < 16; i++) BUF.putFloat(Shadows.MATRIX[i]);
-		// shadow: warp, valid, normal offset at the camera (blocks) and its growth per block (the warp's texels grow with distance)
-		put(Shadows.WARP, Shadows.valid() ? 1f : 0f, 0.035f, 0.006f);
+		for (int c = 0; c < 2; c++) for (int i = 0; i < 16; i++) BUF.putFloat(Shadows.MATRIX[c][i]);
+		// shadow: near cascade normal offset, valid, far cascade normal offset
+		put(Shadows.normalOffset(0), Shadows.valid() ? 1f : 0f, Shadows.normalOffset(1), 0f);
 	}
 
 	private static void put(float x, float y, float z, float w) {

@@ -17,7 +17,7 @@ final class ImNative {
 	private static final MethodHandle SHADOW_PIPELINES = fn("im_shadow_pipelines",
 		FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_LONG, JAVA_INT), false);
 	private static final MethodHandle SHADOW_RENDER = fn("im_shadow_render", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT,
-		JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_FLOAT), false);
+		JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_FLOAT, JAVA_INT), false);
 
 	private static MethodHandle fn(String name, FunctionDescriptor d, boolean critical) {
 		var symbol = MetalBridge.library().find(name).orElseThrow(() -> new IllegalStateException("missing native symbol " + name));
@@ -52,9 +52,9 @@ final class ImNative {
 	}
 
 	static void shadowRender(long enc, long state, long frame, int frameBytes, long arena, long sections, long recs, long lists, long args,
-		int listCap, long atlas, float slopeScale) {
+		int listCap, long atlas, float slopeScale, int cascade) {
 		try {
-			SHADOW_RENDER.invokeExact(enc, state, frame, frameBytes, arena, sections, recs, lists, args, listCap, atlas, slopeScale);
+			SHADOW_RENDER.invokeExact(enc, state, frame, frameBytes, arena, sections, recs, lists, args, listCap, atlas, slopeScale, cascade);
 		} catch (Throwable t) {
 			throw new IllegalStateException(t);
 		}

@@ -5,14 +5,15 @@
 // arena (compact vertices, or packed quad records with OWN_QREC). Only the default path of own_vs: solid and cutout units, no
 // translucent order, no per-quad lists. Function constants: COMPACT (1), FAT (2), as the terrain library was built.
 //
-// The map: one orthographic view along the light, camera-relative, with a radial warp (imShadowWarp, the same in the receiver,
-// lighting.metal) that spends most texels near the player. Standard depth (0 nearest the light, cleared to 1).
+// The map: two cascades, each an orthographic view along the light, camera-relative, snapped to a world-fixed texel grid on the
+// Java side (imaginemetal.Shadows), so a block casts the same texels wherever the player stands. No warp: a warp re-centred on the
+// player re-rasterizes every caster as they walk, which made leaf shadows shimmer. Standard depth (0 nearest the light, cleared to 1).
 
 struct ImShadowFrame {
 	float4x4 lightClip;   // camera-relative world -> light clip (orthographic, before the warp)
 	int4 camBlock;        // xyz floor(camera)
 	float4 camOffset;     // xyz camera block - camera position (the terrain's CameraOffset)
-	float4 warp;          // x warp strength b
+	float4 reserved;
 	uint listBase;
 	uint pad0, pad1, pad2;
 };
@@ -21,10 +22,6 @@ struct ImShadowOut {
 	float4 pos [[position]];
 	float2 uv;
 };
-
-static inline float2 imShadowWarp(float2 xy, float b) {
-	return xy / (length(xy) * b + (1.0 - b));
-}
 
 static Vtx imShadowFetch(uint vi, device const void *arenaRaw) {
 	Vtx v;
@@ -68,9 +65,7 @@ vertex ImShadowOut im_shadow_vs(uint vid [[vertex_id]], uint iid [[instance_id]]
 	}
 	Vtx v = imShadowFetch((quadStart + quad) * 4 + corner, arenaRaw);
 	float3 pos = float3(v.pos) + float3(origin - f.camBlock.xyz) + f.camOffset.xyz;
-	float4 c = f.lightClip * float4(pos, 1.0);
-	c.xy = imShadowWarp(c.xy, f.warp.x);
-	o.pos = c;
+	o.pos = f.lightClip * float4(pos, 1.0);
 	o.uv = float2(v.uv0);
 	return o;
 }

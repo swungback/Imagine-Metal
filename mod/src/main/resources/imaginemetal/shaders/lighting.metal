@@ -13,7 +13,7 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// Per-frame values, written by imaginemetal.ImagineFrame (same layout, 240 bytes) and bound at fragment buffer 30.
+// Per-frame values, written by imaginemetal.ImagineFrame (same layout, 304 bytes) and bound at fragment buffer 30.
 struct ImFrame {
 	float4 lightDir;     // xyz unit direction toward the light that casts this frame's light (sun by day, moon by night), w 1 = sun
 	float4 lightColor;   // rgb direct light (linear), w rain 0..1
@@ -25,8 +25,9 @@ struct ImFrame {
 	float4 grade;        // x saturation, y vibrance, zw 0
 	int4 flags;          // x dimension (0 overworld, 1 Nether, 2 End), y debug view, z 1 = the engine filled this frame, w frame index
 	float4 reserved;
-	float4x4 shadowMat;  // camera-relative world -> the shadow map's light clip (orthographic, before the warp)
-	float4 shadow;       // x warp strength, y 1 = the map is valid this frame, z normal offset at the camera (blocks), w its growth per block
+	float4x4 shadowNear; // camera-relative world -> the near cascade's light clip (orthographic)
+	float4x4 shadowFar;  // ... the far cascade's
+	float4 shadow;       // x near cascade normal offset (blocks), y 1 = the maps are valid this frame, z far cascade normal offset, w 0
 };
 
 static inline float imLuma(float3 c) {
@@ -65,43 +66,50 @@ static inline float3 imFaceNormal(float3 p, thread bool &slanted) {
 	return a.x == m ? float3(sign(n.x), 0, 0) : a.y == m ? float3(0, sign(n.y), 0) : float3(0, 0, sign(n.z));
 }
 
-// The shadow map's radial warp (shadow.metal's casters use the same): most texels near the player.
-static inline float2 imWarp(float2 xy, float b) {
-	return xy / (length(xy) * b + (1.0 - b));
-}
-
-// How much of the sun reaches p (camera-relative, n its face normal): 4 hardware-filtered taps of the shadow map around the
-// point, rotated per pixel. x: 1 lit, 0 shadowed; y: how much the map covers p (1 inside, fading to 0 at its edge, 0 outside or
-// with no map this frame), so the caller blends to its sky-light fallback without a visible seam.
-static float2 imShadow(float3 p, float3 n, float2 pixel, constant ImFrame &f, depth2d<float> smap, sampler cmp) {
-	if (f.shadow.y < 0.5) return float2(1.0, 0.0);
-	float dist = length(p);
-	float3 q = p + n * (f.shadow.z + f.shadow.w * dist);
-	float4 c = f.shadowMat * float4(q, 1.0);
-	float2 xy = imWarp(c.xy, f.shadow.x);
-	float edge = max(abs(xy.x), abs(xy.y));
-	if (edge > 0.98 || c.z > 1.0 || c.z < 0.0) return float2(1.0, 0.0);
-	float2 uv = float2(0.5 + 0.5 * xy.x, 0.5 - 0.5 * xy.y);
-	float texel = 1.0 / float(smap.get_width());
-	float ref = c.z - 0.00012;
-	// a fixed 3x3 pattern, each tap 2x2 filtered by the compare sampler (tent weights): soft edges that stay still when the view
-	// turns (a per-pixel rotated pattern crawled), wide enough that single leaf holes fade in and out as the sun moves instead of
-	// popping
-	float o = 1.5 * texel;
+// One cascade's 3x3 tent filter at uv (each tap 2x2 filtered by the compare sampler). A fixed pattern: soft edges that stay still
+// when the view turns (a per-pixel rotated pattern crawled).
+static inline float imShadowPcf(depth2d_array<float> smap, sampler cmp, float2 uv, float ref, uint slice) {
+	float o = 1.5 / float(smap.get_width());
 	float lit = 0.0, wsum = 0.0;
 	for (int j = -1; j <= 1; j++) {
 		for (int i = -1; i <= 1; i++) {
 			float w = (2.0 - abs(float(i))) * (2.0 - abs(float(j)));
-			lit += w * smap.sample_compare(cmp, uv + float2(i, j) * o, ref);
+			lit += w * smap.sample_compare(cmp, uv + float2(i, j) * o, slice, ref);
 			wsum += w;
 		}
 	}
-	return float2(lit / wsum, 1.0 - smoothstep(0.9, 0.98, edge));
+	return lit / wsum;
+}
+
+// How much of the sun reaches p (camera-relative, n its face normal), from two cascades: the near one (sharp, around the player)
+// where it covers p, the far one beyond, blended across a band so the switch doesn't show. Both are snapped to world-fixed texel
+// grids, so a shadow stays put as the player walks. x: 1 lit, 0 shadowed; y: how much the maps cover p (1 inside, fading to 0 at
+// the far cascade's edge, 0 outside or with no maps this frame), so the caller blends to its sky-light fallback without a seam.
+static float2 imShadow(float3 p, float3 n, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp) {
+	if (f.shadow.y < 0.5) return float2(1.0, 0.0);
+	// the near cascade
+	float4 c0 = f.shadowNear * float4(p + n * f.shadow.x, 1.0);
+	float e0 = max(abs(c0.x), abs(c0.y));
+	float nearW = (c0.z > 0.0 && c0.z < 1.0) ? 1.0 - smoothstep(0.8, 0.92, e0) : 0.0;
+	float litNear = 1.0;
+	if (nearW > 0.0) {
+		float2 uv = float2(0.5 + 0.5 * c0.x, 0.5 - 0.5 * c0.y);
+		litNear = imShadowPcf(smap, cmp, uv, c0.z - 0.00006, 0);
+		if (nearW >= 1.0) return float2(litNear, 1.0);
+	}
+	// the far cascade
+	float4 c1 = f.shadowFar * float4(p + n * f.shadow.z, 1.0);
+	float e1 = max(abs(c1.x), abs(c1.y));
+	if (e1 > 0.98 || c1.z > 1.0 || c1.z < 0.0) return nearW > 0.0 ? float2(litNear, nearW) : float2(1.0, 0.0);
+	float2 uv1 = float2(0.5 + 0.5 * c1.x, 0.5 - 0.5 * c1.y);
+	float litFar = imShadowPcf(smap, cmp, uv1, c1.z - 0.00012, 1);
+	float cover = 1.0 - smoothstep(0.9, 0.98, e1);
+	return float2(mix(litFar, litNear, nearW), max(cover, nearW));
 }
 
 // One terrain fragment: albedo as sampled and tinted (display-encoded, vanilla's AO and face shade already in it through the
 // vertex colour), camera-relative position, light levels (x block, y sky; 0..1). Returns the display-encoded colour.
-static float3 imShade(float3 albedo, float3 p, float2 light, float2 pixel, constant ImFrame &f, depth2d<float> smap, sampler cmp) {
+static float3 imShade(float3 albedo, float3 p, float2 light, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp) {
 	if (f.flags.z == 0) return albedo * (0.2 + 0.8 * max(light.x, light.y)); // the engine hasn't filled a frame yet
 	bool slanted;
 	float3 n = imFaceNormal(p, slanted);

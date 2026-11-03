@@ -2250,8 +2250,11 @@ public final class OwnTerrain {
 	}
 
 	// ---- native shading's sun shadows (mcopt.metal.shade.ShadeOwnShadows): our units culled from the light's view ----
-	private long shArgs, shLists, shTested, shFat;
-	private int shCap;
+	// (Imagine Metal: one set of lists per slot, so each shadow cascade has its own in the same frame: the culls run in the pre
+	// command buffer, before any of the frame's draws, so one shared set would hold only the last cascade's units)
+	public static final int SHADOW_SLOTS = 2;
+	private final long[] shArgs = new long[SHADOW_SLOTS], shLists = new long[SHADOW_SLOTS], shTested = new long[SHADOW_SLOTS], shFat = new long[SHADOW_SLOTS];
+	private final int[] shCap = new int[SHADOW_SLOTS];
 	/** The block atlas and its sampler as the last opaque draw bound them (the shadows' cutout test samples them). */
 	public long lastAtlas, lastAtlasSampler;
 
@@ -2263,16 +2266,21 @@ public final class OwnTerrain {
 	 * is the camera's, as for the view. Reads the section table of the last frame drawn. False when nothing is published yet.
 	 */
 	public boolean shadowCull(Matrix4fc clip, float lx, float ly, float lz) {
+		return this.shadowCull(0, clip, lx, ly, lz);
+	}
+
+	/** (Imagine Metal) shadowCull into the lists of slot (0 .. SHADOW_SLOTS - 1). */
+	public boolean shadowCull(int slot, Matrix4fc clip, float lx, float ly, float lz) {
 		if (this.maxSlot < 0 || this.frame == 0) return false;
 		net.minecraft.client.renderer.ViewArea va = Minecraft.getInstance().levelRenderer.viewArea();
 		if (va == null) return false;
-		if (this.shCap != this.listCap) {
-			for (long b : new long[] {this.shLists, this.shTested, this.shFat}) if (b != 0) this.later(() -> OwnNative.release(b));
-			this.shLists = OwnNative.buffer(this.ctx, 4L * this.listCap * 4, false);
-			this.shTested = OwnNative.buffer(this.ctx, (long) this.listCap * 4, false);
-			this.shFat = OwnNative.buffer(this.ctx, FAT ? 4L * this.listCap * 32 : 16, false);
-			if (this.shArgs == 0) this.shArgs = OwnNative.buffer(this.ctx, 128, 2);
-			this.shCap = this.listCap;
+		if (this.shCap[slot] != this.listCap) {
+			for (long b : new long[] {this.shLists[slot], this.shTested[slot], this.shFat[slot]}) if (b != 0) this.later(() -> OwnNative.release(b));
+			this.shLists[slot] = OwnNative.buffer(this.ctx, 4L * this.listCap * 4, false);
+			this.shTested[slot] = OwnNative.buffer(this.ctx, (long) this.listCap * 4, false);
+			this.shFat[slot] = OwnNative.buffer(this.ctx, FAT ? 4L * this.listCap * 32 : 16, false);
+			if (this.shArgs[slot] == 0) this.shArgs[slot] = OwnNative.buffer(this.ctx, 128, 2);
+			this.shCap[slot] = this.listCap;
 		}
 		net.minecraft.world.phys.Vec3 pos = Minecraft.getInstance().gameRenderer.mainCamera().position();
 		final float shift = 4096.0F;
@@ -2299,19 +2307,25 @@ public final class OwnTerrain {
 			MemoryUtil.memPutInt(f + 104, bz >> 4);
 			MemoryUtil.memPutInt(f + 112, va.getViewDistance());
 			MemoryUtil.memPutInt(f + 116, this.maxSlot + 1);
-			MemoryUtil.memPutInt(f + 120, this.shCap);
+			MemoryUtil.memPutInt(f + 120, this.shCap[slot]);
 			MemoryUtil.memPutInt(f + 128, RUN);
 			MemoryUtil.memPutInt(f + 136, FAT ? 1 : 0);
 			int k = (int) (this.frame % FRAMES);
-			OwnNative.cull(this.own, this.enc, f, CULL_FRAME_BYTES, this.tables[k], this.recBuffer, this.shArgs, this.shLists, this.masks[k], this.maxSlot + 1,
-				this.prevVis, this.curVis, this.shTested, 0, this.shFat);
+			OwnNative.cull(this.own, this.enc, f, CULL_FRAME_BYTES, this.tables[k], this.recBuffer, this.shArgs[slot], this.shLists[slot], this.masks[k],
+				this.maxSlot + 1, this.prevVis, this.curVis, this.shTested[slot], 0, this.shFat[slot]);
 		}
 		return true;
 	}
 
 	/** What a shadow draw after shadowCull reads: arena, section table, records, lists, indirect arguments (solid at 0, cutout at 20), list capacity. */
 	public long[] shadowBuffers() {
-		return new long[] {this.arenaBuffer, this.tables[(int) (this.frame % FRAMES)], this.recBuffer, FAT ? this.shFat : this.shLists, this.shArgs, this.shCap};
+		return this.shadowBuffers(0);
+	}
+
+	/** (Imagine Metal) shadowBuffers of slot. */
+	public long[] shadowBuffers(int slot) {
+		return new long[] {this.arenaBuffer, this.tables[(int) (this.frame % FRAMES)], this.recBuffer, FAT ? this.shFat[slot] : this.shLists[slot], this.shArgs[slot],
+			this.shCap[slot]};
 	}
 
 	public static boolean compact() {
