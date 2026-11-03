@@ -119,21 +119,26 @@ static float2 imShadow(float3 p, float3 n, float2 pixel, constant ImFrame &f, de
 #define IM_MAT_FLAME 3     // a small light with a flame or a lit part (torch, lantern, candle, fire, campfire)
 #define IM_MAT_ORE 4       // an ore: its coloured specks glow faintly
 #define IM_MAT_DIM 5       // a faint light (magma, sculk sensors, glow lichen...): its bright coloured parts glow
+#define IM_MAT_NETHER_ORE 6 // an ore in netherrack (nether quartz, nether gold, ancient debris)
 
-// How much light a fragment of class cls gives off, as a multiple of its own colour (albedo display-encoded, as sampled). The
-// result goes on top of the tone-mapped picture, so values past 1 are real HDR: the bloom picks them up.
-static float imEmission(uint cls, float3 albedo) {
-	float l = imLuma(albedo);
-	float hi = max(max(albedo.r, albedo.g), albedo.b), lo = min(min(albedo.r, albedo.g), albedo.b);
+// How much light a fragment of class cls gives off, as a multiple of its texture's colour (tex: the texel as sampled, before the
+// vertex colour's tint and Minecraft's corner shading, so every face of a block glows alike). The result goes on top of the
+// tone-mapped picture, so values past 1 are real HDR: the bloom picks them up.
+static float imEmission(uint cls, float3 tex) {
+	float l = imLuma(tex);
+	float hi = max(max(tex.r, tex.g), tex.b), lo = min(min(tex.r, tex.g), tex.b);
+	float sat = hi - lo;
 	switch (cls) {
 		case IM_MAT_EMITTER: return 2.6 * l * l + 0.25;
 		case IM_MAT_LAVA: return 0.9 + 1.4 * l;
-		case IM_MAT_FLAME: return 4.0 * smoothstep(0.62, 0.92, hi) * smoothstep(0.15, 0.4, hi - lo);
-		// ores: a faint glow of the coloured specks, following the texture's own shading (brighter texels glow more), well under a
-		// light source's, so the specks read as catching light in the dark rather than as stickers
-		case IM_MAT_ORE: return 0.55 * smoothstep(0.18, 0.42, hi - lo) * smoothstep(0.3, 0.75, hi) * hi;
+		case IM_MAT_FLAME: return 4.0 * smoothstep(0.62, 0.92, hi) * smoothstep(0.15, 0.4, sat);
+		// ores: every pixel with colour against the grey stone around it (the whole speck, its dark edge too; coal's black specks
+		// have none), at a faint glow that keeps the texture's own light and dark
+		case IM_MAT_ORE: return 0.6 * smoothstep(0.05, 0.14, sat);
+		// nether ores sit in red netherrack: their specks are told apart by brightness instead
+		case IM_MAT_NETHER_ORE: return 0.6 * smoothstep(0.5, 0.75, l);
 		// faint lights (sculk sensors and catalysts, magma, glow lichen): only their bright, coloured parts glow, as a flame's
-		case IM_MAT_DIM: return 1.6 * smoothstep(0.5, 0.85, hi) * smoothstep(0.12, 0.35, hi - lo);
+		case IM_MAT_DIM: return 1.6 * smoothstep(0.5, 0.85, hi) * smoothstep(0.12, 0.35, sat);
 		default: return 0.0;
 	}
 }
@@ -157,7 +162,7 @@ static float3 imBlockLightColor(float3 p, float3 n, constant ImFrame &f, texture
 
 // One terrain fragment: albedo as sampled and tinted (display-encoded, vanilla's AO and face shade already in it through the
 // vertex colour), camera-relative position, light levels (x block, y sky; 0..1). Returns the display-encoded colour.
-static float3 imShade(float3 albedo, float3 p, float2 light, uint mat, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp,
+static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint mat, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp,
 	texture3d<float> lvol, sampler lsamp) {
 	if (f.flags.z == 0) return albedo * (0.2 + 0.8 * max(light.x, light.y)); // the engine hasn't filled a frame yet
 	bool slanted;
@@ -200,7 +205,7 @@ static float3 imShade(float3 albedo, float3 p, float2 light, uint mat, float2 pi
 		float gm = max(max(g.r, g.g), g.b);
 		return pow(gm > 1e-4 ? g.rgb / gm * saturate(g.a * 1.5) : float3(0.0), 1.0 / 2.2) * 0.9 + base * 0.1;
 	}
-	float emit = imEmission(mat & 15u, albedo);
+	float emit = imEmission(mat & 15u, tex);
 
 	float3 c = imTonemap(radiance, f.tonemap);
 	// saturation and vibrance (vibrance lifts the colours that aren't saturated yet)
@@ -208,6 +213,6 @@ static float3 imShade(float3 albedo, float3 p, float2 light, uint mat, float2 pi
 	float sat = max(max(c.r, c.g), c.b) - min(min(c.r, c.g), c.b);
 	c = mix(float3(l), c, f.grade.x + f.grade.y * (1.0 - sat));
 	// light given off: on top of the tone-mapped light, unclamped (the picture is HDR: Bloom's resolve maps it to the screen)
-	c = max(c, 0.0) + base * emit;
+	c = max(c, 0.0) + pow(max(tex, 0.0), 2.2) * emit;  // (the texture's colour: light given off isn't darkened by corner shading)
 	return pow(c, 1.0 / 2.2);
 }
