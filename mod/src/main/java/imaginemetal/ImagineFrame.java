@@ -167,12 +167,12 @@ public final class ImagineFrame {
 		long now = System.nanoTime();
 		float dt = lastNs == 0 ? 0f : Math.min((now - lastNs) / 1e9f, 0.25f);
 		lastNs = now;
-		float sky = 1f;
+		float eyeNow = 1f;
 		if (level != null) {
 			var eye = net.minecraft.core.BlockPos.containing(mc.gameRenderer.mainCamera().position());
-			sky = level.getBrightness(net.minecraft.world.level.LightLayer.SKY, eye) / 15f;
+			eyeNow = level.getBrightness(net.minecraft.world.level.LightLayer.SKY, eye) / 15f;
 		}
-		eyeSky += (sky - eyeSky) * (1f - (float) Math.exp(-dt / 1.2f));
+		eyeSky += (eyeNow - eyeSky) * (1f - (float) Math.exp(-dt / 1.2f));
 		cave = dim == 0 ? 1f - smoothstep(0.25f, 0.75f, eyeSky) : 0f;
 		night = dim == 0 ? 1f - day : 0f;
 		put(cave, night, 0f, 0f);
