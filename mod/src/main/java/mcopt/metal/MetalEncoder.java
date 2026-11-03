@@ -107,6 +107,8 @@ final class MetalEncoder implements CommandEncoderBackend {
 	/** Render encoders opened in this submit; the trace's #numbers, which the GPU profile lines refer to. */
 	private int encoderIndex;
 	private @Nullable MetalRenderPass currentPass;
+	/** (Imagine Metal) the open pass draws into a 16-bit float colour image (imaginemetal.Hdr's): pipelines use their HDR twins. */
+	static boolean passHdr;
 	/** Recording the current submit's terrain draws for the visibility probe (-Dmcopt.metal.probe=N); null otherwise. */
 	/** Summed GPU µs over the profiled frames: whole submit, then vertex and fragment per encoder. */
 	private final double[] profileSums = new double[1 + 2 * PROFILE_ENCODERS];
@@ -336,6 +338,8 @@ final class MetalEncoder implements CommandEncoderBackend {
 		if (keptDelegate != null) redirect = null;
 		List<RenderPassDescriptor.@Nullable Attachment<Optional<Vector4fc>>> colors = redirect != null ? List.of() : descriptor.colorAttachments();
 		RenderPassDescriptor.@Nullable Attachment<OptionalDouble> depth = redirect != null && redirect.depth() != 0 ? null : descriptor.depthAttachment();
+		passHdr = !colors.isEmpty() && colors.get(0) != null
+			&& ((MetalTexture.View) colors.get(0).textureView()).metalTexture().getFormat() == com.mojang.renderpearl.api.GpuFormat.RGBA16_FLOAT;
 		// Anything sampled inside this pass must have its deferred clear in memory before the pass starts (with lazyClears: when it's bound)
 		boolean lazy = LAZY_CLEARS && redirect == null && keptDelegate == null;
 		for (MetalTexture t : List.copyOf(this.pendingClears)) {

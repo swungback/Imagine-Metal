@@ -111,9 +111,31 @@ static float2 imShadow(float3 p, float3 n, float2 pixel, constant ImFrame &f, de
 	return float2(mix(litFar, litNear, nearW), max(cover, nearW));
 }
 
+// Material classes (the low 4 bits of a face's material byte, imaginemetal.Materials).
+#define IM_MAT_EMITTER 1   // a block that gives off light (glowstone, sea lantern, shroomlight, modded lights...)
+#define IM_MAT_LAVA 2
+#define IM_MAT_FLAME 3     // a small light with a flame or a lit part (torch, lantern, candle, fire, campfire)
+#define IM_MAT_ORE 4       // an ore: its coloured specks glow faintly
+#define IM_MAT_DIM 5       // a faint light (magma, sculk, ...)
+
+// How much light a fragment of class cls gives off, as a multiple of its own colour (albedo display-encoded, as sampled). The
+// result goes on top of the tone-mapped picture, so values past 1 are real HDR: the bloom picks them up.
+static float imEmission(uint cls, float3 albedo) {
+	float l = imLuma(albedo);
+	float hi = max(max(albedo.r, albedo.g), albedo.b), lo = min(min(albedo.r, albedo.g), albedo.b);
+	switch (cls) {
+		case IM_MAT_EMITTER: return 2.6 * l * l + 0.25;
+		case IM_MAT_LAVA: return 2.2 + 2.0 * l;
+		case IM_MAT_FLAME: return 4.0 * smoothstep(0.62, 0.92, hi) * smoothstep(0.15, 0.4, hi - lo);
+		case IM_MAT_ORE: return 1.4 * smoothstep(0.18, 0.42, hi - lo) * smoothstep(0.25, 0.55, hi);
+		case IM_MAT_DIM: return 0.9 * l * l + 0.1;
+		default: return 0.0;
+	}
+}
+
 // One terrain fragment: albedo as sampled and tinted (display-encoded, vanilla's AO and face shade already in it through the
 // vertex colour), camera-relative position, light levels (x block, y sky; 0..1). Returns the display-encoded colour.
-static float3 imShade(float3 albedo, float3 p, float2 light, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp) {
+static float3 imShade(float3 albedo, float3 p, float2 light, uint mat, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp) {
 	if (f.flags.z == 0) return albedo * (0.2 + 0.8 * max(light.x, light.y)); // the engine hasn't filled a frame yet
 	bool slanted;
 	float3 n = imFaceNormal(p, slanted);
@@ -147,11 +169,14 @@ static float3 imShade(float3 albedo, float3 p, float2 light, float2 pixel, const
 
 	if (f.flags.y == 1) return float3(light, 0.0);          // debug: light levels
 	if (f.flags.y == 2) return n * 0.5 + 0.5;               // debug: normals
+	float emit = imEmission(mat & 15u, albedo);
 
 	float3 c = imTonemap(radiance, f.tonemap);
 	// saturation and vibrance (vibrance lifts the colours that aren't saturated yet)
 	float l = imLuma(c);
 	float sat = max(max(c.r, c.g), c.b) - min(min(c.r, c.g), c.b);
 	c = mix(float3(l), c, f.grade.x + f.grade.y * (1.0 - sat));
-	return pow(saturate(c), 1.0 / 2.2);
+	// light given off: on top of the tone-mapped light, unclamped (the picture is HDR: Bloom's resolve maps it to the screen)
+	c = max(c, 0.0) + base * emit;
+	return pow(c, 1.0 / 2.2);
 }

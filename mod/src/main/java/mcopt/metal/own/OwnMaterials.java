@@ -10,7 +10,10 @@ import net.minecraft.world.level.block.state.BlockState;
  * Only with -Dmcopt.shade=native (and -Dmcopt.own=true).
  */
 public final class OwnMaterials {
-	public static final boolean ON = false; // native shading is not part of this build
+	/** (Imagine Metal) on with our terrain lighting: the classes are imaginemetal.Materials'. */
+	public static final boolean ON = imaginemetal.Engine.TERRAIN;
+	/** Native shading's ambient occlusion split (OwnIntAoMixin, OwnBlockRenderer): not part of this build, off apart from ON. */
+	public static final boolean AO_SPLIT = false;
 	private static final ThreadLocal<byte[]> GRID = ThreadLocal.withInitial(() -> new byte[4096]);
 	private static final ThreadLocal<boolean[]> COMPILING = ThreadLocal.withInitial(() -> new boolean[1]);
 
@@ -19,7 +22,7 @@ public final class OwnMaterials {
 
 	/** The compiler's block at section-relative position (x, y, z & 15): its class into this thread's grid. */
 	public static void block(int x, int y, int z, BlockState state) {
-		GRID.get()[(y & 15) << 8 | (z & 15) << 4 | x & 15] = 0;
+		GRID.get()[(y & 15) << 8 | (z & 15) << 4 | x & 15] = imaginemetal.Materials.of(state);
 	}
 
 	/** Whether this thread is inside a section compile (OwnIntCompilerMixin brackets it). */

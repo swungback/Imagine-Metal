@@ -17,8 +17,8 @@ typedef struct {
 typedef struct {
 	id<MTLDevice> device;
 	id<MTLLibrary> lib;
-	id<MTLRenderPipelineState> prefilter, down, up, composite;
-	MTLPixelFormat compositeFormat;
+	id<MTLRenderPipelineState> prefilter, down, up, composite, resolve;
+	MTLPixelFormat compositeFormat, resolveFormat;
 	id<MTLTexture> chain;
 	id<MTLTexture> views[IM_BLOOM_MAX];
 	int levels, width, height;  // of the main image the chain was made for
@@ -121,7 +121,7 @@ static void imbChain(ImBloom *b, int width, int height) {
 }
 
 static void imbPass(id<MTLCommandBuffer> cmd, id<MTLTexture> target, MTLLoadAction load, id<MTLRenderPipelineState> ps,
-	id<MTLTexture> src, id<MTLSamplerState> s, const ImBloomParams *p, NSString *label) {
+	id<MTLTexture> src, id<MTLSamplerState> s, const ImBloomParams *p, NSString *label, id<MTLTexture> second) {
 	MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
 	rp.colorAttachments[0].texture = target;
 	rp.colorAttachments[0].loadAction = load;
@@ -132,48 +132,66 @@ static void imbPass(id<MTLCommandBuffer> cmd, id<MTLTexture> target, MTLLoadActi
 	[r setRenderPipelineState:ps];
 	[r setCullMode:MTLCullModeNone];
 	[r setFragmentTexture:src atIndex:0];
+	if (second) [r setFragmentTexture:second atIndex:1];
 	[r setFragmentSamplerState:s atIndex:0];
 	[r setFragmentBytes:p length:sizeof *p atIndex:0];
 	[r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 	[r endEncoding];
 }
 
-// This frame's bloom on target (the game's main image, drawn and read back in place). 0 = done, 1 = failed (err filled).
-int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> target, float strength, float threshold, float knee, float haze, char *err,
-	int errCap) {
-	if (!b || !target) return 0;
-	if (!(target.usage & MTLTextureUsageShaderRead) || target.textureType != MTLTextureType2D || target.sampleCount != 1) {
-		snprintf(err, (size_t) errCap, "the main image can't be read by shaders (usage %lu, type %lu)", (unsigned long) target.usage,
-			(unsigned long) target.textureType);
+static int imbCheck(id<MTLTexture> t, const char *what, char *err, int errCap) {
+	if (!(t.usage & MTLTextureUsageShaderRead) || t.textureType != MTLTextureType2D || t.sampleCount != 1) {
+		snprintf(err, (size_t) errCap, "the %s can't be read by shaders (usage %lu, type %lu)", what, (unsigned long) t.usage, (unsigned long) t.textureType);
 		return 1;
 	}
-	if (target.width < 16 || target.height < 16) return 0;
-	if (!b->composite || b->compositeFormat != target.pixelFormat) {
+	return 0;
+}
+
+// This frame's bloom and HDR resolve. src: the picture as drawn; dst: the game's main image. src == dst: the glow is added in
+// place (no HDR image). Otherwise src is the HDR image: the glow is added to it and the result mapped into dst, which is written
+// whole (strength 0: the mapping alone, no glow). 0 = done, 1 = failed (err filled).
+int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst, float strength, float threshold, float knee, float haze,
+	char *err, int errCap) {
+	if (!b || !src || !dst) return 0;
+	if (imbCheck(src, "picture", err, errCap)) return 1;
+	if (src.width < 16 || src.height < 16) return 0;
+	BOOL inPlace = src == dst;
+	if (inPlace && strength == 0.0f) return 0;
+	if (inPlace && (!b->composite || b->compositeFormat != dst.pixelFormat)) {
 		[b->composite release];
-		b->composite = imbPipeline(b, @"im_bloom_composite", target.pixelFormat, NO, err, errCap);
-		b->compositeFormat = target.pixelFormat;
+		b->composite = imbPipeline(b, @"im_bloom_composite", dst.pixelFormat, NO, err, errCap);
+		b->compositeFormat = dst.pixelFormat;
 		if (!b->composite) return 1;
 	}
-	imbChain(b, (int) target.width, (int) target.height);
+	if (!inPlace && (!b->resolve || b->resolveFormat != dst.pixelFormat)) {
+		[b->resolve release];
+		b->resolve = imbPipeline(b, @"im_bloom_resolve", dst.pixelFormat, NO, err, errCap);
+		b->resolveFormat = dst.pixelFormat;
+		if (!b->resolve) return 1;
+	}
+	imbChain(b, (int) src.width, (int) src.height);
 	id<MTLCommandBuffer> cmd = mc_frame_cmd(enc);
 	@autoreleasepool {
-		ImBloomParams p = {{1.0f / (float) target.width, 1.0f / (float) target.height, threshold, knee}, {strength, (float) b->levels, haze, 0}};
-		imbPass(cmd, b->views[0], MTLLoadActionDontCare, b->prefilter, target, b->linear, &p, @"Imagine Metal bloom prefilter");
-		for (int i = 1; i < b->levels; i++) {
-			id<MTLTexture> src = b->views[i - 1];
-			p.texel[0] = 1.0f / (float) src.width;
-			p.texel[1] = 1.0f / (float) src.height;
-			imbPass(cmd, b->views[i], MTLLoadActionDontCare, b->down, src, b->linear, &p, @"Imagine Metal bloom down");
-		}
-		for (int i = b->levels - 2; i >= 0; i--) {
-			id<MTLTexture> src = b->views[i + 1];
-			p.texel[0] = 1.0f / (float) src.width;
-			p.texel[1] = 1.0f / (float) src.height;
-			imbPass(cmd, b->views[i], MTLLoadActionLoad, b->up, src, b->linear, &p, @"Imagine Metal bloom up");
+		ImBloomParams p = {{1.0f / (float) src.width, 1.0f / (float) src.height, threshold, knee}, {strength, (float) b->levels, haze, 0}};
+		if (strength != 0.0f) {
+			imbPass(cmd, b->views[0], MTLLoadActionDontCare, b->prefilter, src, b->linear, &p, @"Imagine Metal bloom prefilter", nil);
+			for (int i = 1; i < b->levels; i++) {
+				id<MTLTexture> s = b->views[i - 1];
+				p.texel[0] = 1.0f / (float) s.width;
+				p.texel[1] = 1.0f / (float) s.height;
+				imbPass(cmd, b->views[i], MTLLoadActionDontCare, b->down, s, b->linear, &p, @"Imagine Metal bloom down", nil);
+			}
+			for (int i = b->levels - 2; i >= 0; i--) {
+				id<MTLTexture> s = b->views[i + 1];
+				p.texel[0] = 1.0f / (float) s.width;
+				p.texel[1] = 1.0f / (float) s.height;
+				imbPass(cmd, b->views[i], MTLLoadActionLoad, b->up, s, b->linear, &p, @"Imagine Metal bloom up", nil);
+			}
 		}
 		p.texel[0] = 1.0f / (float) b->views[0].width;
 		p.texel[1] = 1.0f / (float) b->views[0].height;
-		imbPass(cmd, target, MTLLoadActionLoad, b->composite, b->views[0], b->linear, &p, @"Imagine Metal bloom composite");
+		if (inPlace) imbPass(cmd, dst, MTLLoadActionLoad, b->composite, b->views[0], b->linear, &p, @"Imagine Metal bloom composite", nil);
+		else imbPass(cmd, dst, MTLLoadActionDontCare, b->resolve, b->views[0], b->linear, &p, @"Imagine Metal HDR resolve", src);
 	}
 	return 0;
 }

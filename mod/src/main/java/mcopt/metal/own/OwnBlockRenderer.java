@@ -209,7 +209,7 @@ final class OwnBlockRenderer {
 			}
 			OwnQrStat.GREY.get()[0] = grey ? 1 : 0;
 		}
-		boolean split = OwnMaterials.ON && OwnMaterials.compiling();
+		boolean split = OwnMaterials.AO_SPLIT && OwnMaterials.compiling();
 		if (split) {
 			for (int v = 0; v < 4; v++) {
 				this.aoSplit[v] = this.quadInstance.getColor(v) >>> 8 & 0xFF;

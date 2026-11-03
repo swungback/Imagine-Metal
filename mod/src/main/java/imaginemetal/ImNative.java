@@ -19,7 +19,7 @@ final class ImNative {
 	private static final MethodHandle SHADOW_RENDER = fn("im_shadow_render", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT,
 		JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_FLOAT, JAVA_INT), false);
 	private static final MethodHandle BLOOM_NEW = fn("im_bloom_new", FunctionDescriptor.of(JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT), false);
-	private static final MethodHandle BLOOM_RENDER = fn("im_bloom_render", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_LONG,
+	private static final MethodHandle BLOOM_RENDER = fn("im_bloom_render", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG,
 		JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT, JAVA_LONG, JAVA_INT), false);
 
 	private static MethodHandle fn(String name, FunctionDescriptor d, boolean critical) {
@@ -62,9 +62,9 @@ final class ImNative {
 		}
 	}
 
-	static int bloomRender(long enc, long state, long target, float strength, float threshold, float knee, float haze, long err, int errCap) {
+	static int bloomRender(long enc, long state, long src, long dst, float strength, float threshold, float knee, float haze, long err, int errCap) {
 		try {
-			return (int) BLOOM_RENDER.invokeExact(enc, state, target, strength, threshold, knee, haze, err, errCap);
+			return (int) BLOOM_RENDER.invokeExact(enc, state, src, dst, strength, threshold, knee, haze, err, errCap);
 		} catch (Throwable t) {
 			throw new IllegalStateException(t);
 		}

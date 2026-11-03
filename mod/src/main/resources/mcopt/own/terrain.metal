@@ -1562,6 +1562,7 @@ struct VOut {
 	// (Imagine Metal) for imShade: camera-relative position and the raw light levels (x block, y sky; 0..1)
 	float3 imPos [[function_constant(F_VARY)]];
 	float2 imLight [[function_constant(F_VARY)]];
+	uint imMat [[flat]] [[function_constant(F_VARY)]];  // the face's material byte (OwnMaterials: bits 0-3 class, 4-7 upper corners)
 #endif
 };
 
@@ -1691,6 +1692,7 @@ vertex VOut own_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant Dr
 	int3 origin;
 	int uploadMs;
 	uint unitRec = 0xffffffffu;
+	uint imMatOff = 0xffffffffu;  // (Imagine Metal) the unit's material bytes in the arena (Rec.pad0), none = all ones
 	// (F_QFLAT: the table entry, instances of 64 quads over the list's region: the draw's base vertex is 4 x the region's first entry;
 	// 0xFFFFFFFF past the list's quads, a degenerate quad)
 	// (F_QFLAT with listBase bit 31: the list's own class draw, the overflow fallback, through the same pipeline)
@@ -1709,6 +1711,9 @@ vertex VOut own_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant Dr
 		base = 0;
 	} else if (F_TIGHT) {
 		uint4 r4 = ((device const uint4 *) recs)[lists[df.listBase + iid] * 2];  // Rec: quadStart, slot, meta, plane | lo, hi, pad
+#ifdef IM_SHADE
+		imMatOff = ((device const uint4 *) recs)[lists[df.listBase + iid] * 2 + 1].z;
+#endif
 		uint4 s4 = ((device const uint4 *) sections)[r4.y * 2];                 // Section: x, y, z, uploadMs | recStart, recCount, pad
 		quadStart = r4.x;
 		meta = r4.z;
@@ -1753,6 +1758,9 @@ vertex VOut own_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant Dr
 		origin = int3(s.x, s.y, s.z);
 		uploadMs = s.uploadMs;
 		base = uint(rec.plane);
+#ifdef IM_SHADE
+		imMatOff = rec.pad0;
+#endif
 #ifdef OWN_TPROBE
 		tOff = rec.pad1;
 #endif
@@ -1803,6 +1811,10 @@ vertex VOut own_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant Dr
 		return ov;
 	}
 	VOut ov = ownVertex(vi, origin, uploadMs, df, arenaRaw, proj, g, t, lightmap, lightSampler, rel);
+#ifdef IM_SHADE
+	// (Imagine Metal) the face's material byte: solid / cutout units of sections compiled with materials on
+	if (!TRANSLUCENT && !QUADS && imMatOff != 0xffffffffu) ov.imMat = ((device const uchar *) arenaRaw)[imMatOff + quad];
+#endif
 	if (F_FV) {
 		// (F_FV: the fog value itself per vertex, in the spherical distance's place; with F_FOGVERT_ALL in rich pipelines also the
 		// render-distance term's max, as the fragment stage would take it)
@@ -1889,6 +1901,7 @@ static VOut ownShade(Vtx v, int3 origin, int uploadMs, constant DrawFrame &df, c
 	putColor(o, float4(v.color) / 255.0);
 	o.imPos = pos;
 	o.imLight = saturate(float2(int2(v.uv2)) / 240.0);
+	o.imMat = 0;  // (own_vs fills it in where the unit has material bytes)
 #else
 	float2 luv = clamp(float2(int2(v.uv2)) / 256.0 + 0.5 / 16.0, float2(0.5 / 16.0), float2(15.5 / 16.0));
 	putColor(o, VS_MODE == 1 ? float4(v.color) / 255.0 : float4(v.color) / 255.0 * lightmap.sample(lightSampler, luv, level(0.0)));
@@ -2246,7 +2259,7 @@ fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]],
 		if (F_RICH && !F_FV) fogValue = max(fogValue, linear_fog_value(in.cylindricalVertexDistance, fog.FogRenderDistanceStart, fog.FogRenderDistanceEnd));
 	}
 #ifdef IM_SHADE
-	color.rgb = imShade(color.rgb, in.imPos, in.imLight, in.pos.xy, imf, imShadowMap, imShadowCmp); // (Imagine Metal)
+	color.rgb = imShade(color.rgb, in.imPos, in.imLight, in.imMat, in.pos.xy, imf, imShadowMap, imShadowCmp); // (Imagine Metal)
 #endif
 	return float4(mix(color.rgb, fog.FogColor.rgb, fogValue * fog.FogColor.a), color.a);
 }

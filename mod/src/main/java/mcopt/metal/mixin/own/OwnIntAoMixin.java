@@ -29,7 +29,7 @@ abstract class OwnIntAoMixin {
 
 	@Inject(method = "putQuadWithTint", at = @At("HEAD"))
 	private void mcopt$aoOut(CallbackInfo ci) {
-		this.mcopt$split = OwnMaterials.ON && OwnMaterials.compiling();
+		this.mcopt$split = OwnMaterials.AO_SPLIT && OwnMaterials.compiling();
 		if (!this.mcopt$split) return;
 		for (int v = 0; v < 4; v++) {
 			int c = this.quadInstance.getColor(v);

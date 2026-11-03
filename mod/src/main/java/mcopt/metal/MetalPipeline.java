@@ -44,6 +44,11 @@ final class MetalPipeline implements BackendRenderPipeline {
 	/** Metal bakes the depth attachment format into the pipeline, so like Vulkan there's one for passes with depth and one without. */
 	final long withDepth;
 	final long withoutDepth;
+	/**
+	 * (Imagine Metal) the same pipeline for a 16-bit float colour target where it declares an 8-bit one: the level draws into
+	 * imaginemetal.Hdr's RGBA16_FLOAT image, and Metal bakes the attachment formats into the pipeline. 0 where it declares none.
+	 */
+	long withDepthHdr, withoutDepthHdr;
 	final long depthState;
 	final List<BindGroupLayout.UniformDescription> uniforms;
 	final boolean cull;
@@ -122,6 +127,11 @@ final class MetalPipeline implements BackendRenderPipeline {
 			int compare = depth == null ? 7 : MetalConst.compare(depth.depthTest());
 			long depthState = Native.depthStateNew(ctx, compare, depth != null && depth.writeDepth() ? 1 : 0);
 			MetalPipeline pipeline = new MetalPipeline(encoder, withDepth, withoutDepth, pulled, depthState, compare, info);
+			if (hasLdrTarget(info)) {
+				// (Imagine Metal) its HDR twin, from the same libraries
+				pipeline.withDepthHdr = pipelineNewCounted(ctx, vlib, vname, flib, fname, describe(stack, info, true, true, true), err, 4096);
+				if (depth == null) pipeline.withoutDepthHdr = pipelineNewCounted(ctx, vlib, vname, flib, fname, describe(stack, info, false, true, true), err, 4096);
+			}
 			return pipeline;
 		} finally {
 			if (vlib != 0) Native.release(vlib);
@@ -200,6 +210,25 @@ final class MetalPipeline implements BackendRenderPipeline {
 
 	/** Packs the pipeline layout into the int array mc_pipeline_new reads (see mcmetal.m); no vertex input for shaders that pull their own. */
 	private static long describe(MemoryStack stack, CreateInfo info, boolean hasDepth, boolean vertexInput) {
+		return describe(stack, info, hasDepth, vertexInput, false);
+	}
+
+	/** (Imagine Metal) whether a pipeline draws into an 8-bit colour target (it then gets an HDR twin). */
+	private static boolean hasLdrTarget(CreateInfo info) {
+		for (@Nullable ColorTargetState c : info.colorTargetStates()) if (c != null && c.format() == com.mojang.renderpearl.api.GpuFormat.RGBA8_UNORM) return true;
+		return false;
+	}
+
+	/** The pipeline state for a pass with or without depth, into the HDR image (Imagine Metal) or not. */
+	long state(boolean hasDepth, boolean hdr) {
+		if (hdr) {
+			long h = hasDepth ? this.withDepthHdr : this.withoutDepthHdr;
+			if (h != 0) return h;
+		}
+		return hasDepth ? this.withDepth : this.withoutDepth;
+	}
+
+	private static long describe(MemoryStack stack, CreateInfo info, boolean hasDepth, boolean vertexInput, boolean hdr) {
 		IntBuffer d = stack.mallocInt(5 + info.vertexBuffers().size() * 3 + info.attribBindings().size() * 4 + info.colorTargetStates().size() * 9);
 		List<CreateInfo.VertexBuffer> buffers = vertexInput ? info.vertexBuffers() : List.of();
 		List<CreateInfo.AttribBinding> attributes = vertexInput ? info.attribBindings() : List.of();
@@ -217,7 +246,8 @@ final class MetalPipeline implements BackendRenderPipeline {
 			}
 			// MTLColorWriteMask is ABGR-ordered (red = 8), renderpearl's is RGBA-ordered (red = 1).
 			int mask = (c.writeRed() ? 8 : 0) | (c.writeGreen() ? 4 : 0) | (c.writeBlue() ? 2 : 0) | (c.writeAlpha() ? 1 : 0);
-			d.put(MetalConst.pixelFormat(c.format())).put(mask);
+			var format = hdr && c.format() == com.mojang.renderpearl.api.GpuFormat.RGBA8_UNORM ? com.mojang.renderpearl.api.GpuFormat.RGBA16_FLOAT : c.format();
+			d.put(MetalConst.pixelFormat(format)).put(mask);
 			if (c.blendFunction().isPresent()) {
 				var b = c.blendFunction().get();
 				d.put(1).put(MetalConst.blendFactor(b.color().sourceFactor())).put(MetalConst.blendFactor(b.color().destFactor())).put(MetalConst.blendOp(b.color().op()))

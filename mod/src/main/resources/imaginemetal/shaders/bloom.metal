@@ -7,10 +7,14 @@
 //  2. down: a chain of half-size copies, each a 13-tap filter of the one before (wide, soft, no square artefacts).
 //  3. up: back up the chain, each level adding a 3x3 tent of the smaller one to itself, so the top level holds every size of
 //     glow, from a tight halo to a wide haze.
-//  4. composite: the glow added to the main image in linear light. The main image is read with Apple GPUs' programmable
-//     blending ([[color(0)]]: the pixel's current value straight from tile memory), so nothing is copied.
+//  4. resolve (HDR, the usual path): the world was drawn into a 16-bit float image (imaginemetal.Hdr); the glow is added to it in
+//     linear light and the result mapped into the game's 8-bit main image: anything brighter than white (lava, flames, glowing
+//     blocks: the terrain's emission) is brought back to the screen's range keeping its hue, a little toward white the brighter it
+//     was, as a hot light looks. composite (no HDR image): the glow added to the 8-bit main image in place, read with Apple GPUs'
+//     programmable blending ([[color(0)]]: the pixel's current value straight from tile memory).
 //
-// The main image is display-encoded (gamma 2.2: the terrain's shading writes it that way, vanilla's passes too).
+// Both images are display-encoded (gamma 2.2: the terrain's shading writes them that way, vanilla's passes too); the HDR one
+// goes past 1 where something gives off light.
 #include <metal_stdlib>
 using namespace metal;
 
@@ -101,4 +105,21 @@ fragment float4 im_bloom_composite(ImBloomOut in [[stage_in]], float4 dst [[colo
 	if (p.mix.x < 0.0) return float4(pow(saturate(glow * -p.mix.x * 4.0), 1.0 / 2.2), dst.a);
 	float3 c = imbLinear(dst.rgb) + glow * p.mix.x;
 	return float4(pow(saturate(c), 1.0 / 2.2), dst.a);
+}
+
+fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> src [[texture(0)]], sampler s [[sampler(0)]],
+	texture2d<float> hdr [[texture(1)]], constant ImBloomParams &p [[buffer(0)]]) {
+	float4 h = hdr.read(uint2(in.pos.xy));
+	float3 c = imbLinear(h.rgb);
+	if (p.mix.x != 0.0) {
+		float3 glow = imbTent(src, s, in.uv, p.texel.xy) / p.mix.y;
+		if (p.mix.x < 0.0) return float4(pow(saturate(glow * -p.mix.x * 4.0), 1.0 / 2.2), 1.0);
+		c += glow * p.mix.x;
+	}
+	float m = max(max(c.r, c.g), c.b);
+	if (m > 1.0) {
+		c /= m;
+		c = mix(c, float3(1.0), 0.3 * (1.0 - 1.0 / m));
+	}
+	return float4(pow(saturate(c), 1.0 / 2.2), h.a);
 }

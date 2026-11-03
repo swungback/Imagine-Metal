@@ -3,6 +3,7 @@ package imaginemetal.mixin;
 import com.mojang.blaze3d.resource.GraphicsResourceAllocator;
 import com.mojang.renderpearl.api.buffers.GpuBufferSlice;
 import imaginemetal.Bloom;
+import imaginemetal.Hdr;
 import imaginemetal.ImagineFrame;
 import imaginemetal.Shadows;
 import net.minecraft.client.renderer.LevelRenderer;
@@ -20,6 +21,13 @@ abstract class LevelRendererMixin {
 	private void imaginemetal$frame(GraphicsResourceAllocator resourceAllocator, boolean renderOutline, CameraRenderState cameraState,
 		GpuBufferSlice terrainFog, Vector4f fogColor, boolean shouldRenderSky, boolean consistentDepthRequired, CallbackInfo ci) {
 		ImagineFrame.update(cameraState);
+		Hdr.begin();
+	}
+
+	/** (In case the level's passes threw before the resolve: the main target gets its own colour back.) */
+	@Inject(method = "render", at = @At("RETURN"))
+	private void imaginemetal$hdrEnd(CallbackInfo ci) {
+		Hdr.end();
 	}
 
 	/** The shadow map, after the frame's values and before the level's passes (the frame graph) draw anything. */
@@ -28,7 +36,7 @@ abstract class LevelRendererMixin {
 		Shadows.render();
 	}
 
-	/** Bloom, once the level's passes have drawn the world (the hand and the HUD come after, so they don't glow). */
+	/** Bloom and the HDR resolve, once the level's passes have drawn the world (the hand and the HUD come after, so they don't glow). */
 	@Inject(method = "render", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/framegraph/FrameGraphBuilder;execute(Lcom/mojang/blaze3d/resource/GraphicsResourceAllocator;Lcom/mojang/blaze3d/framegraph/FrameGraphBuilder$Inspector;)V", shift = At.Shift.AFTER))
 	private void imaginemetal$bloom(CallbackInfo ci) {
 		Bloom.render();
