@@ -16,7 +16,7 @@ using namespace metal;
 
 struct ImBloomParams {
 	float4 texel;  // xy 1 / the source's size; z threshold (linear luma), w soft knee
-	float4 mix;    // x strength, y number of levels (the chain's sum is divided by it), z haze (share of all light), w 0
+	float4 mix;    // x strength (negative: debug, the glow alone), y number of levels (the chain's sum is divided by it), z haze, w 0
 };
 
 struct ImBloomOut {
@@ -98,6 +98,7 @@ fragment float4 im_bloom_up(ImBloomOut in [[stage_in]], texture2d<float> src [[t
 fragment float4 im_bloom_composite(ImBloomOut in [[stage_in]], float4 dst [[color(0)]], texture2d<float> src [[texture(0)]],
 	sampler s [[sampler(0)]], constant ImBloomParams &p [[buffer(0)]]) {
 	float3 glow = imbTent(src, s, in.uv, p.texel.xy) / p.mix.y;
+	if (p.mix.x < 0.0) return float4(pow(saturate(glow * -p.mix.x * 4.0), 1.0 / 2.2), dst.a);
 	float3 c = imbLinear(dst.rgb) + glow * p.mix.x;
 	return float4(pow(saturate(c), 1.0 / 2.2), dst.a);
 }

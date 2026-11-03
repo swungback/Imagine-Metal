@@ -15,11 +15,16 @@ public final class Bloom {
 	/** imaginemetal.bloom (true). */
 	public static final boolean ON = Engine.flag("imaginemetal.bloom", true);
 	/** imaginemetal.bloomStrength: how much of the glow is added. */
-	static final float STRENGTH = Config.number("imaginemetal.bloomStrength", 0.18f, 0f, 1f);
-	/** The glow starts around this brightness (linear luma; the main image's white is 1), fading in over the knee. */
-	private static final float THRESHOLD = 0.6f, KNEE = 0.35f;
+	static final float STRENGTH = Config.number("imaginemetal.bloomStrength", 0.5f, 0f, 2f);
+	/**
+	 * The glow starts around this brightness (linear luma; the main image's white is 1), fading in over the knee. Low, because the
+	 * main image is 8-bit: a torch flame or lava is barely brighter than a sunlit wall in it (0.6 left almost nothing glowing).
+	 */
+	private static final float THRESHOLD = 0.3f, KNEE = 0.25f;
 	/** The share of every pixel's light that glows regardless of brightness (the overall soft haze). */
-	private static final float HAZE = 0.05f;
+	private static final float HAZE = 0.06f;
+	/** imaginemetal.debug=3: the glow alone, brightened, instead of the picture (to see what glows). */
+	private static final boolean DEBUG = Integer.getInteger("imaginemetal.debug", 0) == 3;
 
 	private static long state;
 	private static boolean failed;
@@ -48,7 +53,7 @@ public final class Bloom {
 					if (state == 0) throw new IllegalStateException(MemoryUtil.memUTF8(err));
 					System.out.println("[Imagine Metal] bloom on");
 				}
-				if (ImNative.bloomRender(MetalBridge.enc(encoder), state, MetalBridge.textureHandle(color), STRENGTH, THRESHOLD, KNEE, HAZE, err, 1024) != 0)
+				if (ImNative.bloomRender(MetalBridge.enc(encoder), state, MetalBridge.textureHandle(color), DEBUG ? -STRENGTH : STRENGTH, THRESHOLD, KNEE, HAZE, err, 1024) != 0)
 					throw new IllegalStateException(MemoryUtil.memUTF8(err));
 			}
 		} catch (Throwable t) {

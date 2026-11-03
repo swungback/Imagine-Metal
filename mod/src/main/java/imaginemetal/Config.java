@@ -33,8 +33,8 @@ public final class Config {
 		#
 		# Bloom: the soft glow around bright things (the sun, lava, torches, glowing blocks) and a faint haze over everything.
 		imaginemetal.bloom=true
-		# How strong the glow is (0 to 1).
-		imaginemetal.bloomStrength=0.18
+		# How strong the glow is (0 off, 0.5 default, up to 2).
+		imaginemetal.bloomStrength=0.5
 		""";
 
 	private Config() {
