@@ -127,7 +127,7 @@ static float imEmission(uint cls, float3 albedo) {
 	float hi = max(max(albedo.r, albedo.g), albedo.b), lo = min(min(albedo.r, albedo.g), albedo.b);
 	switch (cls) {
 		case IM_MAT_EMITTER: return 2.6 * l * l + 0.25;
-		case IM_MAT_LAVA: return 2.2 + 2.0 * l;
+		case IM_MAT_LAVA: return 0.9 + 1.4 * l;
 		case IM_MAT_FLAME: return 4.0 * smoothstep(0.62, 0.92, hi) * smoothstep(0.15, 0.4, hi - lo);
 		case IM_MAT_ORE: return 1.4 * smoothstep(0.18, 0.42, hi - lo) * smoothstep(0.25, 0.55, hi);
 		case IM_MAT_DIM: return 0.9 * l * l + 0.1;
@@ -144,11 +144,12 @@ static float3 imBlockLightColor(float3 p, float3 n, constant ImFrame &f, texture
 	float3 e = min(uvw, 1.0 - uvw) * f.lightSize.xyz;  // blocks to the grid's nearest side
 	float inside = smoothstep(1.0, 6.0, min(min(e.x, e.y), e.z));
 	if (inside <= 0.0) return warm;
-	float3 c = vol.sample(vs, uvw).rgb;
+	float4 c = vol.sample(vs, uvw);
 	float m = max(max(c.r, c.g), c.b);
-	if (m < 1e-5) return warm;
-	float3 hue = c / m * max(max(warm.r, warm.g), warm.b);
-	return mix(warm, hue, inside);
+	if (m < 1e-4) return warm;
+	float3 hue = c.rgb / m * max(max(warm.r, warm.g), warm.b);
+	// (the grid's strength fades it in: where its light runs out, Minecraft's has too)
+	return mix(warm, hue, inside * smoothstep(0.0, 0.1, c.a));
 }
 
 // One terrain fragment: albedo as sampled and tinted (display-encoded, vanilla's AO and face shade already in it through the

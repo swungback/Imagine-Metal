@@ -31,6 +31,15 @@ public final class Bloom {
 	}
 
 	public static void render() {
+		long t0 = Perf.start();
+		try {
+			renderTimed();
+		} finally {
+			Perf.end(Perf.BLOOM, t0);
+		}
+	}
+
+	private static void renderTimed() {
 		boolean hdr = Hdr.active();
 		GpuTexture src = hdr ? Hdr.texture() : null, dst = hdr ? Hdr.output() : null;
 		Hdr.end();

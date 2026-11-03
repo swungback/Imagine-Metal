@@ -119,6 +119,15 @@ public final class Shadows {
 	/** The casters' depth for this frame, before the level's passes. */
 	public static void render() {
 		if (!prepared || failed) return;
+		long t0 = Perf.start();
+		try {
+			renderTimed();
+		} finally {
+			Perf.end(Perf.SHADOWS, t0);
+		}
+	}
+
+	private static void renderTimed() {
 		try {
 			Object encoder = MetalBridge.encoder(((FrontendCommandEncoder) RenderSystem.getDevice().createCommandEncoder()).backend());
 			if (encoder == null) return;

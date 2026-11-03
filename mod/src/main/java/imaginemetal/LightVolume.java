@@ -14,7 +14,7 @@ import org.lwjgl.system.MemoryUtil;
 
 /**
  * Coloured block light: a grid of SX x SY x SZ voxels (one a block) around the player holding the light sources and the blocks
- * that stop light (seeds), spread on the GPU one block a frame (light.metal, imlight.m). The terrain takes block light's hue from it
+ * that stop light (seeds), spread on the GPU one block a frame the way Minecraft spreads light (light.metal, imlight.m). The terrain takes block light's hue from it
  * (lighting.metal imBlockLightColor); its brightness stays Minecraft's own light level.
  *
  * <p>The seeds come from the section compiles, which visit every block anyway (mcopt's OwnMaterials hooks): per section a bit for
@@ -85,10 +85,9 @@ public final class LightVolume {
 		int light = state.getLightEmission();
 		if (light > 0 && c.count + 2 <= c.sources.length) {
 			float[] col = LightColors.of(state);
-			float f = light / 15.0f * 255.0f;
-			int r = Math.round(col[0] * f), g = Math.round(col[1] * f), b = Math.round(col[2] * f);
+			int r = Math.round(col[0] * 255f), g = Math.round(col[1] * 255f), b = Math.round(col[2] * 255f);
 			c.sources[c.count++] = i;
-			c.sources[c.count++] = r | g << 8 | b << 16;
+			c.sources[c.count++] = r | g << 8 | b << 16 | Math.min(light, 15) << 24;
 		}
 	}
 
@@ -135,6 +134,15 @@ public final class LightVolume {
 	/** Before the level's passes: the seeds brought up to date and one spread step on the GPU. */
 	public static void render() {
 		if (!Settings.coloredLight || !Engine.TERRAIN || failed) return;
+		long t0 = Perf.start();
+		try {
+			renderTimed();
+		} finally {
+			Perf.end(Perf.LIGHT, t0);
+		}
+	}
+
+	private static void renderTimed() {
 		try {
 			Object encoder = MetalBridge.encoder(((FrontendCommandEncoder) RenderSystem.getDevice().createCommandEncoder()).backend());
 			if (encoder == null) return;
@@ -228,7 +236,7 @@ public final class LightVolume {
 				bits &= bits - 1;
 				int i = word << 6 | b;
 				int x = i & 15, z = i >> 4 & 15, y = i >> 8;
-				MemoryUtil.memPutByte(base + ((long) ((z0 + z) * h + y0 + y) * w + x0 + x) * 4 + 3, (byte) 255);
+				MemoryUtil.memPutByte(base + ((long) ((z0 + z) * h + y0 + y) * w + x0 + x) * 4 + 3, (byte) 128);
 			}
 		}
 		int[] src = s.sources();
@@ -239,6 +247,8 @@ public final class LightVolume {
 			MemoryUtil.memPutByte(a, (byte) (rgb & 255));
 			MemoryUtil.memPutByte(a + 1, (byte) (rgb >> 8 & 255));
 			MemoryUtil.memPutByte(a + 2, (byte) (rgb >> 16 & 255));
+			// alpha: bit 7 stops light (kept from the opacity pass), bits 0-3 the light level
+			MemoryUtil.memPutByte(a + 3, (byte) (MemoryUtil.memGetByte(a + 3) & 128 | rgb >>> 24 & 15));
 		}
 	}
 }

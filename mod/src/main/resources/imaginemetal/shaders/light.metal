@@ -1,10 +1,11 @@
 // Imagine Metal: the coloured light grid (imlight.m, imaginemetal.LightVolume).
 //
-// A box of voxels around the player, one per block. seeds: per voxel the light a block gives off (rgb: its colour times its
-// light level / 15) and whether it stops light (a: 1 for a solid block). Every frame each open voxel takes its own light plus a
-// share of its six neighbours' light from the frame before, so light spreads one block a frame, bends around corners, stops at
-// walls, and mixes where two colours meet (weighted by how near each is). The terrain reads only the hue from it; how bright block
-// light is comes from Minecraft's own light levels, so the coloured light reaches exactly as far as normal light does.
+// A box of voxels around the player, one per block. seeds (RGBA8): per voxel the colour of the light the block gives off (rgb,
+// brightest channel 1) and in a: bit 7 set if the block stops light, bits 0-3 its light level. Light spreads as Minecraft's own
+// does: one block a frame, one level weaker per block, stopped by solid blocks, so it reaches exactly as far as normal block light
+// and bends around corners the same way. Where lights meet, their colours mix by how strong each one is there (squared, so the
+// nearer, stronger light leads). Stored: rgb the mixed colour, a the strength (level / 15). The terrain takes the hue from it;
+// how bright block light is stays Minecraft's own light level.
 //
 // shift: when the box moves (the player crossed into another section), how far, in voxels: the previous frame is read shifted by
 // it, so what has already spread stays in place in the world instead of starting over.
@@ -17,20 +18,28 @@ kernel void im_light_step(texture3d<float, access::read> seeds [[texture(0)]], t
 	int3 v = int3(id);
 	if (any(v >= size)) return;
 	float4 s = seeds.read(id);
+	uint bits = uint(s.a * 255.0 + 0.5);
+	float level = float(bits & 15u) / 15.0;
 	// a solid block stops light, unless it gives off light itself (glowstone, sea lanterns, froglights...)
-	if (s.a > 0.5 && all(s.rgb == 0.0)) {
+	if ((bits & 128u) != 0u && level == 0.0) {
 		next.write(half4(0.0h), id);
 		return;
 	}
+	float strength = level;
+	float3 colour = s.rgb * (level * level);
+	float weight = level * level;
 	int3 c = v + shift.xyz;
-	float3 sum = float3(0.0);
 	const int3 dirs[6] = {int3(1, 0, 0), int3(-1, 0, 0), int3(0, 1, 0), int3(0, -1, 0), int3(0, 0, 1), int3(0, 0, -1)};
 	for (int i = 0; i < 6; i++) {
 		int3 q = c + dirs[i];
-		if (all(q >= 0) && all(q < size)) sum += float3(prev.read(uint3(q)).rgb);
+		if (any(q < 0) || any(q >= size)) continue;
+		float4 n = float4(prev.read(uint3(q)));
+		float a = n.a - 1.0 / 15.0;
+		if (a <= 0.0) continue;
+		strength = max(strength, a);
+		colour += n.rgb * (a * a);
+		weight += a * a;
 	}
-	// 0.99: light keeps most of its strength from block to block (a reach of tens of blocks before the half floats run out), so
-	// the hue is known everywhere Minecraft's light reaches; the brightness itself is not used
-	float3 l = s.rgb * 4.0 + sum * (0.99 / 6.0);
-	next.write(half4(half3(min(l, float3(60000.0))), 1.0h), id);
+	float3 hue = weight > 0.0 ? colour / weight : float3(0.0);
+	next.write(half4(half3(hue), half(strength)), id);
 }

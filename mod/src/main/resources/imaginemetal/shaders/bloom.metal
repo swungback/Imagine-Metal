@@ -9,8 +9,7 @@
 //     glow, from a tight halo to a wide haze.
 //  4. resolve (HDR, the usual path): the world was drawn into a 16-bit float image (imaginemetal.Hdr); the glow is added to it in
 //     linear light and the result mapped into the game's 8-bit main image: anything brighter than white (lava, flames, glowing
-//     blocks: the terrain's emission) is brought back to the screen's range keeping its hue, a little toward white the brighter it
-//     was, as a hot light looks. composite (no HDR image): the glow added to the 8-bit main image in place, read with Apple GPUs'
+//     blocks: the terrain's emission) is brought back to the screen's range keeping its hue. composite (no HDR image): the glow added to the 8-bit main image in place, read with Apple GPUs'
 //     programmable blending ([[color(0)]]: the pixel's current value straight from tile memory).
 //
 // Both images are display-encoded (gamma 2.2: the terrain's shading writes them that way, vanilla's passes too); the HDR one
@@ -116,10 +115,8 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 		if (p.mix.x < 0.0) return float4(pow(saturate(glow * -p.mix.x * 4.0), 1.0 / 2.2), 1.0);
 		c += glow * p.mix.x;
 	}
+	// past white: scaled back keeping the hue (mixing toward white turned lava pink once gamma-encoded)
 	float m = max(max(c.r, c.g), c.b);
-	if (m > 1.0) {
-		c /= m;
-		c = mix(c, float3(1.0), 0.3 * (1.0 - 1.0 / m));
-	}
+	if (m > 1.0) c /= m;
 	return float4(pow(saturate(c), 1.0 / 2.2), h.a);
 }

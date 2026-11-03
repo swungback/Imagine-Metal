@@ -57,8 +57,11 @@ public final class ImagineFrame {
 	public static void update(CameraRenderState camera) {
 		if (failed || !Engine.TERRAIN) return;
 		try {
+			long t0 = Perf.start();
+			Perf.frame();
 			fill(camera);
 			ImNative.frame(ADDRESS, SIZE);
+			Perf.end(Perf.FRAME, t0);
 		} catch (Throwable t) {
 			failed = true;
 			System.out.println("[Imagine Metal] frame values off: " + t);
