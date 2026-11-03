@@ -23,8 +23,8 @@ public final class Shadows {
 	/** imaginemetal.shadows (true). */
 	public static final boolean ON = Engine.TERRAIN && Engine.flag("imaginemetal.shadows", true);
 	/** Map size (texels) and the half-width it covers (blocks). */
-	static final int RES = Math.clamp(Integer.getInteger("imaginemetal.shadowRes", 2048), 512, 8192);
-	static final float RANGE = 160f;
+	static final int RES = (int) Config.number("imaginemetal.shadowRes", 2048, 512, 8192);
+	static final float RANGE = Config.number("imaginemetal.shadowRange", 160, 64, 256);
 	/** Warp strength: the share of the map's resolution pulled toward the centre (0 none). */
 	static final float WARP = 0.85f;
 	/** Depth range along the light (blocks before and behind the camera). */

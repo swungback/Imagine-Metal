@@ -6,6 +6,10 @@ import java.nio.charset.StandardCharsets;
 
 /** Imagine Metal's switches and the shader sources it adds to the backend's libraries. */
 public final class Engine {
+	static {
+		Config.load(); // (before the switches below read their keys)
+	}
+
 	/** imaginemetal.terrain (true): the terrain is lit by our lighting model (lighting.metal) instead of vanilla's lightmap. */
 	public static final boolean TERRAIN = flag("imaginemetal.terrain", true);
 
