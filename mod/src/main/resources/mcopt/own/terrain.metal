@@ -2261,6 +2261,7 @@ fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]],
 #ifdef IM_SHADE
 	, constant ImFrame &imf [[buffer(30)]], depth2d_array<float> imShadowMap [[texture(20)]], sampler imShadowCmp [[sampler(13)]]
 	, texture3d<float> imLightVol [[texture(21)]], sampler imLightSampler [[sampler(12)]]
+	, texture2d<float> imHistColor [[texture(22)]], depth2d<float> imHistDepth [[texture(23)]], sampler imHistSampler [[sampler(11)]]
 #endif
 	) {
 #ifdef OWN_TPROBE
@@ -2296,7 +2297,7 @@ fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]],
 	}
 #ifdef IM_SHADE
 	color.rgb = imShade(color.rgb, texel.rgb, in.imPos, in.imLight, in.imMat, in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler,
-		in.texCoord0, in.imRect, atlas); // (Imagine Metal)
+		in.texCoord0, in.imRect, atlas, imHistColor, imHistDepth, imHistSampler); // (Imagine Metal)
 	float3 imFogColor = fog.FogColor.rgb;
 	float imFog = fogValue * fog.FogColor.a;
 	if (imf.sunGlow.w > 0.5) {

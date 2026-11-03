@@ -2069,6 +2069,7 @@ public final class OwnTerrain {
 		else proj.set(camera.projectionMatrix);
 		Matrix4fc view = camera.viewRotationMatrix;
 		Matrix4f clip = new Matrix4f(proj).mul(view);
+		imaginemetal.Reflections.noteClip(clip, camera.pos.x, camera.pos.y, camera.pos.z);
 		GpuBufferSlice terrain = RenderSystem.getDynamicUniforms().writeTerrainTransform(new Matrix4f(view), atlas.getWidth(0), atlas.getHeight(0));
 		try (MemoryStack stack = MemoryStack.stackPush()) {
 			long f = stack.ncalloc(16, 1, CULL_FRAME_BYTES);

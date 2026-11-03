@@ -37,6 +37,9 @@ struct ImFrame {
 	float4 skySunset;    // the sunset band's colour (linear), w the distance haze's density (per block)
 	float4 sunDir;       // xyz unit direction toward the sun (by night too), w how much its glow shows 0..1
 	float4 sunGlow;      // the glow around the sun (linear), w 1 = this frame's fog is ours (overworld, eyes in air)
+	float4x4 histClip;   // the reflections' history (the last frame's picture and depth): camera-relative world (then) -> clip
+	float4x4 histClipInv;
+	float4 histShift;    // xyz the camera's move since (now - then: a camera-relative position now + this = then), w 1 = valid
 };
 
 // The sky's colour in direction d (world space, unit; linear light, HDR around the sun): a gradient from the zenith to a bright
@@ -148,7 +151,12 @@ static float2 imShadow(float3 p, float3 n, float2 pixel, constant ImFrame &f, de
 #define IM_MAT_SCULK 7     // sculk: its specks glow like stars
 #define IM_MAT_METAL 8     // metal blocks (iron, gold, copper, netherite; chains, anvils, bells...): coloured reflections
 #define IM_MAT_POLISHED 9  // polished and glazed stone, quartz, prismarine, concrete...: a smooth stone sheen
-#define IM_MAT_GLOSSY 10   // ice, obsidian, amethyst, gem blocks: a near-mirror finish
+#define IM_MAT_GEM 10      // obsidian, amethyst, gem blocks, packed ice: smooth, strongly reflective
+#define IM_MAT_STONE 11    // stone, cobblestone, deepslate, andesite, granite, diorite, tuff, bricks...: its specks glint
+#define IM_MAT_SAND 12     // sand, red sand, sandstone, gravel: the brightest grains glint
+#define IM_MAT_WOOD 13     // planks, logs, wood
+#define IM_MAT_FOLIAGE 14  // leaves, grass (the block and the plants), vines, ferns
+#define IM_MAT_DIRT 15     // dirt, coarse dirt, podzol, mud, farmland, paths
 
 // How much light a fragment of class cls gives off, as a multiple of its texture's colour (tex: the texel as sampled, before the
 // vertex colour's tint and Minecraft's corner shading, so every face of a block glows alike). The result goes on top of the
@@ -218,60 +226,189 @@ static float4 imBlockLight(float3 p, float3 n, constant ImFrame &f, texture3d<fl
 // One terrain fragment: albedo as sampled and tinted (display-encoded, vanilla's AO and face shade already in it through the
 // vertex colour), camera-relative position, light levels (x block, y sky; 0..1). Returns the display-encoded colour.
 // ---- PBR ----
+// Built from what Complementary Reimagined and Photon do (their integrated PBR, no resource pack): every block family's
+// smoothness comes from its own texture (bright parts shinier: stone's specks, sand's brightest grains, polished wood), the sun
+// leaves a GGX highlight on them, and reflections are traced through the screen with a steep fresnel falloff, so rough blocks
+// reflect only at grazing angles while metal, gems and polished stone reflect clearly.
 
-// The surface's height at texel t of its texture (wrapped inside the sprite's rectangle lo..hi, in texels): its brightness, so
-// the mortar between bricks and the cracks in stone sit lower than the faces around them. Clear texels count as low.
-static inline float imHeight(texture2d<float> atlas, float2 t, float2 lo, float2 size, float centre) {
-	float2 w = lo + fmod(fmod(t - lo, size) + size, size);
-	float4 c = atlas.read(uint2(w), 0);
-	return c.a < 0.5 ? centre : imLuma(c.rgb);
+// Generated normals, as Reimagined does them: each texel compared with its neighbours an eighth of a texel away, so only the
+// edges between texels that differ clearly in brightness bevel (a pixel-art relief), and never across the sprite's edge. Small
+// differences are ignored, big ones capped. As the texels shrink on screen the bevels widen to a pixel and fade.
+static inline float imGnDif(texture2d<float> atlas, float2 t, float lc) {
+	float4 c = atlas.read(uint2(t), 0);
+	if (c.a < 0.1) return 0.0;
+	float d = lc - length(c.rgb);
+	d = d > 0.0 ? max(d - 0.05, 0.0) : min(d + 0.05, 0.0);
+	return clamp(d, -0.2, 0.2);
 }
 
-// Generated normals (no resource pack needed): the texture's brightness read as a height map, its slope tilting the face's normal,
-// so every brick, plank and pebble catches the light on its own. Tangent space: x along the texture's u, y along its v, z out of
-// the face. Fades out with distance (where a texel is smaller than a pixel it would only shimmer).
-static float3 imGenNormal(texture2d<float> atlas, float2 uv, float4 rect, float strength, float2 texelsPerPixel) {
+static float3 imGenNormal(texture2d<float> atlas, float2 uv, float4 rect, float strength, float2 texelsPerPixel, float3 col /* the texel, untinted */) {
 	float2 asz = float2(atlas.get_width(), atlas.get_height());
-	float2 lo = floor(rect.xy * asz + 0.5), hi = floor(rect.zw * asz + 0.5);
-	float2 size = hi - lo;
-	if (strength <= 0.0 || any(size < 2.0) || any(size > 512.0)) return float3(0, 0, 1);
-	float fade = 1.0 - smoothstep(0.6, 1.5, max(texelsPerPixel.x, texelsPerPixel.y));
-	if (fade <= 0.0) return float3(0, 0, 1);
-	float2 t = floor(uv * asz) + 0.5;
-	float4 c0 = atlas.read(uint2(t), 0);
-	if (c0.a < 0.5) return float3(0, 0, 1);
-	float h0 = imLuma(c0.rgb);
-	float hx = imHeight(atlas, t + float2(1, 0), lo, size, h0) - imHeight(atlas, t - float2(1, 0), lo, size, h0);
-	float hy = imHeight(atlas, t + float2(0, 1), lo, size, h0) - imHeight(atlas, t - float2(0, 1), lo, size, h0);
-	float2 g = float2(-hx, -hy) * (strength * fade);
-	float gl = length(g);
-	if (gl > 0.6) g *= 0.6 / gl;  // (at most ~30 degrees: a bump, never a face turned away)
-	return normalize(float3(g, 1.0));
+	float2 lo = rect.xy * asz, hi = rect.zw * asz;
+	if (strength <= 0.0 || any(hi - lo < 2.0)) return float3(0, 0, 1);
+	float2 t = uv * asz;
+	float2 off0 = float2(0.125);
+	float2 off = max(off0, texelsPerPixel);
+	float2 fade = off0 / off;
+	if (max(fade.x, fade.y) < 0.02) return float3(0, 0, 1);
+	float lc = length(col);
+	float2 nm = float2(0.0);
+	if (t.y + off.y < hi.y) nm.y += imGnDif(atlas, t + float2(0, off.y), lc);
+	if (t.x + off.x < hi.x) nm.x += imGnDif(atlas, t + float2(off.x, 0), lc);
+	if (t.y - off.y > lo.y) nm.y -= imGnDif(atlas, t - float2(0, off.y), lc);
+	if (t.x - off.x > lo.x) nm.x -= imGnDif(atlas, t - float2(off.x, 0), lc);
+	nm = clamp(nm * (2.5 * strength) * fade, -1.0, 1.0);
+	return normalize(float3(nm, 1.0));
 }
 
-// How each class reflects: x smoothness (0 rough .. 1 mirror), y metalness (0 or 1); tex the texture's own colour. Smoothness
-// follows the texture a little (bright parts of a block shinier than its dark seams), so it isn't one flat sheen.
-static float2 imSurface(uint cls, float3 tex) {
-	float l = imLuma(tex);
-	float hi = max(max(tex.r, tex.g), tex.b), lo = min(min(tex.r, tex.g), tex.b);
+// A surface's specular properties. g: smoothness for the sun's highlight; d: smoothness for reflections; metal 0/1; f0 the
+// reflectance head-on (dielectrics); hl how strong the highlight is.
+struct ImSurf {
+	float g, d, metal, f0, hl;
+};
+
+static inline float imLinStep(float a, float b, float x) {
+	return saturate((x - a) / (b - a));
+}
+
+// col: the surface's colour as drawn (texture times tint, gamma space); tex: the texture alone.
+static ImSurf imSurface(uint cls, float3 col, float3 tex) {
+	ImSurf s = {0.0, 0.0, 0.0, 0.04, 1.0};
+	float hi = max(max(col.r, col.g), col.b), lo = min(min(col.r, col.g), col.b);
+	float L = 0.5 * (hi + lo);  // (HSL lightness, as Photon)
+	float g2 = col.g * col.g, g4 = g2 * g2;
 	switch (cls) {
-		case IM_MAT_METAL: return float2(0.50 + 0.35 * l, 1.0);
-		case IM_MAT_POLISHED: return float2(0.55 + 0.2 * l, 0.0);
-		case IM_MAT_GLOSSY: return float2(0.82 + 0.1 * l, 0.0);
-		case IM_MAT_ORE: return float2(mix(0.2, 0.85, smoothstep(0.08, 0.2, hi - lo)), 0.0);  // the gems in it glint
-		case IM_MAT_LAVA: case IM_MAT_EMITTER: case IM_MAT_FLAME: return float2(0.0, 0.0);
-		default: return float2(0.0, 0.0);  // everything else: matte (no reflection at all)
+		case IM_MAT_STONE:  // Reimagined: the light specks shine, the rest stays matte
+			s.g = min(g4 * 2.0, 1.0);
+			s.d = s.g;
+			break;
+		case IM_MAT_ORE: {
+			float th = max(max(tex.r, tex.g), tex.b) - min(min(tex.r, tex.g), tex.b);
+			if (th > 0.12) {  // the ore's own pixels: gem-like
+				s.g = 0.8;
+				s.d = 0.7;
+				s.f0 = 0.2;
+				s.hl = 2.5;
+			} else {
+				s.g = min(g4 * 2.0, 1.0);
+				s.d = s.g;
+			}
+			break;
+		}
+		case IM_MAT_SAND:  // Photon: only the brightest grains glint
+			s.g = 0.8 * imLinStep(0.72, 0.95, L);
+			s.d = s.g * 0.5;
+			s.hl = 2.0;
+			break;
+		case IM_MAT_WOOD:  // Photon's planks
+			s.g = 0.5 * imLinStep(0.3, 0.8, L);
+			s.d = s.g * 0.5;
+			break;
+		case IM_MAT_FOLIAGE:
+			if (col.g > max(col.r, col.b) * 1.05) {  // Reimagined's leaves and grass: the green parts, with a strong sheen
+				float k = min(pow(max(col.g - 0.15 * (col.r + col.b), 0.0), 2.0) * 2.5, 1.0);
+				s.g = k * 0.4;
+				s.hl = k * 4.0 + 2.0;
+			} else {
+				s.g = col.r * 0.1 + 0.1;  // (the dirt under a grass block's top)
+			}
+			break;
+		case IM_MAT_DIRT:
+			s.g = col.r * 0.1 + 0.1;
+			break;
+		case IM_MAT_POLISHED:
+			s.g = 0.2 + 0.5 * imLinStep(0.1, 0.85, L);
+			s.d = s.g;
+			s.hl = 1.5;
+			break;
+		case IM_MAT_GEM:  // Photon's gems and obsidian: smooth, a strong reflectance
+			s.g = 0.55 + 0.4 * sqrt(imLinStep(0.05, 0.85, L));
+			s.d = s.g;
+			s.f0 = 0.2;
+			s.hl = 2.0;
+			break;
+		case IM_MAT_METAL:  // Photon's metals: smooth where bright; the colour is in the reflection
+			s.g = max(sqrt(imLinStep(0.1, 0.9, L)), 0.3);
+			s.d = s.g;
+			s.metal = 1.0;
+			s.hl = 2.5;
+			break;
+		case IM_MAT_EMITTER: case IM_MAT_LAVA: case IM_MAT_FLAME: case IM_MAT_DIM: case IM_MAT_SCULK:
+			break;
+		default:  // everything else (Photon's default, softer): a faint highlight on the light parts, no reflection
+			s.g = 0.2 * smoothstep(0.2, 0.6, L);
+			s.hl = 0.6;
+			break;
 	}
+	return s;
 }
 
-static inline float3 imFresnel(float3 f0, float c, float rough) {
-	float x = 1.0 - saturate(c);
-	float x2 = x * x;
-	return f0 + (max(float3(1.0 - rough), f0) - f0) * (x2 * x2 * x);
+// The sun's highlight (Reimagined's GGX): N the shading normal, V toward the eye, L toward the light.
+static float imHighlight(float3 N, float3 V, float3 L, float nl, float smooth) {
+	float sm = sqrt(saturate(smooth * 0.9 + 0.1));
+	float rp = 1.35 - sm;
+	float r = rp * rp;
+	r *= r;
+	float3 H = normalize(L + V);
+	float lh = saturate(dot(H, L));
+	float nh = saturate(dot(N, H));
+	float nh2 = nh * nh;
+	float den = nh2 * r - nh2 + 1.0;
+	float D = r / (3.14159265 * den * den);
+	const float f0 = 0.05;
+	float F = exp2((-5.55473 * lh - 6.98316) * lh) * (1.0 - f0) + f0;
+	return min(nl * D * F / max(lh * lh, 1e-3), 32.0);
+}
+
+// Screen-space reflection through the last frame's picture and depth (Reflections): march from p (camera-relative, now) along
+// R, in the last frame's screen, until the ray passes just behind what was drawn there; then a few halving steps to the surface.
+// rgba: the colour there (linear; blurred by lod) and how much to trust it (0 = nothing found).
+static float4 imReflect(float3 p, float3 n, float3 R, float lod, float dither, constant ImFrame &f, texture2d<float> hc, depth2d<float> hd,
+	sampler hs) {
+	float dist = length(p);
+	float3 q = p + f.histShift.xyz + n * (0.03 + dist * 0.004);
+	float2 size = float2(hd.get_width(), hd.get_height());
+	float stepLen = 0.2 + dist * 0.03;
+	float t = stepLen * (0.25 + 0.75 * dither), tPrev = 0.0;
+	for (int i = 0; i < 26; i++) {
+		float3 r = q + R * t;
+		float4 c = f.histClip * float4(r, 1.0);
+		if (c.w <= 0.05) break;
+		float2 ndc = c.xy / c.w;
+		if (any(abs(ndc) > 1.0)) break;
+		float d = hd.read(uint2(clamp(ndc * 0.5 + 0.5, 0.0, 0.9999) * size));
+		float4 sp = f.histClipInv * float4(ndc, d, 1.0);
+		float diff = length(r) - length(sp.xyz / sp.w);
+		if (diff > 0.0) {
+			if (diff > stepLen * 3.0 + 0.3) return float4(0.0);  // (behind something: what's reflected there isn't on screen)
+			float a = tPrev, b = t;
+			float2 uv = float2(0.0);
+			for (int j = 0; j < 5; j++) {
+				float m = 0.5 * (a + b);
+				float3 rm = q + R * m;
+				float4 cm = f.histClip * float4(rm, 1.0);
+				float2 nm = cm.xy / cm.w;
+				float dm = hd.read(uint2(clamp(nm * 0.5 + 0.5, 0.0, 0.9999) * size));
+				float4 spm = f.histClipInv * float4(nm, dm, 1.0);
+				if (length(rm) > length(spm.xyz / spm.w)) b = m; else a = m;
+			}
+			float4 cb = f.histClip * float4(q + R * b, 1.0);
+			float2 nb = cb.xy / cb.w;
+			uv = nb * 0.5 + 0.5;
+			float2 e = abs(nb);
+			float edge = saturate(1.0 - pow(max(e.x, e.y), 24.0));
+			float3 col = hc.sample(hs, uv, level(lod)).rgb;
+			return float4(pow(max(col, 0.0), 2.2), edge);
+		}
+		tPrev = t;
+		t += stepLen;
+		stepLen *= 1.3;
+	}
+	return float4(0.0);
 }
 
 static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint mat, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp,
-	texture3d<float> lvol, sampler lsamp, float2 uv, float4 rect, texture2d<float> atlas) {
+	texture3d<float> lvol, sampler lsamp, float2 uv, float4 rect, texture2d<float> atlas, texture2d<float> hc, depth2d<float> hd, sampler hs) {
 	if (f.flags.z == 0) return albedo * (0.2 + 0.8 * max(light.x, light.y)); // the engine hasn't filled a frame yet
 	bool slanted;
 	float3 n = imFaceNormal(p, slanted);
@@ -283,7 +420,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	uint cls = mat & 15u;
 	float3 N = n;
 	if (f.lightSize.w > 0.0 && cls != IM_MAT_LAVA && !slanted) {
-		float3 tn = imGenNormal(atlas, uv, rect, f.lightSize.w, tpp);
+		float3 tn = imGenNormal(atlas, uv, rect, f.lightSize.w, tpp, tex);
 		if (tn.z < 0.9999) {
 			float3 dp2perp = cross(dp2, n), dp1perp = cross(n, dp1);
 			float3 T = dp2perp * duv1.x + dp1perp * duv2.x;
@@ -293,10 +430,8 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		}
 	}
 	float3 base = pow(max(albedo, 0.0), 2.2);
-	float2 surf = f.shadow.w > 0.5 ? imSurface(cls, tex) : float2(0.0);
-	float metal = surf.y;
-	float rough = max((1.0 - surf.x) * (1.0 - surf.x), 0.03);
-	float3 f0 = mix(float3(0.04), base, metal);
+	bool pbr = f.shadow.w > 0.5 && f.flags.y == 0;
+	ImSurf surf = pbr ? imSurface(cls, albedo, tex) : ImSurf{0.0, 0.0, 0.0, 0.04, 0.0};
 	float3 V = -normalize(p);
 	float block = light.x, sky = light.y;
 	float skyF = imSkyCurve(sky);
@@ -326,32 +461,17 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	float3 lit = sqrt(day * day + torch * torch + f.minLight.rgb * f.minLight.rgb);
 	float3 radiance = base * lit * face * f.minLight.w;
 
-	// reflections and highlights (PBR): the sun's highlight (GGX), the sky reflected (its colour in the mirror direction on smooth
-	// surfaces, the sky's light on rough ones; none where the sky can't be seen), a faint sheen of the torches' light
-	if (f.shadow.w > 0.5 && f.flags.y == 0 && surf.x > 0.0) {
-		float nv = max(dot(N, V), 1e-3);
-		float3 F = imFresnel(f0, nv, rough);
-		radiance *= 1.0 - metal * 0.92;   // (a metal's colour is in its reflections; what's left is its tarnish)
-		radiance *= 1.0 - (1.0 - metal) * imLuma(F) * surf.x * surf.x;
-		float3 H = normalize(V + f.lightDir.xyz);
-		float nlh = saturate(dot(N, f.lightDir.xyz)), nh = saturate(dot(N, H)), vh = saturate(dot(V, H));
-		float a2 = rough * rough;
-		float d = nh * nh * (a2 - 1.0) + 1.0;
-		float D = a2 / (3.14159 * d * d);
-		float k = rough * 0.5;
-		float vis = 0.25 / ((nlh * (1.0 - k) + k) * (nv * (1.0 - k) + k));
-		float3 Fs = f0 + (1.0 - f0) * pow(1.0 - vh, 5.0);
-		float3 highlight = min(D * vis * nlh, 24.0) * Fs * f.lightColor.rgb * sun * step(0.0, dot(n, f.lightDir.xyz));
-		float3 R = reflect(-V, N);
-		float3 blurry = mix(f.ambientDown.rgb, f.ambientUp.rgb, R.y * 0.5 + 0.5);
-		float3 sharp = f.flags.x == 0 ? imSkyColor(R, f) * (R.y < 0.0 ? 0.45 : 1.0) : blurry;
-		float3 env = mix(blurry, sharp, smoothstep(0.35, 0.85, surf.x)) * skyF;
-		env += torch * (0.25 * surf.x);
-		// (rough surfaces scatter the reflection: little of it comes back as a sheen; and the geometric face decides how much
-		// there is, so a bumped texel can't light up on its own)
-		float spread = surf.x * surf.x;
-		float3 Fg = imFresnel(f0, max(dot(n, V), 1e-3), rough);
-		radiance += (highlight + env * min(F, Fg) * spread) * f.minLight.w;
+	// the sun's highlight (on top of the light, before the tone curve: a bright one blooms); a metal's in its own colour
+	if (pbr && surf.g > 0.0) {
+		float nlh = saturate(dot(N, f.lightDir.xyz)) * step(0.0, dot(n, f.lightDir.xyz));
+		float hlt = imHighlight(N, V, f.lightDir.xyz, nlh, surf.g) * surf.hl;
+		if (cls == IM_MAT_FOLIAGE) {
+			float fr = 1.0 - saturate(dot(N, V));
+			fr *= fr;
+			hlt *= 1.0 - fr * fr;
+		}
+		float3 tint = mix(float3(1.0), base / max(max(max(base.r, base.g), base.b), 0.02), surf.metal);
+		radiance += f.lightColor.rgb * (hlt * sun) * tint * f.minLight.w;
 	}
 
 	if (f.flags.y == 1) return float3(light, 0.0);          // debug: light levels
@@ -371,6 +491,31 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	float l = imLuma(c);
 	float sat = max(max(c.r, c.g), c.b) - min(min(c.r, c.g), c.b);
 	c = mix(float3(l), c, f.grade.x + f.grade.y * (1.0 - sat));
+
+	// reflections (Reimagined's blend): how much by the angle, with a steep falloff for rough surfaces (they only reflect at
+	// grazing angles), metals and gems at every angle; traced through the last frame's picture where it shows what's reflected,
+	// the sky where nothing is in the way (as much as the sky can be seen from here: in a cave only what the screen shows)
+	if (pbr && surf.d > 0.0) {
+		float fresnel = 1.0 - saturate(dot(N, V));
+		float ff = (1.0 - surf.d) * 0.7;
+		float fm = max(fresnel - ff, 0.0) / (1.0 - ff);
+		float intense = max(surf.metal, smoothstep(0.04, 0.2, surf.f0) * 0.6);
+		fm = mix(fm * fm, fm * 0.75 + 0.25, intense);
+		fm *= sqrt(surf.d);
+		if (fm > 0.01) {
+			float3 R = reflect(-V, N);
+			if (dot(R, n) < 0.02) R = normalize(R - n * (dot(R, n) - 0.02));  // (a bumped normal can't reflect into the face)
+			float lod = (1.0 - surf.d) * 5.0;
+			float dither = fract(dot(pixel, float2(0.06711056, 0.00583715)) * 52.9829189 + float(f.flags.w & 63) * 0.618034);
+			float4 hit = f.histShift.w > 0.5 ? imReflect(p, n, R, lod, dither, f, hc, hd, hs) : float4(0.0);
+			float3 skyR = (f.flags.x == 0 ? imSkyColor(R, f) * (R.y < 0.0 ? 0.4 : 1.0) : f.ambientUp.rgb * 2.0) * skyF;
+			float3 refl = mix(skyR, hit.rgb, hit.a);
+			// (texture kept: Reimagined keeps 70 % of the surface under its reflection)
+			refl = mix(refl, max(c, refl), 0.7);
+			refl *= mix(float3(1.0), base / max(max(max(base.r, base.g), base.b), 0.02), surf.metal);
+			c = mix(c, refl, saturate(fm));
+		}
+	}
 	// light given off: on top of the tone-mapped light, unclamped (the picture is HDR: Bloom's resolve maps it to the screen)
 	c = max(c, 0.0) + pow(max(tex, 0.0), 2.2) * emit;  // (the texture's colour: light given off isn't darkened by corner shading)
 	return pow(c, 1.0 / 2.2);

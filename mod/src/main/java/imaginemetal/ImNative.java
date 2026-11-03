@@ -31,6 +31,10 @@ final class ImNative {
 	private static final MethodHandle SKY_DRAW = fn("im_sky_draw", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT,
 		JAVA_LONG, JAVA_LONG, JAVA_INT), false);
 
+	private static final MethodHandle SSR_NEW = fn("im_ssr_new", FunctionDescriptor.of(JAVA_LONG, JAVA_LONG), false);
+	private static final MethodHandle SSR_CAPTURE = fn("im_ssr_capture", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG,
+		JAVA_LONG, JAVA_INT), false);
+
 	private static MethodHandle fn(String name, FunctionDescriptor d, boolean critical) {
 		var symbol = MetalBridge.library().find(name).orElseThrow(() -> new IllegalStateException("missing native symbol " + name));
 		return critical ? Linker.nativeLinker().downcallHandle(symbol, d, Linker.Option.critical(false)) : Linker.nativeLinker().downcallHandle(symbol, d);
@@ -99,6 +103,22 @@ final class ImNative {
 	static void lightStep(long enc, long state, int dx, int dy, int dz, boolean reset) {
 		try {
 			LIGHT_STEP.invokeExact(enc, state, dx, dy, dz, reset ? 1 : 0);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
+	static long ssrNew(long ctx) {
+		try {
+			return (long) SSR_NEW.invokeExact(ctx);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
+	static int ssrCapture(long enc, long state, long color, long depth, long err, int errCap) {
+		try {
+			return (int) SSR_CAPTURE.invokeExact(enc, state, color, depth, err, errCap);
 		} catch (Throwable t) {
 			throw new IllegalStateException(t);
 		}

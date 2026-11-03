@@ -8,7 +8,7 @@
 // (Imagine Metal) the shader engine's per-frame values (imaginemetal.ImagineFrame, terrain.metal / lighting.metal ImFrame,
 // 240 bytes), bound at fragment buffer 30 on every terrain draw. All zero until the engine's first frame: imShade then falls
 // back to a plain light-level look (ImFrame.flags.z == 0).
-static uint8_t imFrame[416];
+static uint8_t imFrame[560];
 // (Imagine Metal) the shadow map and its compare sampler (imshadow.m), bound at fragment texture 20 / sampler 13 once it exists;
 // own_fs only samples it when ImFrame.shadow.y says this frame's map is valid
 static id<MTLTexture> imLightTex;
@@ -22,6 +22,13 @@ static id<MTLSamplerState> imShadowCmp;
 void mc_im_shadow_bind(id<MTLTexture> map, id<MTLSamplerState> cmp) {
 	imShadowTex = map;
 	imShadowCmp = cmp;
+}
+static id<MTLTexture> imSsrColor, imSsrDepth;
+static id<MTLSamplerState> imSsrSampler;
+void mc_im_ssr_bind(id<MTLTexture> color, id<MTLTexture> depth, id<MTLSamplerState> sampler) {
+	imSsrColor = color;
+	imSsrDepth = depth;
+	imSsrSampler = sampler;
 }
 void mc_im_frame(const void *bytes, int length) {
 	if (length > (int) sizeof imFrame) length = (int) sizeof imFrame;
@@ -840,6 +847,11 @@ drawCall:
 	if (imShadowTex) {
 		[r setFragmentTexture:imShadowTex atIndex:20];
 		[r setFragmentSamplerState:imShadowCmp atIndex:13];
+	}
+	if (imSsrColor) {
+		[r setFragmentTexture:imSsrColor atIndex:22];
+		[r setFragmentTexture:imSsrDepth atIndex:23];
+		[r setFragmentSamplerState:imSsrSampler atIndex:11];
 	}
 	if (w->vcount && !mesh) [r setVertexBuffer:w->vcount offset:0 atIndex:28];
 	if (cutout & (1 << 30)) {

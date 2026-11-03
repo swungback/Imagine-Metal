@@ -34,10 +34,10 @@ public final class Config {
 		# Our sky and distance haze (false: Minecraft's sky and fog).
 		imaginemetal.sky=true
 		#
-		# Surfaces: reflections and highlights (metal, polished stone, ice...), and generated normals' strength (0 off, up to 4):
-		# every texture's light and dark read as bumps.
+		# Surfaces: reflections and highlights (every block family by its texture, as Complementary Reimagined and Photon do), and
+		# generated normals' strength (0 off; 1 is Reimagined's default strength, up to 4): edges between texels bevel.
 		imaginemetal.pbr=true
-		imaginemetal.surfaceDetail=0.75
+		imaginemetal.generatedNormals=0
 		#
 		# Coloured light: torches, soul fire, redstone, lava and other light sources light the world in their own colours.
 		imaginemetal.coloredLight=true

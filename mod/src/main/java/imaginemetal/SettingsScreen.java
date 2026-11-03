@@ -34,10 +34,10 @@ public final class SettingsScreen extends OptionsSubScreen {
 			"Our sky (a gradient, the sun's glow, sunsets, a blue night) and the haze that fades distant land into it. Off: Minecraft's."));
 
 		this.list.addHeader(Component.literal("Surfaces"));
-		this.list.addSmall(toggle("Reflections", Settings.pbr, v -> Settings.pbr = v,
-			"Metal, polished stone, ice and gems reflect the sky and catch the sun; everything else gets a faint sheen."),
-			slider("Surface detail", 0, 4, 0.25f, Settings.normals, v -> Settings.normals = v, v -> v == 0 ? "Off" : String.format(java.util.Locale.ROOT, "%.2f", v),
-				"Generated normals: every brick, plank and pebble catches the light on its own. 0 turns them off."));
+		this.list.addSmall(toggle("PBR", Settings.pbr, v -> Settings.pbr = v,
+			"Sun highlights on every block by its texture, and reflections traced on screen: metal, gems and polished stone clearly, rough blocks at low angles."),
+			slider("Generated normals", 0, 4, 0.25f, Settings.normals, v -> Settings.normals = v, v -> v == 0 ? "Off" : Math.round(v * 100) + "%",
+				"The edges between a texture's light and dark pixels bevel, so blocks look like raised pixel tiles. 100% is Reimagined's strength."));
 
 		this.list.addHeader(Component.literal("Light"));
 		this.list.addBig(toggle("Coloured light", Settings.coloredLight, v -> Settings.coloredLight = v,
