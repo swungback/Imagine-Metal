@@ -24,7 +24,7 @@ struct ImFrame {
 	float4 tonemap;      // Lottes 2016: y = x^a / (x^(a d) b + c); x a, y d, z b, w c
 	float4 grade;        // x saturation, y vibrance, zw 0
 	int4 flags;          // x dimension (0 overworld, 1 Nether, 2 End), y debug view, z 1 = the engine filled this frame, w frame index
-	float4 reserved;
+	float4 env;          // x how far underground the player is (0..1, eased), y how much it's night (0..1)
 	float4x4 shadowNear; // camera-relative world -> the near cascade's light clip (orthographic)
 	float4x4 shadowFar;  // ... the far cascade's
 	float4 shadow;       // x near cascade normal offset (blocks), y 1 = the maps are valid this frame, z far cascade normal offset, w 0
@@ -36,12 +36,13 @@ static inline float imLuma(float3 c) {
 	return dot(c, float3(0.2126, 0.7152, 0.0722));
 }
 
-// Block light level 0..1 -> intensity: a hot core right next to the source on top of a long, soft reach (2.8 at level 15,
-// 1.7 at 14, 0.23 at 10, 0.05 at 7), so a room lit by one torch reads as lit, and the torch itself glows.
+// Block light level 0..1 -> intensity: a hot core right next to the source and a reach that falls off fast (3.0 at level 15,
+// 1.5 at 14, 0.43 at 12, 0.11 at 10, 0.01 at 7; before: 2.8, 1.7, 0.6, 0.23, 0.05), so light pools around torches and lanterns and the space between them stays dark,
+// as in Photon's caves; the colour stays a warm flame's.
 static inline float imBlockCurve(float b) {
 	float v = b / (4.0 - 3.0 * b);
 	float b2 = b * b, b4 = b2 * b2, b8 = b4 * b4;
-	return 1.6 * v * v + 1.2 * b8;
+	return 1.8 * v * v * v + 1.2 * b8;
 }
 
 // Sky light level 0..1 -> how much of the sky's light reaches the surface.

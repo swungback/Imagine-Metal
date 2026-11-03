@@ -12,6 +12,7 @@
 typedef struct {
 	float texel[4];
 	float mix[4];
+	float grade[4];
 } ImBloomParams;
 
 typedef struct {
@@ -151,7 +152,7 @@ static int imbCheck(id<MTLTexture> t, const char *what, char *err, int errCap) {
 // place (no HDR image). Otherwise src is the HDR image: the glow is added to it and the result mapped into dst, which is written
 // whole (strength 0: the mapping alone, no glow). 0 = done, 1 = failed (err filled).
 int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst, float strength, float threshold, float knee, float haze,
-	char *err, int errCap) {
+	float toe, char *err, int errCap) {
 	if (!b || !src || !dst) return 0;
 	if (imbCheck(src, "picture", err, errCap)) return 1;
 	if (src.width < 16 || src.height < 16) return 0;
@@ -172,7 +173,7 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 	imbChain(b, (int) src.width, (int) src.height);
 	id<MTLCommandBuffer> cmd = mc_frame_cmd(enc);
 	@autoreleasepool {
-		ImBloomParams p = {{1.0f / (float) src.width, 1.0f / (float) src.height, threshold, knee}, {strength, (float) b->levels, haze, 0}};
+		ImBloomParams p = {{1.0f / (float) src.width, 1.0f / (float) src.height, threshold, knee}, {strength, (float) b->levels, haze, 0}, {toe, 0, 0, 0}};
 		if (strength != 0.0f) {
 			imbPass(cmd, b->views[0], MTLLoadActionDontCare, b->prefilter, src, b->linear, &p, @"Imagine Metal bloom prefilter", nil);
 			for (int i = 1; i < b->levels; i++) {

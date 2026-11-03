@@ -20,6 +20,7 @@ using namespace metal;
 struct ImBloomParams {
 	float4 texel;  // xy 1 / the source's size; z threshold (linear luma), w soft knee
 	float4 mix;    // x strength (negative: debug, the glow alone), y number of levels (the chain's sum is divided by it), z haze, w 0
+	float4 grade;  // x how much the dark parts are deepened (the resolve's toe: 0 none)
 };
 
 struct ImBloomOut {
@@ -118,6 +119,10 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 	// the top of the range rolled off keeping the hue (mixing toward white turned lava pink once gamma-encoded): up to 0.85 as
 	// it is, above that a soft shoulder that reaches white only far past it, so a glowing surface keeps its texture's light and
 	// dark instead of every bright pixel landing on the same white
+	// the grade: below mid grey (0.18 linear) the picture is darkened by (lum / 0.18)^k, more the darker it is; mid grey and
+	// everything brighter stay as they are. Strong in caves and at night (lights stand out of the dark), off in daylight.
+	float lum = dot(c, float3(0.2126, 0.7152, 0.0722));
+	if (p.grade.x > 0.0 && lum < 0.18) c *= pow(max(lum, 1e-6) / 0.18, p.grade.x);
 	float m = max(max(c.r, c.g), c.b);
 	const float t = 0.85;
 	if (m > t) c *= (t + (1.0 - t) * (m - t) / ((m - t) + (1.0 - t))) / m;

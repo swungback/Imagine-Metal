@@ -24,6 +24,15 @@ public final class Bloom {
 	/** The share of every pixel's light that glows regardless of brightness (the overall soft haze). */
 	private static final float HDR_HAZE = 0.04f, LDR_HAZE = 0.06f;
 
+	/**
+	 * How much the resolve deepens the dark parts (the grade's toe, an exponent: 0 none): Photon's contrast where the user likes it,
+	 * in caves (0.4) and at night (0.3), none in daylight outside.
+	 */
+	private static float toe() {
+		float cave = ImagineFrame.cave, night = ImagineFrame.night;
+		return 0.4f * cave + 0.3f * night * (1f - cave);
+	}
+
 	private static long state;
 	private static boolean failed;
 
@@ -69,7 +78,7 @@ public final class Bloom {
 				}
 				float s = Settings.debug == 3 ? -Math.max(strength, 0.5f) : strength;
 				if (ImNative.bloomRender(MetalBridge.enc(encoder), state, MetalBridge.textureHandle(src), MetalBridge.textureHandle(dst), s,
-					hdr ? HDR_THRESHOLD : LDR_THRESHOLD, hdr ? HDR_KNEE : LDR_KNEE, hdr ? HDR_HAZE : LDR_HAZE, err, 1024) != 0)
+					hdr ? HDR_THRESHOLD : LDR_THRESHOLD, hdr ? HDR_KNEE : LDR_KNEE, hdr ? HDR_HAZE : LDR_HAZE, toe(), err, 1024) != 0)
 					throw new IllegalStateException(MemoryUtil.memUTF8(err));
 			}
 		} catch (Throwable t) {

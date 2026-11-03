@@ -26,6 +26,10 @@ public final class ImagineFrame {
 	private static final ByteBuffer BUF = MemoryUtil.memAlloc(SIZE).order(ByteOrder.LITTLE_ENDIAN);
 	private static final long ADDRESS = MemoryUtil.memAddress(BUF);
 	private static int frame;
+	/** The sky light where the player's eyes are (0..1), eased over about a second, and the cave and night factors from it. */
+	private static float eyeSky = 1f;
+	private static long lastNs;
+	static float cave, night;
 	private static boolean failed;
 
 	// Tone curve (Lottes 2016): mid-grey 0.25 stays 0.25, white at 8 (highlights roll off), contrast 1.05.
@@ -158,7 +162,20 @@ public final class ImagineFrame {
 		put(TM_A, TM_D, TM_B, TM_C);
 		put(1.04f, 0.08f, 0f, 0f); // saturation, vibrance (the blue sky light greys the greens a little)
 		BUF.putInt(dim).putInt(Settings.debug).putInt(1).putInt(frame++);
-		put(0f, 0f, 0f, 0f);
+		// how far underground the player is (by the sky light at their eyes, eased so walking into a cave fades) and how much it's
+		// night: the picture's grade (Bloom's resolve) darkens the dark parts more in both
+		long now = System.nanoTime();
+		float dt = lastNs == 0 ? 0f : Math.min((now - lastNs) / 1e9f, 0.25f);
+		lastNs = now;
+		float sky = 1f;
+		if (level != null) {
+			var eye = net.minecraft.core.BlockPos.containing(mc.gameRenderer.mainCamera().position());
+			sky = level.getBrightness(net.minecraft.world.level.LightLayer.SKY, eye) / 15f;
+		}
+		eyeSky += (sky - eyeSky) * (1f - (float) Math.exp(-dt / 1.2f));
+		cave = dim == 0 ? 1f - smoothstep(0.25f, 0.75f, eyeSky) : 0f;
+		night = dim == 0 ? 1f - day : 0f;
+		put(cave, night, 0f, 0f);
 		for (int c = 0; c < 2; c++) for (int i = 0; i < 16; i++) BUF.putFloat(Shadows.MATRIX[c][i]);
 		// shadow: near cascade normal offset, valid, far cascade normal offset
 		put(Shadows.normalOffset(0), Shadows.valid() ? 1f : 0f, Shadows.normalOffset(1), 0f);
