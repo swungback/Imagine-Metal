@@ -7,6 +7,10 @@ on:
       classes:
         description: 'Space-separated class names, e.g. com.mojang.blaze3d.platform.Window'
         required: true
+      code:
+        description: 'Optional: also print bytecode (javap -c) of the classes, filtered to lines matching this regex'
+        required: false
+        default: ''
       list:
         description: 'Optional regex: list the class files in the game jars whose path matches it'
         required: false
@@ -28,9 +32,11 @@ jobs:
         env:
           CLASSES: ${{ inputs.classes }}
           LIST: ${{ inputs.list }}
+          CODE: ${{ inputs.code }}
         run: |
           CP=$(find ~/.gradle/caches .gradle mod/.gradle -name '*.jar' \( -path '*minecraft*' -o -path '*blaze3d*' -o -path '*lwjgl*' \) 2>/dev/null | tr '\n' ':')
           if [ -n "$LIST" ]; then
             for j in $(echo "$CP" | tr ':' ' '); do case "$j" in *minecraft*) unzip -l "$j" 2>/dev/null | awk '{print $4}' | grep -E "$LIST" | grep -v '\$[0-9]' ;; esac; done | sort -u | head -400
           fi
           for c in $CLASSES; do echo "===== $c"; javap -p -cp "$CP" "$c" || echo "not found: $c"; done
+          if [ -n "$CODE" ]; then for c in $CLASSES; do echo "===== code $c"; javap -p -c -cp "$CP" "$c" | grep -E "^  [a-z].*\\(|$CODE"; done; fi
