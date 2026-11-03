@@ -132,9 +132,10 @@ static float imEmission(uint cls, float3 tex) {
 		case IM_MAT_EMITTER: return 2.6 * l * l + 0.25;
 		case IM_MAT_LAVA: return 0.9 + 1.4 * l;
 		case IM_MAT_FLAME: return 4.0 * smoothstep(0.62, 0.92, hi) * smoothstep(0.15, 0.4, sat);
-		// ores: every pixel with colour against the grey stone around it (the whole speck, its dark edge too; coal's black specks
-		// have none), at a faint glow that keeps the texture's own light and dark
-		case IM_MAT_ORE: return 0.6 * smoothstep(0.05, 0.14, sat);
+		// ores: every pixel with clear colour against the grey stone around it (the whole speck, its coloured edge too; iron's pale
+		// specks count; a speck's near-grey highlights and coal's black specks don't), at a faint glow that keeps the texture's own
+		// light and dark
+		case IM_MAT_ORE: return 0.6 * smoothstep(0.08, 0.2, sat);
 		// nether ores sit in red netherrack: their specks are told apart by brightness instead
 		case IM_MAT_NETHER_ORE: return 0.6 * smoothstep(0.5, 0.75, l);
 		// faint lights (sculk sensors and catalysts, magma, glow lichen): only their bright, coloured parts glow, as a flame's
