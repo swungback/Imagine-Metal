@@ -14,7 +14,7 @@ import org.joml.Vector4f;
 import org.lwjgl.system.MemoryUtil;
 
 /**
- * The lighting's per-frame values (lighting.metal ImFrame, 736 bytes): where the sun or moon is, the colours of its light, of
+ * The lighting's per-frame values (lighting.metal ImFrame, 752 bytes): where the sun or moon is, the colours of its light, of
  * the sky's light and of torches for this time of day and weather, the cave floor, the tone curve. Made once per frame at
  * LevelRenderer.render's start (LevelRendererMixin) and handed to the backend, which binds it on every terrain draw.
  *
@@ -22,7 +22,7 @@ import org.lwjgl.system.MemoryUtil;
  * a deep orange golden hour, blue-violet nights), tuned for our pipeline.
  */
 public final class ImagineFrame {
-	static final int SIZE = 736;
+	static final int SIZE = 752;
 	private static final ByteBuffer BUF = MemoryUtil.memAlloc(SIZE).order(ByteOrder.LITTLE_ENDIAN);
 	private static final long ADDRESS = MemoryUtil.memAddress(BUF);
 	private static int frame;
@@ -69,6 +69,7 @@ public final class ImagineFrame {
 	private static float sunY;
 	private static long auroraLastNs;
 	private static float[] auroraLow = Aurora.LOW[0], auroraHigh = Aurora.HIGH[0];
+	private static final float[] auroraLight = new float[3];
 
 	private static float lightDirSunY() {
 		return sunY;
@@ -78,7 +79,11 @@ public final class ImagineFrame {
 		return auroraVis > 0.001f;
 	}
 
+	/** this frame's view rotation (the sky pass: Sky.skyRot) */
+	static org.joml.Matrix4f viewRot;
+
 	public static void update(CameraRenderState camera) {
+		viewRot = camera.viewRotationMatrix != null ? new org.joml.Matrix4f(camera.viewRotationMatrix) : null;
 		Sky.active = false;
 		Clouds.frameStart();
 		if (failed || !Engine.TERRAIN) return;
@@ -245,17 +250,18 @@ public final class ImagineFrame {
 		auroraVis += (auroraTarget - auroraVis) * (1f - (float) Math.exp(-dtA / 4f));
 		if (auroraVis < 0.002f && auroraTarget == 0f) auroraVis = 0f;
 		int scheme = Math.clamp(Settings.auroraColors, 0, Aurora.NAMES.length - 1);
-		auroraLow = Aurora.LOW[scheme];
-		auroraHigh = Aurora.HIGH[scheme];
+		auroraLow = Aurora.low(scheme);
+		auroraHigh = Aurora.high(scheme);
+		// the aurora's light on the world (Euphoria Patches' aurora influence): a light from the sky above, in its colours, strongest
+		// on what faces up (the snow's tops) and none on what faces down (lighting.metal); slowly pulsing with the curtains
+		auroraLight[0] = auroraLight[1] = auroraLight[2] = 0f;
 		if (auroraVis > 0f && Settings.auroraInfluence > 0f) {
-			// the aurora's light on the world (Euphoria Patches' aurora influence): its colours, mostly the lower one (pink in
-			// Reimagined's), in the sky's light from above and, a little less, bounced from below
-			float k = auroraVis * Settings.auroraInfluence * Settings.auroraBrightness;
-			for (int i = 0; i < 3; i++) {
-				float c = (0.7f * auroraLow[i] / 16f + 0.3f * auroraHigh[i] / 18f);
-				up[i] += c * 0.11f * k;
-				down[i] += c * 0.08f * k;
-			}
+			double tA = System.nanoTime() / 1e9;
+			float pulse = 0.8f + 0.2f * (float) Math.sin(tA * 0.35) * (float) Math.sin(tA * 0.13 + 1.3);
+			float k = auroraVis * Settings.auroraInfluence * Settings.auroraBrightness * pulse;
+			float[] lo = auroraLow, hi = auroraHigh;
+			float ml = Math.max(lo[0], Math.max(lo[1], lo[2])), mh = Math.max(hi[0], Math.max(hi[1], hi[2]));
+			for (int i = 0; i < 3; i++) auroraLight[i] = (0.65f * lo[i] / ml + 0.35f * hi[i] / mh) * 0.075f * k;
 		}
 
 		var lightmap = game.lightmapRenderState;
@@ -332,6 +338,7 @@ public final class ImagineFrame {
 		// the light in the player's hands (the brighter of the two): its colour, its level / 15
 		float[] held = HeldLight.get();
 		put(held[0], held[1], held[2], held[3]);
+		put(auroraLight[0], auroraLight[1], auroraLight[2], 0f);
 		if (BUF.position() != SIZE) throw new IllegalStateException("ImFrame is " + BUF.position() + " bytes, not " + SIZE);
 	}
 

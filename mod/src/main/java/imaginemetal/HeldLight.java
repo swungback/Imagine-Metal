@@ -12,6 +12,7 @@ import net.minecraft.world.level.block.state.BlockState;
  */
 public final class HeldLight {
 	private static final float[] NONE = {0f, 0f, 0f, 0f};
+	private static String last = "";
 
 	private HeldLight() {
 	}
@@ -29,6 +30,12 @@ public final class HeldLight {
 			if (light <= 0 || light / 15f <= best[3]) continue;
 			float[] c = LightColors.of(state);
 			best = new float[] {c[0], c[1], c[2], light / 15f};
+		}
+		// (logged when it changes: what the hands hold and the light it gives)
+		String now = player.getMainHandItem().getItem() + " / " + player.getOffhandItem().getItem() + " -> " + Math.round(best[3] * 15f);
+		if (!now.equals(last)) {
+			last = now;
+			System.out.println("[Imagine Metal] held light: " + now);
 		}
 		return best;
 	}

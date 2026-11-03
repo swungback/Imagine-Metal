@@ -52,6 +52,7 @@ struct ImFrame {
 	float4 auroraLow;    // the aurora's colour where its curtains end (low), w its style (0 smooth, 1 pixel)
 	float4 auroraHigh;   // its colour at their height, w its brightness
 	float4 held;         // the light in the player's hands: rgb its colour (brightest channel 1), w its level 0..1
+	float4 auroraLight;  // rgb the aurora's light on the world (linear, from above), w 0
 };
 
 static inline float imSqrt2(float x) { x = 1.0 - x; x *= x; x *= x; return 1.0 - x; }
@@ -579,6 +580,8 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 
 	// sky light: blue from above, warmer and dimmer from below
 	float3 ambient = mix(f.ambientDown.rgb, f.ambientUp.rgb, N.y * 0.5 + 0.5) * skyF;
+	// the aurora's light: from the sky above, so tops take it fully, sides a little, undersides none
+	ambient += f.auroraLight.rgb * (skyF * (0.12 + 0.88 * saturate(N.y)));
 
 	// torches: warm, weaker in full daylight
 	float4 bl = imBlockLight(p, n, f, lvol, lsamp);

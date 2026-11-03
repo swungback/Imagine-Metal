@@ -47,7 +47,7 @@ public final class Sky {
 					if (state == 0) throw new IllegalStateException(MemoryUtil.memUTF8(err));
 					System.out.println("[Imagine Metal] sky on");
 				}
-				Matrix4f rot = mc.gameRenderer.mainCamera().getViewRotationProjectionMatrix(new Matrix4f()).invert();
+				Matrix4f rot = skyRot();
 				long m = stack.nmalloc(16, 64);
 				rot.getToAddress(m);
 				if (ImNative.skyDraw(MetalBridge.enc(encoder), state, MetalBridge.textureHandle(target), ImagineFrame.address(), ImagineFrame.SIZE, m, 0, err, 1024) != 0)
@@ -62,6 +62,21 @@ public final class Sky {
 	}
 
 	private static boolean cloudsFailed, texturesSet;
+
+	/**
+	 * Clip -> view direction for this frame, from the same projection the level draws with (its buffer carries view bobbing, the
+	 * hurt tilt and nausea, which the camera's own matrix doesn't: with that the sky and clouds stayed still while the land bobbed).
+	 */
+	private static Matrix4f skyRot() {
+		Matrix4f proj = new Matrix4f();
+		var pb = RenderSystem.getProjectionMatrixBuffer();
+		long pa = pb != null ? MetalBridge.bufferAddress(pb.buffer()) : 0;
+		if (pa != 0 && ImagineFrame.viewRot != null) {
+			proj.setFromAddress(pa + pb.offset());
+			return proj.mul(ImagineFrame.viewRot).invert();
+		}
+		return Minecraft.getInstance().gameRenderer.mainCamera().getViewRotationProjectionMatrix(proj).invert();
+	}
 
 	/** At the end of Minecraft's sky pass (after its sun, moon and stars): our clouds and the aurora over them. */
 	public static void drawAfter() {
@@ -87,7 +102,7 @@ public final class Sky {
 			MetalBridge.flushClear(encoder, target);
 			try (MemoryStack stack = MemoryStack.stackPush()) {
 				long err = stack.ncalloc(1, 1024, 1);
-				Matrix4f rot = mc.gameRenderer.mainCamera().getViewRotationProjectionMatrix(new Matrix4f()).invert();
+				Matrix4f rot = skyRot();
 				long m = stack.nmalloc(16, 64);
 				rot.getToAddress(m);
 				if (ImNative.skyDraw(MetalBridge.enc(encoder), state, MetalBridge.textureHandle(target), ImagineFrame.address(), ImagineFrame.SIZE, m, 1, err, 1024) != 0)
