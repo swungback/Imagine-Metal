@@ -9,12 +9,19 @@
 
 void mc_im_light_bind(id<MTLTexture> volume, id<MTLSamplerState> sampler);  // mcown.m
 
+#define IM_LIGHT_PENDING 160
 typedef struct {
 	id<MTLDevice> device;
 	id<MTLComputePipelineState> step;
 	id<MTLTexture> seeds, light[2];
 	id<MTLSamplerState> linear;
 	int sx, sy, sz, cur;
+	// uploads waiting for the next step: copied into their own buffers and blitted into seeds on the frame's command buffer, so
+	// a frame still in flight on the GPU never reads seeds written for a later frame (that showed lights a section off for a
+	// frame, flickering, while moving)
+	id<MTLBuffer> pendBuf[IM_LIGHT_PENDING];
+	MTLRegion pendRegion[IM_LIGHT_PENDING];
+	int pending;
 } ImLight;
 
 ImLight *im_light_new(Ctx *ctx, const char *source, int sx, int sy, int sz, char *err, int errCap) {
@@ -45,7 +52,7 @@ ImLight *im_light_new(Ctx *ctx, const char *source, int sx, int sy, int sz, char
 		td.height = (NSUInteger) sy;
 		td.depth = (NSUInteger) sz;
 		td.pixelFormat = MTLPixelFormatRGBA8Unorm;
-		td.storageMode = MTLStorageModeShared;
+		td.storageMode = MTLStorageModePrivate;
 		td.usage = MTLTextureUsageShaderRead;
 		l->seeds = [ctx->device newTextureWithDescriptor:td];
 		td.pixelFormat = MTLPixelFormatRGBA16Float;
@@ -70,12 +77,21 @@ ImLight *im_light_new(Ctx *ctx, const char *source, int sx, int sy, int sz, char
 	}
 }
 
-// Writes a box of seed voxels (4 bytes each, x fastest, then y, then z) at (x, y, z), size (w, h, d). The seeds texture is
-// shared memory: the write lands before the next command buffer that reads it is committed.
+// Queues a box of seed voxels (4 bytes each, x fastest, then y, then z) at (x, y, z), size (w, h, d) for the next step: the bytes
+// are copied now, the seeds texture is written on the GPU's timeline just before that step reads it.
 void im_light_upload(ImLight *l, int x, int y, int z, int w, int h, int d, const void *bytes) {
 	if (!l || w <= 0 || h <= 0 || d <= 0) return;
-	[l->seeds replaceRegion:MTLRegionMake3D((NSUInteger) x, (NSUInteger) y, (NSUInteger) z, (NSUInteger) w, (NSUInteger) h, (NSUInteger) d)
-		mipmapLevel:0 slice:0 withBytes:bytes bytesPerRow:(NSUInteger) w * 4 bytesPerImage:(NSUInteger) w * h * 4];
+	// a whole-box upload replaces everything still waiting
+	if (x == 0 && y == 0 && z == 0 && w == l->sx && h == l->sy && d == l->sz) {
+		for (int i = 0; i < l->pending; i++) [l->pendBuf[i] release];
+		l->pending = 0;
+	}
+	if (l->pending >= IM_LIGHT_PENDING) return;  // (can't happen with the Java side's budget; the next full upload repairs it)
+	id<MTLBuffer> b = [l->device newBufferWithBytes:bytes length:(NSUInteger) w * h * d * 4 options:MTLResourceStorageModeShared];
+	if (!b) return;
+	l->pendBuf[l->pending] = b;
+	l->pendRegion[l->pending] = MTLRegionMake3D((NSUInteger) x, (NSUInteger) y, (NSUInteger) z, (NSUInteger) w, (NSUInteger) h, (NSUInteger) d);
+	l->pending++;
 }
 
 // One spread step (shift: how far the box moved since the last step, in voxels; reset: start from nothing). Binds the result for
@@ -83,6 +99,21 @@ void im_light_upload(ImLight *l, int x, int y, int z, int w, int h, int d, const
 void im_light_step(Enc *enc, ImLight *l, int shiftX, int shiftY, int shiftZ, int reset) {
 	if (!l) return;
 	id<MTLCommandBuffer> cmd = mc_frame_cmd(enc);
+	if (l->pending > 0) {
+		@autoreleasepool {
+			id<MTLBlitCommandEncoder> bl = [cmd blitCommandEncoder];
+			bl.label = @"Imagine Metal light seeds";
+			for (int i = 0; i < l->pending; i++) {
+				MTLRegion r = l->pendRegion[i];
+				[bl copyFromBuffer:l->pendBuf[i] sourceOffset:0 sourceBytesPerRow:r.size.width * 4
+					sourceBytesPerImage:r.size.width * r.size.height * 4 sourceSize:r.size toTexture:l->seeds destinationSlice:0
+					destinationLevel:0 destinationOrigin:r.origin];
+				[l->pendBuf[i] release];  // (the command buffer keeps it alive until it has run)
+			}
+			[bl endEncoding];
+		}
+		l->pending = 0;
+	}
 	@autoreleasepool {
 		// reset (the first step, a jump): the previous volume is read shifted wholly out of the box, so it counts as empty
 		if (reset) shiftX = l->sx * 4;
