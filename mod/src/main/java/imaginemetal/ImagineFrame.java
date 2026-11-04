@@ -37,6 +37,8 @@ public final class ImagineFrame {
 	private static float wet;
 	/** this frame's TAA jitter (Minecraft's clip units, y up; Bloom un-jitters the history lookup with it) */
 	static float jitterX, jitterY;
+	/** this frame's dimension (0 overworld, 1 Nether, 2 End) */
+	static int dimNow;
 
 	private static float halton(int i, int b) {
 		float f = 1f, r = 0f;
@@ -131,6 +133,7 @@ public final class ImagineFrame {
 		float thunder = level != null ? level.getThunderLevel(partial) : 0f;
 		rain = Math.max(rain, thunder);
 		int dim = sky.skybox == DimensionType.Skybox.OVERWORLD ? 0 : sky.skybox == DimensionType.Skybox.END ? 2 : 1;
+		dimNow = dim;
 
 		float[] lightDir = {0f, 1f, 0f}, light = new float[3], up = new float[3], down = new float[3];
 		float day = 0f, sunFlag = 0f;

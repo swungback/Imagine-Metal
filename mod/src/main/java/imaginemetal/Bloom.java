@@ -129,7 +129,13 @@ public final class Bloom {
 				if (ImagineFrame.underwater) fogK = 1.4f;
 				else if (ImagineFrame.shaftOn || ImagineFrame.cave > 0f)
 					fogK = (ImagineFrame.shaftRain * ImagineFrame.shaftRain * 0.8f + ImagineFrame.night * 0.3f) * (1f - ImagineFrame.cave) + ImagineFrame.cave * 1.4f;
-				ImNative.bloomFog(state, Settings.bloomFog ? fogK : 0f, ImagineFrame.underwater ? 1f : 0f, Settings.rainbows ? ImagineFrame.rainbow : 0f);
+				// (the Nether: Reimagined's strongest, 14, over the view range)
+				float fogMode = ImagineFrame.underwater ? 1f : 0f;
+				if (ImagineFrame.dimNow == 1) {
+					fogK = 1.4f;
+					fogMode = 2f + Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f;
+				}
+				ImNative.bloomFog(state, Settings.bloomFog ? fogK : 0f, fogMode, Settings.rainbows ? ImagineFrame.rainbow : 0f);
 				// (the jitter in uv: Minecraft's clip units halved; the uv's y runs with clip y)
 				ImNative.bloomTaa(state, ImagineFrame.jitterX * 0.5f, ImagineFrame.jitterY * 0.5f, Settings.taa && Reflections.valid ? 1f : 0f);
 				long clips = stack.nmalloc(4, 192);

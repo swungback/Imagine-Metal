@@ -371,9 +371,17 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 		if (d < 0.99999) {
 			float4 w = p.clipInv * float4(in.uv * 2.0 - 1.0, d, 1.0);
 			float dist = length(w.xyz / w.w);
-			float bf = 1.0 - exp(-dist * (p.grade.z > 0.5 ? 0.06 : 0.02));
-			bf *= bf;
-			bf *= bf;
+			float bf;
+			if (p.grade.z > 1.5) {
+				// (the Nether: Reimagined's, by the cube of the distance over the view range: the far side of the cavern a glowing
+				// haze)
+				float nf = dist / clamp(p.grade.z - 2.0, 96.0, 512.0);
+				bf = 1.0 - exp(-8.0 * nf * nf * nf);
+			} else {
+				bf = 1.0 - exp(-dist * (p.grade.z > 0.5 ? 0.06 : 0.02));
+				bf *= bf;
+				bf *= bf;
+			}
 			float k = bf * p.grade.y;
 			float3 blur = imbLinear(pic.sample(ms, in.uv, level(4.0)).rgb) * 0.5 + imbLinear(pic.sample(ms, in.uv, level(5.5)).rgb) * 0.5;
 			c = mix(c, blur, k / (1.0 + k));
