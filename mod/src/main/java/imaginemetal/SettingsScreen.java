@@ -83,8 +83,9 @@ public final class SettingsScreen extends OptionsSubScreen {
 				this.list.addSmall(toggle("Clouds", Settings.clouds, v -> Settings.clouds = v,
 					"Our clouds: Minecraft's cloud shapes as soft, rounded blocks, lit by the sun, coloured by the sky. Off: Minecraft's. (Minecraft's Clouds video setting must be on.)"),
 					open(Page.AURORA));
-				this.list.addBig(toggle("Bloom fog", Settings.bloomFog, v -> Settings.bloomFog = v,
-					"Reimagined's soft depth: in rain, at night, in caves and under water, distant things dissolve into a gentle glow."));
+				this.list.addSmall(toggle("Bloom fog", Settings.bloomFog, v -> Settings.bloomFog = v,
+					"Reimagined's soft depth: in rain, at night, in caves and under water, distant things dissolve into a gentle glow."),
+					toggle("Rainbows", Settings.rainbows, v -> Settings.rainbows = v, "A rainbow opposite the sun as the rain clears."));
 				this.list.addSmall(toggle("Light shafts", Settings.shafts, v -> Settings.shafts = v,
 					"Beams of sunlight around leaves, mountains and cave mouths when you look toward the sun."),
 					slider("Shaft strength", 0, 3, 0.05f, Settings.shaftStrength, v -> Settings.shaftStrength = v, SettingsScreen::pct,

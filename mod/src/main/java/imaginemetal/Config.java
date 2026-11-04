@@ -65,6 +65,8 @@ public final class Config {
 		imaginemetal.ssao=true
 		# Reimagined's bloom fog: distant things soften into a glow in rain, at night, in caves and under water.
 		imaginemetal.bloomFog=true
+		# A rainbow opposite the sun as the rain clears.
+		imaginemetal.rainbows=true
 		# In the rain the world turns wet and glossy, with puddles on top of blocks (needs PBR).
 		imaginemetal.wet=true
 		imaginemetal.ssaoStrength=0.7

@@ -76,6 +76,8 @@ public final class Bloom {
 		return r;
 	}
 
+	private static final org.joml.Matrix4f PREV_CLIP = new org.joml.Matrix4f();
+	private static double prevX, prevY, prevZ;
 	private static long state;
 	private static boolean failed;
 
@@ -127,10 +129,17 @@ public final class Bloom {
 				if (ImagineFrame.underwater) fogK = 1.4f;
 				else if (ImagineFrame.shaftOn || ImagineFrame.cave > 0f)
 					fogK = (ImagineFrame.shaftRain * ImagineFrame.shaftRain * 0.8f + ImagineFrame.night * 0.3f) * (1f - ImagineFrame.cave) + ImagineFrame.cave * 1.4f;
-				ImNative.bloomFog(state, Settings.bloomFog ? fogK : 0f, ImagineFrame.underwater ? 1f : 0f);
-				long clips = stack.nmalloc(4, 128);
+				ImNative.bloomFog(state, Settings.bloomFog ? fogK : 0f, ImagineFrame.underwater ? 1f : 0f, Settings.rainbows ? ImagineFrame.rainbow : 0f);
+				long clips = stack.nmalloc(4, 192);
 				Reflections.CLIP.get(MemoryUtil.memFloatBuffer(clips, 16));
 				Reflections.CLIP_INV.get(MemoryUtil.memFloatBuffer(clips + 64, 16));
+				// (the last frame's clip, taking this frame's camera-relative positions: shifted by how far the camera moved)
+				new org.joml.Matrix4f(PREV_CLIP).translate((float) (Reflections.camX - prevX), (float) (Reflections.camY - prevY), (float) (Reflections.camZ - prevZ))
+					.get(MemoryUtil.memFloatBuffer(clips + 128, 16));
+				PREV_CLIP.set(Reflections.CLIP);
+				prevX = Reflections.camX;
+				prevY = Reflections.camY;
+				prevZ = Reflections.camZ;
 				ImNative.bloomAo(state, Settings.ssao && Reflections.valid ? Settings.ssaoStrength : 0f, clips);
 				float s = Settings.debug == 3 ? -Math.max(strength, 0.5f) : strength;
 				if (ImNative.bloomRender(MetalBridge.enc(encoder), state, MetalBridge.textureHandle(src), MetalBridge.textureHandle(dst), s,

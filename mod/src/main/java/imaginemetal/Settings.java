@@ -34,6 +34,7 @@ public final class Settings {
 	public static volatile int stars = (int) Config.number("imaginemetal.stars", 1, 0, 1);
 	public static volatile boolean shootingStars = Engine.flag("imaginemetal.shootingStars", true);
 	public static volatile boolean wet = Engine.flag("imaginemetal.wet", true);
+	public static volatile boolean rainbows = Engine.flag("imaginemetal.rainbows", true);
 	public static volatile boolean bloomFog = Engine.flag("imaginemetal.bloomFog", true);
 	public static volatile boolean ssao = Engine.flag("imaginemetal.ssao", true);
 	public static volatile float ssaoStrength = Config.number("imaginemetal.ssaoStrength", 0.7f, 0f, 1f);
@@ -80,6 +81,7 @@ public final class Settings {
 		v.put("imaginemetal.shafts", String.valueOf(shafts));
 		v.put("imaginemetal.ssao", String.valueOf(ssao));
 		v.put("imaginemetal.bloomFog", String.valueOf(bloomFog));
+		v.put("imaginemetal.rainbows", String.valueOf(rainbows));
 		v.put("imaginemetal.wet", String.valueOf(wet));
 		v.put("imaginemetal.ssaoStrength", String.format(java.util.Locale.ROOT, "%.2f", ssaoStrength));
 		v.put("imaginemetal.stars", String.valueOf(stars));

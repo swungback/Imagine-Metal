@@ -17,6 +17,7 @@ typedef struct {
 	float shaftColor[4];  // rgb the light's colour (linear), w ambient occlusion strength (0 off)
 	float clip[16];       // this frame's camera-relative world -> clip (the ambient occlusion)
 	float clipInv[16];
+	float prevClip[16];   // the last frame's transform, from this frame's camera-relative world (the shafts' history)
 } ImBloomParams;
 
 id<MTLTexture> mc_im_ssr_depth(void);  // mcown.m: this frame's depth copy (Reflections), nil before the first
@@ -30,12 +31,14 @@ typedef struct {
 	id<MTLDevice> device;
 	id<MTLLibrary> lib;
 	id<MTLRenderPipelineState> prefilter, down, up, composite, resolve, shafts;
-	id<MTLTexture> shaftTex;  // the light shafts at a quarter of the size
+	id<MTLTexture> shaftTex;  // the light shafts at half size (r the light, g the distance it was traced to)
+	id<MTLTexture> shaftHist[2];  // their history, ping-ponged: this frame's result blended over the last
+	int shaftIdx, shaftValid;
 	float shaft[8];           // im_bloom_shafts: sun uv, strength, colour
-	float fog[2];             // im_bloom_fog: Reimagined's bloom fog strength, 1 = eyes under water
+	float fog[3];             // im_bloom_fog: Reimagined's bloom fog strength, 1 = eyes under water, the rainbow's strength
 	id<MTLRenderPipelineState> ao;
 	id<MTLTexture> aoTex;     // the ambient occlusion at half size
-	float aoStrength, aoClip[32];
+	float aoStrength, aoClip[48];
 	MTLPixelFormat compositeFormat, resolveFormat;
 	id<MTLTexture> chain;
 	id<MTLTexture> views[IM_BLOOM_MAX];
@@ -151,10 +154,11 @@ void im_bloom_shafts(ImBloom *b, float sx, float sy, float strength, float r, fl
 }
 
 // This frame's bloom fog (imaginemetal.Bloom): how much distant things dissolve into a soft glow (rain, night, caves, water).
-void im_bloom_fog(ImBloom *b, float strength, float water) {
+void im_bloom_fog(ImBloom *b, float strength, float water, float rainbow) {
 	if (!b) return;
 	b->fog[0] = strength;
 	b->fog[1] = water;
+	b->fog[2] = rainbow;
 }
 
 // This frame's ambient occlusion (imaginemetal.Bloom): strength (0 off) and the terrain's transform and its inverse (32 floats).
@@ -166,7 +170,7 @@ void im_bloom_ao(ImBloom *b, float strength, const float *clips) {
 
 static void imbPass3(id<MTLCommandBuffer> cmd, id<MTLTexture> target, MTLLoadAction load, id<MTLRenderPipelineState> ps,
 	id<MTLTexture> src, id<MTLSamplerState> s, const ImBloomParams *p, NSString *label, id<MTLTexture> second, id<MTLTexture> third,
-	id<MTLTexture> fourth, id<MTLTexture> fifth, id<MTLTexture> sixth, id<MTLSamplerState> s2) {
+	id<MTLTexture> fourth, id<MTLTexture> fifth, id<MTLTexture> sixth, id<MTLSamplerState> s2, const void *frame, int frameLen) {
 	MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
 	rp.colorAttachments[0].texture = target;
 	rp.colorAttachments[0].loadAction = load;
@@ -185,13 +189,14 @@ static void imbPass3(id<MTLCommandBuffer> cmd, id<MTLTexture> target, MTLLoadAct
 	[r setFragmentSamplerState:(s2 ? s2 : s) atIndex:1];
 	[r setFragmentSamplerState:s atIndex:0];
 	[r setFragmentBytes:p length:sizeof *p atIndex:0];
+	if (frame && frameLen > 0) [r setFragmentBytes:frame length:(NSUInteger) frameLen atIndex:1];
 	[r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 	[r endEncoding];
 }
 
 static void imbPass(id<MTLCommandBuffer> cmd, id<MTLTexture> target, MTLLoadAction load, id<MTLRenderPipelineState> ps,
 	id<MTLTexture> src, id<MTLSamplerState> s, const ImBloomParams *p, NSString *label, id<MTLTexture> second) {
-	imbPass3(cmd, target, load, ps, src, s, p, label, second, nil, nil, nil, nil, nil);
+	imbPass3(cmd, target, load, ps, src, s, p, label, second, nil, nil, nil, nil, nil, NULL, 0);
 }
 
 static int imbCheck(id<MTLTexture> t, const char *what, char *err, int errCap) {
@@ -231,6 +236,7 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 			{b->shaft[0], b->shaft[1], 0, b->shaft[6]}, {b->shaft[3], b->shaft[4], b->shaft[5], 0}};
 		memcpy(p.clip, b->aoClip, sizeof p.clip);
 		memcpy(p.clipInv, b->aoClip + 16, sizeof p.clipInv);
+		memcpy(p.prevClip, b->aoClip + 32, sizeof p.prevClip);
 		// the light shafts (HDR path, volumetric): along each pixel's view ray, how much of the air the sun reaches (the shadow
 		// maps), from the depth Reflections copied this frame
 		id<MTLTexture> depth = mc_im_ssr_depth();
@@ -239,19 +245,27 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 		int frameLen = 0;
 		const void *frame = mc_im_frame_bytes(&frameLen);
 		id<MTLTexture> shafts = nil;
+		if (!(b->shaft[2] > 0.0f)) b->shaftValid = 0;
 		if (!inPlace && b->shaft[2] > 0.0f && depth && smap && scmp && frame && depth.width == src.width && depth.height == src.height) {
-			if (!b->shafts) b->shafts = imbPipeline(b, @"im_bloom_shafts", MTLPixelFormatR16Float, NO, err, errCap);
+			if (!b->shafts) b->shafts = imbPipeline(b, @"im_bloom_shafts", MTLPixelFormatRG16Float, NO, err, errCap);
 			NSUInteger sw = src.width / 2 > 1 ? src.width / 2 : 1, sh = src.height / 2 > 1 ? src.height / 2 : 1;
-			if (b->shafts && (!b->shaftTex || b->shaftTex.width != sw || b->shaftTex.height != sh)) {
-				[b->shaftTex release];
-				MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR16Float width:sw height:sh
-					mipmapped:NO];
-				td.storageMode = MTLStorageModePrivate;
-				td.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
-				b->shaftTex = [b->device newTextureWithDescriptor:td];
-				b->shaftTex.label = @"Imagine Metal light shafts";
+			if (b->shafts && (!b->shaftHist[0] || b->shaftHist[0].width != sw || b->shaftHist[0].height != sh)) {
+				for (int k = 0; k < 2; k++) {
+					[b->shaftHist[k] release];
+					MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRG16Float width:sw height:sh
+						mipmapped:NO];
+					td.storageMode = MTLStorageModePrivate;
+					td.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+					b->shaftHist[k] = [b->device newTextureWithDescriptor:td];
+					b->shaftHist[k].label = @"Imagine Metal light shafts";
+				}
+				b->shaftValid = 0;
 			}
-			if (b->shafts && b->shaftTex) {
+			if (b->shafts && b->shaftHist[0] && b->shaftHist[1]) {
+				b->shaftIdx ^= 1;
+				b->shaftTex = b->shaftHist[b->shaftIdx];
+				id<MTLTexture> prev = b->shaftHist[b->shaftIdx ^ 1];
+				p.mix[3] = b->shaftValid ? 1.0f : 0.0f;  // (the history is usable)
 				MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
 				rp.colorAttachments[0].texture = b->shaftTex;
 				rp.colorAttachments[0].loadAction = MTLLoadActionDontCare;
@@ -262,7 +276,9 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 				[r setRenderPipelineState:b->shafts];
 				[r setCullMode:MTLCullModeNone];
 				[r setFragmentTexture:depth atIndex:1];
+				[r setFragmentTexture:prev atIndex:2];
 				[r setFragmentTexture:smap atIndex:4];
+				[r setFragmentSamplerState:b->linear atIndex:0];
 				[r setFragmentSamplerState:scmp atIndex:1];
 				[r setFragmentBytes:&p length:sizeof p atIndex:0];
 				[r setFragmentBytes:frame length:(NSUInteger) frameLen atIndex:1];
@@ -270,6 +286,8 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 				[r endEncoding];
 				shafts = b->shaftTex;
 				p.shaft[2] = b->shaft[2];
+				p.mix[3] = 0.0f;
+				b->shaftValid = 1;
 			}
 			err[0] = 0;  // (a failed shafts pipeline only turns the shafts off)
 		}
@@ -318,10 +336,14 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 			id<MTLSamplerState> hs = mc_im_ssr_sampler();
 			BOOL fogOk = b->fog[0] > 0.0f && hc && hs && depth && hc.width == src.width && hc.height == src.height && hc.mipmapLevelCount > 4
 				&& depth.width == src.width && depth.height == src.height;
+			BOOL depthOk = depth && depth.width == src.width && depth.height == src.height;
 			p.grade[1] = fogOk ? b->fog[0] : 0.0f;
 			p.grade[2] = b->fog[1];
+			p.grade[3] = depthOk && frame ? b->fog[2] : 0.0f;
+			p.texel[2] = depthOk ? 1.0f : 0.0f;  // (the resolve doesn't use the threshold: here, whether the depth is bound)
 			imbPass3(cmd, dst, MTLLoadActionDontCare, b->resolve, b->views[0], b->linear, &p, @"Imagine Metal HDR resolve", src,
-				shafts ? shafts : b->views[0], aoT ? aoT : b->views[0], fogOk ? hc : b->views[0], fogOk ? depth : nil, fogOk ? hs : nil);
+				shafts ? shafts : b->views[0], aoT ? aoT : b->views[0], fogOk ? hc : b->views[0], depthOk ? depth : nil, fogOk ? hs : nil,
+				frame, frameLen);
 		}
 	}
 	return 0;

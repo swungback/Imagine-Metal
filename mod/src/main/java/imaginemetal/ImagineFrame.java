@@ -35,6 +35,9 @@ public final class ImagineFrame {
 	static boolean shaftOn, underwater;
 	static float shaftRain, shaftNoon, shaftSunVis, shaftCover;
 	private static float wet;
+	/** the rainbow (Bloom; Reimagined's, after rain): how strong now, by the sun's height and how recently it rained here */
+	static float rainbow;
+	private static float afterRain;
 	private static boolean failed;
 
 	// Tone curve (Lottes 2016): mid-grey 0.25 stays 0.25, white at 8 (highlights roll off), contrast 1.05.
@@ -373,6 +376,13 @@ public final class ImagineFrame {
 		// (wet: with the rain, quickly; drying slowly after; none where it doesn't rain or snows)
 		float wetTarget = Settings.wet && dim == 0 ? rain * (1f - Haze.dry) * (1f - Haze.cold) : 0f;
 		wet += (wetTarget - wet) * (1f - (float) Math.exp(-dt / (wetTarget > wet ? 8f : 40f)));
+		// (after rain: builds while it rains, fades over a minute and a half once it stops; the rainbow shows as the rain clears,
+		// with the sun up but not too high)
+		float rainHere = dim == 0 ? rain * (1f - Haze.dry) * (1f - Haze.cold) : 0f;
+		afterRain = rainHere > 0.5f ? Math.min(1f, afterRain + dt / 20f) : Math.max(0f, afterRain - dt / 90f);
+		float rbTime = Math.clamp((sunDir[1] - 0.1f) / 0.15f, 0f, 1f);
+		rbTime = Math.clamp(rbTime - (float) Math.pow(noonF, 8) * 8f, 0f, 0.85f);
+		rainbow = rbTime * (float) Math.sqrt(Math.max(0f, afterRain - 0.333f) * 1.5f) * (1f - rain) * (1f - cave) * (camera.fogType == net.minecraft.world.level.material.FogType.NONE ? 1f : 0f);
 		put(Settings.waterStyle, Settings.glassReflections ? 1f : 0f, camera.fogType == net.minecraft.world.level.material.FogType.WATER ? 1f : 0f, wet);
 		if (BUF.position() != SIZE) throw new IllegalStateException("ImFrame is " + BUF.position() + " bytes, not " + SIZE);
 	}

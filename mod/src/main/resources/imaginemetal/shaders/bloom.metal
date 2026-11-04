@@ -19,12 +19,15 @@ using namespace metal;
 
 struct ImBloomParams {
 	float4 texel;  // xy 1 / the source's size; z threshold (linear luma), w soft knee
-	float4 mix;    // x strength (negative: debug, the glow alone), y number of levels (the chain's sum is divided by it), z haze, w 0
-	float4 grade;  // x how much the dark parts are deepened (the resolve's toe: 0 none), y bloom fog strength (0 none), z 1 = under water
+	float4 mix;    // x strength (negative: debug, the glow alone), y number of levels (the chain's sum is divided by it), z haze,
+	               // w 1 = the shafts' history is usable (their pass only)
+	float4 grade;  // x how much the dark parts are deepened (the resolve's toe: 0 none), y bloom fog strength (0 none), z 1 = under water,
+	               // w the rainbow's strength (0 none)
 	float4 shaft;  // light shafts: z strength (0 none)
 	float4 shaftColor; // rgb the sun's (or moon's) light, linear; w ambient occlusion strength (0 none)
 	float4x4 clip;     // this frame's camera-relative world -> clip (y up: uv.y = ndc.y * 0.5 + 0.5), depth 0..1
 	float4x4 clipInv;
+	float4x4 prevClip; // the last frame's clip, from this frame's camera-relative world (the shafts' history)
 };
 
 struct ImBloomOut {
@@ -161,8 +164,8 @@ static inline float imbSmooth(float x) {
 // Strongest at sunrise and sunset, looking toward the light and toward the horizon; at noon only an eighth of it, except where
 // something is overhead (a forest, a cave, an arch: "scene-aware", p.shaft.y), where the beams are the point.
 // p.shaft: x 1 = eyes under water, y how much there's something overhead (0..1), z strength (0 off), w the far shadow map's reach.
-fragment float4 im_bloom_shafts(ImBloomOut in [[stage_in]], depth2d<float> depth [[texture(1)]], depth2d_array<float> smap [[texture(4)]],
-	sampler cmp [[sampler(1)]], constant ImBloomParams &p [[buffer(0)]], constant ImVlFrame &f [[buffer(1)]]) {
+static float4 imbShaftsNow(ImBloomOut in, depth2d<float> depth, depth2d_array<float> smap, sampler cmp, constant ImBloomParams &p,
+	constant ImVlFrame &f) {
 	float2 size = float2(depth.get_width(), depth.get_height());
 	float d = depth.read(uint2(clamp(in.uv, 0.0, 0.9999) * size));
 	bool sky = d >= 0.99999;
@@ -192,7 +195,7 @@ fragment float4 im_bloom_shafts(ImBloomOut in [[stage_in]], depth2d<float> depth
 	vlMult *= mix(invNoon2 * 0.875 + 0.125, 1.0, max(intense, rain * rain));
 	vlMult *= 1.4 - 0.4 * rain;
 	if (sunVis < 0.5) vlMult *= 0.3 + 0.4 * rain * rain + 0.5 * max(f.fogParams.x - len, 0.0) / max(f.fogParams.x, 1.0);
-	if (vlMult < 0.0001) return float4(0.0);
+	if (vlMult < 0.0001) return float4(0.0, len, 0.0, 1.0);
 
 	// the march
 	int nearN = water || intense > 0.5 ? 15 : 10;
@@ -201,7 +204,7 @@ fragment float4 im_bloom_shafts(ImBloomOut in [[stage_in]], depth2d<float> depth
 	float reach = min(p.shaft.w * 0.98, maxD);
 	float active = mix(reach, min(100.0, reach), intense);
 	float rayEnd = sky ? maxD : min(len, maxD);
-	float j = fract(52.9829189 * fract(dot(in.pos.xy, float2(0.06711056, 0.00583715))));
+	float j = fract(52.9829189 * fract(dot(in.pos.xy, float2(0.06711056, 0.00583715))) + 0.61803399 * float(f.flags.w & 1023));
 	float eyeBright = 1.0 - f.env.x;  // (beyond the shadow maps: as lit as it is where the player stands)
 	float vl = 0.0, last = 0.0;
 	for (int i = 0; i <= nearN + 1; i++) {
@@ -239,8 +242,35 @@ fragment float4 im_bloom_shafts(ImBloomOut in [[stage_in]], depth2d<float> depth
 		vl += dens * (nw - cw);
 		last = next;
 	}
-	return float4(vl * vlMult, 0.0, 0.0, 1.0);
+	return float4(vl * vlMult, len, 0.0, 1.0);
 }
+
+fragment float4 im_bloom_shafts(ImBloomOut in [[stage_in]], depth2d<float> depth [[texture(1)]], texture2d<float> hist [[texture(2)]],
+	depth2d_array<float> smap [[texture(4)]], sampler ls [[sampler(0)]], sampler cmp [[sampler(1)]], constant ImBloomParams &p [[buffer(0)]],
+	constant ImVlFrame &f [[buffer(1)]]) {
+	float4 res = imbShaftsNow(in, depth, smap, cmp, p, f);
+	// (temporal: a jitter that changes every frame, averaged with the last frames' result where that is the same place in the
+	// world: smooth beams for twelve samples a pixel, as Reimagined gets with its TAA)
+	if (p.mix.w > 0.5) {
+		float len = res.g;
+		float2 size = float2(depth.get_width(), depth.get_height());
+		float d = depth.read(uint2(clamp(in.uv, 0.0, 0.9999) * size));
+		float4 w = p.clipInv * float4(in.uv * 2.0 - 1.0, d >= 0.99999 ? 0.9999 : d, 1.0);
+		float3 P = w.xyz / w.w;
+		float4 c = p.prevClip * float4(P, 1.0);
+		if (c.w > 0.05) {
+			float2 puv = c.xy / c.w * 0.5 + 0.5;
+			if (all(puv > 0.0) && all(puv < 1.0)) {
+				float4 h = hist.sample(ls, puv);
+				// (the history only where it was the same distance: an edge that moved shows the new value)
+				float same = 1.0 - smoothstep(0.05, 0.2, abs(h.g - len) / max(len, 1.0));
+				res.r = mix(res.r, h.r, 0.85 * same);
+			}
+		}
+	}
+	return res;
+}
+
 
 // Ambient occlusion (at half size): corners, the ground under ledges, between close blocks a little darker. Eight points in the
 // half sphere above the surface (its normal from the neighbouring depths), half a block out, each counting as hidden when the depth
@@ -298,9 +328,39 @@ fragment float4 im_bloom_ao(ImBloomOut in [[stage_in]], depth2d<float> depth [[t
 fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> src [[texture(0)]], sampler s [[sampler(0)]],
 	texture2d<float> hdr [[texture(1)]], texture2d<float> shafts [[texture(2)]], texture2d<float> aoT [[texture(3)]],
 	texture2d<float> pic [[texture(4)]], depth2d<float> depth [[texture(5)]], sampler ms [[sampler(1)]],
-	constant ImBloomParams &p [[buffer(0)]]) {
+	constant ImBloomParams &p [[buffer(0)]], constant ImVlFrame &f [[buffer(1)]]) {
 	float4 h = hdr.read(uint2(in.pos.xy));
 	float3 c = imbLinear(h.rgb);
+	if (p.grade.w > 0.0) {
+		// Reimagined's rainbow (lib/atmospherics/rainbow.glsl, after rain): a ring opposite the sun, over the sky and far land
+		float d = depth.read(uint2(clamp(in.uv, 0.0, 0.9999) * float2(depth.get_width(), depth.get_height())));
+		float4 w = p.clipInv * float4(in.uv * 2.0 - 1.0, d >= 0.99999 ? 0.9999 : d, 1.0);
+		float3 P = w.xyz / w.w;
+		float len = length(P);
+		float3 dir = P / max(len, 1e-4);
+		float rl = 0.9 * 256.0;
+		float far = d >= 0.99999 ? 1.0 : saturate(len / rl);
+		float vl = dot(dir, f.lightDir.xyz);
+		float rc = saturate(1.0 - (vl + 0.75) / 0.0625);
+		float rf = rc * (1.0 - rc) * 3.7;
+		rf *= rf;
+		rf *= rf;
+		rf *= far * far * p.grade.w;
+		if (rf > 0.0) {
+			float j = fract(52.9829189 * fract(dot(in.pos.xy, float2(0.06711056, 0.00583715))));
+			float rcm = pow(rc, 1.4 + max(rc - 0.5, 0.0) * 1.6);
+			rcm = smoothstep(0.0, 1.0, rcm) * 0.85 + (j - 0.5) * 0.1;
+			float3 rb = float3(0.0);
+			for (int k = -1; k <= 1; k++) {
+				float q = rcm + 0.1 * float(k);
+				rb += saturate(abs(fmod(q * 6.0 + float3(-0.55, 4.3, 2.2) + 60.0, 6.0) - 3.0) - 1.0);
+			}
+			rb /= 3.0;
+			rb.r += pow(max(rc - 0.5, 0.0), 2.0) * max(1.0 - rc, 0.0) * 26.0;
+			rb = pow(rb, 2.2) * float3(0.25, 0.075, 0.25) * 3.0;
+			c += rb * rf;
+		}
+	}
 	if (p.grade.y > 0.0) {
 		// Reimagined's bloom fog (lib/atmospherics/fog/bloomFog.glsl): in rain, at night, in caves and under water, the farther
 		// something is the more it dissolves into a soft glow of what's around it, the soft, hazy depth of its rainy and underwater
@@ -329,10 +389,24 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 	if (p.shaft.z > 0.0) {
 		// the light (a wide tent over the half-size texture: the jitter's grain smoothed; Reimagined smooths it with TAA)
 		float2 st = 1.0 / float2(shafts.get_width(), shafts.get_height());
-		float sh = 0.0;
+		// (edge-aware: each half-size texel counts by how close its traced distance is to this pixel's, so beams don't bleed
+		// over the edges of leaves and blocks)
+		float myLen = -1.0;
+		if (p.texel.z > 0.5) {  // (the resolve's texel.z: 1 = the depth is bound)
+			float dd = depth.read(uint2(clamp(in.uv, 0.0, 0.9999) * float2(depth.get_width(), depth.get_height())));
+			float4 ww = p.clipInv * float4(in.uv * 2.0 - 1.0, dd >= 0.99999 ? 0.9999 : dd, 1.0);
+			myLen = length(ww.xyz / ww.w);
+		}
+		float sh = 0.0, sw = 0.0;
 		for (int y = -1; y <= 1; y++)
-			for (int x = -1; x <= 1; x++) sh += shafts.sample(s, in.uv + st * float2(x, y) * 1.5).r * (2.0 - abs(float(x))) * (2.0 - abs(float(y)));
-		sh /= 16.0;
+			for (int x = -1; x <= 1; x++) {
+				float2 sv = shafts.sample(s, in.uv + st * float2(x, y)).rg;
+				float wgt = (2.0 - abs(float(x))) * (2.0 - abs(float(y)));
+				if (myLen >= 0.0) wgt *= 1.0 / (1.0 + 20.0 * abs(sv.g - myLen) / max(myLen, 1.0));
+				sh += sv.r * wgt;
+				sw += wgt;
+			}
+		sh /= max(sw, 1e-4);
 		c += p.shaftColor.rgb * (sh * p.shaft.z);
 	}
 	if (p.mix.x != 0.0) {

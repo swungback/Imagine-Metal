@@ -261,9 +261,9 @@ static float imEmission(uint cls, float3 tex) {
 		// ores: every pixel with clear colour against the grey stone around it (the whole speck, its coloured edge too; iron's pale
 		// specks count; a speck's near-grey highlights and coal's black specks don't), at a faint glow that keeps the texture's own
 		// light and dark
-		case IM_MAT_ORE: return 1.5 * smoothstep(0.08, 0.2, sat);
+		case IM_MAT_ORE: return 2.6 * smoothstep(0.08, 0.2, sat) * (0.5 + 0.5 * hi);
 		// nether ores sit in red netherrack: their specks are told apart by brightness instead
-		case IM_MAT_NETHER_ORE: return 1.4 * smoothstep(0.5, 0.75, l);
+		case IM_MAT_NETHER_ORE: return 2.2 * smoothstep(0.5, 0.75, l);
 		// faint lights (sculk sensors and catalysts, magma, glow lichen): only their bright, coloured parts glow, as a flame's
 		case IM_MAT_DIM: return 1.6 * smoothstep(0.5, 0.85, hi) * smoothstep(0.12, 0.35, sat);
 		// sculk's specks: only their brightest pixels (small, calm dots), but far past white, so the bloom gives each a soft halo
@@ -656,6 +656,19 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	float2 sm = imShadow(p, n, pixel, f, smap, cmp);
 	float open = smoothstep(0.45, 0.9, sky);
 	float sun = mix(open, sm.x, sm.y) * (f.water.z > 0.5 && f.flags.x == 0 ? 0.3 + 0.7 * smoothstep(0.0, 0.6, sky) : smoothstep(0.0, 0.07, sky));
+	// caustics (eyes under water: what you see is under it too): the waves above focus the sunlight into a moving net of bright
+	// lines on everything it reaches, from two drifting noises' crossings, along the light's direction
+	if (f.water.z > 0.5 && f.flags.x == 0 && sun > 0.0) {
+		float3 wpc = p + f.world.xyz;
+		float2 cq = (wpc.xz - f.lightDir.xz * (wpc.y / max(f.lightDir.y, 0.2))) * 0.6;
+		float tc = f.world.w * 0.5;
+		float n1 = imValueNoise(cq + float2(tc, tc * 0.6)), n2 = imValueNoise(cq * 1.3 - float2(tc * 0.7, tc));
+		float cl = 1.0 - abs(n1 - n2) * 3.0;
+		cl = saturate(cl);
+		cl *= cl;
+		cl *= cl;
+		sun *= 0.45 + 1.8 * cl;
+	}
 	float3 direct = f.lightColor.rgb * (wrap * sun);
 	// (and glow when the light is behind them: Reimagined's subsurface highlight, looking toward the sun through grass and leaves,
 	// their backlit edges lit up gold; added on top of the surface, as its highlight is)
@@ -831,6 +844,13 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		}
 	}
 	// light given off: on top of the tone-mapped light, unclamped (the picture is HDR: Bloom's resolve maps it to the screen)
-	c = max(c, 0.0) + pow(max(tex, 0.0), 2.2) * emit * airT;  // (the texture's colour: light given off isn't darkened by corner shading)
+	float3 ecol = pow(max(tex, 0.0), 2.2);
+	if (cls == IM_MAT_ORE || cls == IM_MAT_NETHER_ORE) {
+		// (Reimagined's glowing ores: each speck's own colour made deeper (colour x colour^k: redstone's red pure, diamond's
+		// cyan, emerald's green), then glowing well past white so the bloom gives every speck a halo; the stone stays dark)
+		float em = max(max(ecol.r, ecol.g), ecol.b);
+		ecol = ecol * pow(ecol / max(em, 1e-3), 1.2);
+	}
+	c = max(c, 0.0) + ecol * emit * airT;  // (the texture's colour: light given off isn't darkened by corner shading)
 	return pow(c, 1.0 / 2.2);
 }
