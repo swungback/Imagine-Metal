@@ -624,8 +624,10 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			surf.d = mix(surf.d, 1.0, 1.0 - (1.0 - pmix) * (1.0 - pmix));
 			N = normalize(mix(N, n, 1.0 - (1.0 - pmix) * (1.0 - pmix)));
 		}
-		surf.d = max(surf.d, 0.3 * wetF * saturate(n.y));
+		surf.g = max(surf.g, 0.4 * wetF * saturate(n.y));  // (the rest: a wet sheen in the sun, no reflections traced)
 	}
+	float block = light.x, sky = light.y;
+	float skyF = imSkyCurve(sky);
 
 	// direct light: wrapped N.L; until there are shadow maps, the sky light stands in for them (no sun under a roof)
 	float nl = dot(N, f.lightDir.xyz);
