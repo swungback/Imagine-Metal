@@ -64,6 +64,35 @@ public final class LightColors {
 		return c;
 	}
 
+	private static final ConcurrentHashMap<BlockState, float[]> EXTRA = new ConcurrentHashMap<>();
+	private static final float[] NO_LIGHT = new float[0];
+
+	/**
+	 * Blocks that give off no light in Minecraft but do in Reimagined's coloured light (its floodfill, blocklightColors.glsl):
+	 * the glowing ores a faint glow of their own colour on the stone around them, the redstone and lapis blocks a stronger one.
+	 * {r, g, b (brightest 1), level}, or null.
+	 */
+	static float[] extra(BlockState state) {
+		float[] c = EXTRA.get(state);
+		if (c == null) {
+			String n = state.getBlock().toString().toLowerCase(java.util.Locale.ROOT);
+			c = n.contains("redstone_block") ? new float[] {1f, 0.025f, 0.025f, 7}
+				: n.contains("lapis_block") ? new float[] {0.25f, 0.25f, 1f, 6}
+				: n.contains("redstone_ore") ? new float[] {1f, 0.025f, 0.025f, 4}
+				: n.contains("diamond_ore") ? new float[] {0.25f, 1f, 1f, 4}
+				: n.contains("emerald_ore") ? new float[] {0.14f, 1f, 0.14f, 4}
+				: n.contains("lapis_ore") ? new float[] {0.25f, 0.25f, 1f, 4}
+				: n.contains("nether_gold_ore") || n.contains("gilded_blackstone") ? new float[] {1f, 0.65f, 0.12f, 3}
+				: n.contains("gold_ore") ? new float[] {1f, 0.65f, 0.12f, 4}
+				: n.contains("copper_ore") ? new float[] {1f, 0.47f, 0.24f, 3}
+				: n.contains("iron_ore") ? new float[] {1f, 0.53f, 0.24f, 3}
+				: n.contains("nether_quartz_ore") ? new float[] {1f, 1f, 1f, 3}
+				: NO_LIGHT;
+			EXTRA.put(state, c);
+		}
+		return c.length == 0 ? null : c;
+	}
+
 	private static float[] find(String name) {
 		// flames first where a coloured word would be misleading ("redstone_torch" is red, "soul_torch" blue: those stay above)
 		if (name.contains("soul")) return SOUL;

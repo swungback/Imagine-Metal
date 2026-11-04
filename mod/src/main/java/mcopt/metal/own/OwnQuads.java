@@ -431,7 +431,9 @@ public final class OwnQuads {
 					int m = mt[i];
 					int gb = grid[m & 4095], wave = gb >> 4 & 3;
 					int corners = wave == 2 ? 15 : wave == 1 ? m >>> 12 & 15 : 0;
-					MemoryUtil.memPutByte(dst++, (byte) (gb & 15 | corners << 4));
+					// (Imagine Metal: an ore's upper bits are which ore it is, not corners: ores don't wave)
+					int cls = gb & 15;
+					MemoryUtil.memPutByte(dst++, (byte) (cls == 4 || cls == 6 ? gb : cls | corners << 4));
 				}
 			}
 		}

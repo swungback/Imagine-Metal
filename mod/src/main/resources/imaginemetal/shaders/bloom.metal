@@ -209,7 +209,8 @@ static inline float imbNoise3(float3 q, int3 per) {
 	return mix(a, b, u.z);
 }
 
-static float imbStorm(float3 dir, float len, bool open, float j, constant ImBloomParams &p, constant ImVlFrame &f) {
+static float imbStorm(float3 dir, float len, bool open, float j, texture3d<float> nt, sampler ns, constant ImBloomParams &p,
+	constant ImVlFrame &f) {
 	float maxDist = max(p.shaft.w, 32.0);
 	float rayEnd = open ? maxDist : min(len, maxDist);
 	const int N = 12;
@@ -225,7 +226,9 @@ static float imbStorm(float3 dir, float len, bool open, float j, constant ImBloo
 		// (its slant: height and x together, as Reimagined's lattice, so the clouds lean)
 		float3 q = float3(wp.x, wp.y + wp.x, wp.z);
 		// a slow warp first (cells of 8 blocks), then the two coarse sizes (4 and 2 blocks across, 16 and 8 tall)
-		float3 warp = float3(imbNoise3(q * 0.125 - windW, int3(512, 512, 512)));
+		// (the noise from a 64^3 texture of random values, filtered by the sampler: one sample for eight hashed corners, Apple's
+		// texture units doing the blend; its 64-cell repeat divides every lattice's wrap)
+		float3 warp = float3(nt.sample(ns, (q * 0.125 - windW) * (1.0 / 64.0)).r);
 		float3 l1 = q * float3(0.25, 0.0625, 0.25) + warp * float3(2.56, 0.64, 2.56);
 		float alt = abs(wp.y - 28.0);
 		if (wp.y < 28.0) alt *= 10.0;
@@ -234,8 +237,8 @@ static float imbStorm(float3 dir, float len, bool open, float j, constant ImBloo
 		alt4 *= alt4;
 		float fade = saturate(1.0 - t / maxDist);
 		fade = fade * (2.0 - fade);
-		float n1 = imbNoise3(l1 + wind1, int3(1024, 256, 1024));
-		float n2 = imbNoise3(l1 * 2.0 - wind1 * 2.0, int3(2048, 512, 2048));
+		float n1 = nt.sample(ns, (l1 + wind1) * (1.0 / 64.0)).r;
+		float n2 = nt.sample(ns, (l1 * 2.0 - wind1 * 2.0) * (1.0 / 64.0)).r;
 		n1 *= n1; n1 *= n1; n1 *= n1;
 		n2 *= n2; n2 *= n2; n2 *= n2;
 		// (the two finest sizes: their mean, E[n^8] of this noise, 0.0229 each)
@@ -336,8 +339,8 @@ static float4 imbEnd(float3 dir, float len, bool open, float j, depth2d_array<fl
 // Strongest at sunrise and sunset, looking toward the light and toward the horizon; at noon only an eighth of it, except where
 // something is overhead (a forest, a cave, an arch: "scene-aware", p.shaft.y), where the beams are the point.
 // p.shaft: x 1 = eyes under water, y how much there's something overhead (0..1), z strength (0 off), w the far shadow map's reach.
-static float4 imbShaftsNow(ImBloomOut in, depth2d<float> depth, depth2d_array<float> smap, sampler cmp, constant ImBloomParams &p,
-	constant ImVlFrame &f) {
+static float4 imbShaftsNow(ImBloomOut in, depth2d<float> depth, depth2d_array<float> smap, sampler cmp, texture3d<float> nt, sampler ns,
+	constant ImBloomParams &p, constant ImVlFrame &f) {
 	float2 size = float2(depth.get_width(), depth.get_height());
 	float d = depth.read(uint2(clamp(in.uv, 0.0, 0.9999) * size));
 	bool sky = d >= 0.99999;
@@ -349,7 +352,7 @@ static float4 imbShaftsNow(ImBloomOut in, depth2d<float> depth, depth2d_array<fl
 		// (the Nether: its storm instead; the End: its beams. A new step offset each frame)
 		float js = fract(52.9829189 * fract(dot(in.pos.xy, float2(0.06711056, 0.00583715))) + 0.61803399 * float(f.flags.w & 1023));
 		if (p.shaft.x < -2.5) return imbEnd(dir, len, sky, js, smap, cmp, p, f);
-		return float4(imbStorm(dir, len, sky, js, p, f), len, 0.0, 1.0);
+		return float4(imbStorm(dir, len, sky, js, nt, ns, p, f), len, 0.0, 1.0);
 	}
 	bool water = p.shaft.x < -0.5;
 	float intense = water ? 1.0 : p.shaft.y;
@@ -424,9 +427,9 @@ static float4 imbShaftsNow(ImBloomOut in, depth2d<float> depth, depth2d_array<fl
 }
 
 fragment float4 im_bloom_shafts(ImBloomOut in [[stage_in]], depth2d<float> depth [[texture(1)]], texture2d<float> hist [[texture(2)]],
-	depth2d_array<float> smap [[texture(4)]], sampler ls [[sampler(0)]], sampler cmp [[sampler(1)]], constant ImBloomParams &p [[buffer(0)]],
-	constant ImVlFrame &f [[buffer(1)]]) {
-	float4 res = imbShaftsNow(in, depth, smap, cmp, p, f);
+	depth2d_array<float> smap [[texture(4)]], texture3d<float> nt [[texture(5)]], sampler ls [[sampler(0)]], sampler cmp [[sampler(1)]],
+	sampler ns [[sampler(2)]], constant ImBloomParams &p [[buffer(0)]], constant ImVlFrame &f [[buffer(1)]]) {
+	float4 res = imbShaftsNow(in, depth, smap, cmp, nt, ns, p, f);
 	// (temporal: a jitter that changes every frame, averaged with the last frames' result where that is the same place in the
 	// world: smooth beams for twelve samples a pixel, as Reimagined gets with its TAA)
 	if (p.mix.w > 0.5) {

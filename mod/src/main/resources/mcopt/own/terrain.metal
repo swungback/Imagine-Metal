@@ -1826,6 +1826,7 @@ vertex VOut own_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant Dr
 		// and the upper half of tall plants; else the corners above the quad's middle, a plant's top): a breeze from where the
 		// vertex is in the world and the time, so shared corners move together and the plant stays in one piece
 		uint wc = (ov.imMat >> 4) & 15u;
+		if ((ov.imMat & 15u) == 4u || (ov.imMat & 15u) == 6u) wc = 0u;  // (an ore's upper bits say which ore it is)
 		if (wc != 0u && (wc == 15u || ((wc >> corner) & 1u) != 0u)) {
 			float3 wp = float3(origin & 1023) + rel;
 			float tw = g.GameTime * 1200.0;

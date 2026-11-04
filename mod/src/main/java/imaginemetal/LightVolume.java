@@ -89,6 +89,13 @@ public final class LightVolume {
 			c.sources[c.count++] = i;
 			// 4 levels stronger than Minecraft's: coloured lights read clearly (a redstone torch lights like an 11)
 			c.sources[c.count++] = r | g << 8 | b << 16 | Math.min(light + 4, 15) << 24;
+		} else if (light == 0 && c.count + 2 <= c.sources.length) {
+			// (Reimagined's extra lights: glowing ores, the redstone and lapis blocks)
+			float[] e = LightColors.extra(state);
+			if (e != null) {
+				c.sources[c.count++] = i;
+				c.sources[c.count++] = Math.round(e[0] * 255f) | Math.round(e[1] * 255f) << 8 | Math.round(e[2] * 255f) << 16 | (int) e[3] << 24;
+			}
 		}
 	}
 

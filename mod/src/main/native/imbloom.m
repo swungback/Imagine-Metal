@@ -6,6 +6,7 @@
 // Manual retain/release (the library builds with -fno-objc-arc).
 #import "mcmetal.h"
 #include <string.h>
+#include <stdlib.h>
 
 #define IM_BLOOM_MAX 7
 
@@ -53,6 +54,8 @@ typedef struct {
 	id<MTLTexture> views[IM_BLOOM_MAX];
 	int levels, width, height;  // of the main image the chain was made for
 	id<MTLSamplerState> linear;
+	id<MTLTexture> noise3;         // the Nether storm's noise: 64^3 random bytes (shared storage, filled once)
+	id<MTLSamplerState> noiseSamp; // linear, repeating
 } ImBloom;
 
 static void imbErr(NSError *e, const char *what, char *err, int cap) {
@@ -117,6 +120,37 @@ ImBloom *im_bloom_new(Ctx *ctx, const char *source, char *err, int errCap) {
 		sd.sAddressMode = MTLSamplerAddressModeClampToEdge;
 		sd.tAddressMode = MTLSamplerAddressModeClampToEdge;
 		b->linear = [ctx->device newSamplerStateWithDescriptor:sd];
+		// the storm's 3D noise (white per texel, filtered by the sampler: one sample where the shader hashed eight corners)
+		{
+			MTLTextureDescriptor *nd = [[MTLTextureDescriptor new] autorelease];
+			nd.textureType = MTLTextureType3D;
+			nd.pixelFormat = MTLPixelFormatR8Unorm;
+			nd.width = nd.height = nd.depth = 64;
+			nd.storageMode = MTLStorageModeShared;
+			nd.usage = MTLTextureUsageShaderRead;
+			b->noise3 = [ctx->device newTextureWithDescriptor:nd];
+			if (b->noise3) {
+				uint8_t *bytes = (uint8_t *) malloc(64 * 64 * 64);
+				if (bytes) {
+					for (uint32_t i = 0; i < 64u * 64u * 64u; i++) {
+						uint32_t h = i * 2654435761u + 0x9E3779B9u;
+						h = (h ^ (h >> 16)) * 2246822519u;
+						h ^= h >> 13;
+						h *= 3266489917u;
+						h ^= h >> 16;
+						bytes[i] = (uint8_t) (h >> 24);
+					}
+					[b->noise3 replaceRegion:MTLRegionMake3D(0, 0, 0, 64, 64, 64) mipmapLevel:0 slice:0 withBytes:bytes bytesPerRow:64
+						bytesPerImage:64 * 64];
+					free(bytes);
+				}
+			}
+			MTLSamplerDescriptor *ns = [[MTLSamplerDescriptor new] autorelease];
+			ns.minFilter = MTLSamplerMinMagFilterLinear;
+			ns.magFilter = MTLSamplerMinMagFilterLinear;
+			ns.sAddressMode = ns.tAddressMode = ns.rAddressMode = MTLSamplerAddressModeRepeat;
+			b->noiseSamp = [ctx->device newSamplerStateWithDescriptor:ns];
+		}
 		return b;
 	}
 }
@@ -329,6 +363,8 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 				[r setFragmentTexture:depth atIndex:1];
 				[r setFragmentTexture:prev atIndex:2];
 				[r setFragmentTexture:smap atIndex:4];
+				[r setFragmentTexture:b->noise3 atIndex:5];
+				[r setFragmentSamplerState:b->noiseSamp atIndex:2];
 				[r setFragmentSamplerState:b->linear atIndex:0];
 				[r setFragmentSamplerState:scmp atIndex:1];
 				[r setFragmentBytes:&p length:sizeof p atIndex:0];

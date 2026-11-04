@@ -115,12 +115,41 @@ public final class Materials {
 		return false;
 	}
 
+	/**
+	 * Which ore (bits 4-7 of an ore's material byte; lighting.metal imOre has each one's glow, Reimagined's): 0 one we don't know
+	 * (modded: glows by its own colours), 1 iron, 2 copper, 3 gold, 4 diamond, 5 emerald, 6 lapis, 7 redstone, 8 redstone lit,
+	 * 9 coal, 10 nether quartz, 11 nether gold, 12 ancient debris, 13 gilded blackstone.
+	 */
+	private static int oreType(String n, BlockState state) {
+		if (n.contains("ancient_debris")) return 12;
+		if (n.contains("gilded_blackstone")) return 13;
+		if (n.contains("nether_quartz")) return 10;
+		if (n.contains("nether_gold")) return 11;
+		if (n.contains("redstone")) {
+			boolean lit = false;
+			try {
+				lit = state.hasProperty(BlockStateProperties.LIT) && state.getValue(BlockStateProperties.LIT);
+			} catch (Throwable ignored) {
+			}
+			return lit ? 8 : 7;
+		}
+		if (n.contains("iron_ore")) return 1;
+		if (n.contains("copper_ore")) return 2;
+		if (n.contains("gold_ore")) return 3;
+		if (n.contains("diamond_ore")) return 4;
+		if (n.contains("emerald_ore")) return 5;
+		if (n.contains("lapis_ore")) return 6;
+		if (n.contains("coal_ore")) return 9;
+		return 0;
+	}
+
 	private static byte classify(BlockState state) {
 		if (state.getBlock() == Blocks.LAVA) return LAVA;
 		String name = state.getBlock().toString().toLowerCase(java.util.Locale.ROOT); // "Block{minecraft:diamond_ore}"
 		// ores first: a lit redstone ore gives off light, but only its specks should glow, not the stone around them
-		if (name.contains("ancient_debris") || name.contains("nether") && name.contains("_ore")) return NETHER_ORE;
-		if (name.contains("_ore")) return ORE;
+		if (name.contains("ancient_debris") || name.contains("nether") && name.contains("_ore") || name.contains("gilded_blackstone"))
+			return (byte) (NETHER_ORE | oreType(name, state) << 4);
+		if (name.contains("_ore")) return (byte) (ORE | oreType(name, state) << 4);
 		// sculk: its cyan specks glow like stars in the deep dark (the blocks themselves give off no light)
 		if (name.contains("sculk") && state.getLightEmission() == 0) return SCULK;
 		int light = state.getLightEmission();

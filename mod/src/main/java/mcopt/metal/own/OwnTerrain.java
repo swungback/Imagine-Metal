@@ -687,6 +687,11 @@ public final class OwnTerrain {
 				}
 				int bx = Math.clamp((int) Math.floor(cx), 0, 15), by = Math.clamp((int) Math.floor(cy), 0, 15), bz = Math.clamp((int) Math.floor(cz), 0, 15);
 				int gb = grid[by << 8 | bz << 4 | bx], m = gb & 15, wave = gb >> 4 & 3;
+				// (Imagine Metal: an ore's upper bits are which ore it is, not corners: ores don't wave)
+				if (m == 4 || m == 6) {
+					m = gb & 0xFF;
+					wave = 0;
+				}
 				float mid = (ylo + yhi) * 0.5F + 1e-4F;
 				// (corner bits only for blocks that wave: 1 the corners above the quad's middle, 2 all four)
 				if (wave == 2) m |= 0xF0;

@@ -589,6 +589,57 @@ static inline float imValueNoise(float2 q) {
 	return mix(mix(imHash2(i), imHash2(i + int2(1, 0)), u.x), mix(imHash2(i + int2(0, 1)), imHash2(i + int2(1, 1)), u.x), u.y);
 }
 
+// Reimagined's glowing ores (lib/materials/materialHandling/terrainIPBR.glsl, GLOWING_ORE_*), ore by ore: which texels are the ore's
+// own (its rule on the texel's colour), how strongly they glow (e: Reimagined adds e^2 to the light, so the light given off is
+// (colour x e^2)^2.2 once linear: a diamond's core far past white, iron a soft peach) and how the speck's colour is deepened
+// (cm: colour x colour^k; redstone's green and blue cut to a tenth). t: the ore (Materials.oreType); c: the texel (gamma).
+static float imOre(uint t, float3 c, thread float3 &cm) {
+	cm = float3(1.0);
+	switch (t) {
+		case 1u:  // iron
+			if (c.r != c.g && c.r - c.b > 0.15) { cm = pow(max(c, 0.0), 0.5); return pow(c.r, 1.5) * 1.5; }
+			break;
+		case 2u:  // copper
+			if (max(c.r * 0.5, c.g) - c.b > 0.05 && (c.r + c.g > 1.9 || c.r + c.g + c.b < 1.9)) { cm = c; return c.r * 2.0 + 0.7; }
+			break;
+		case 3u:  // gold
+			if ((c.g - c.b > 0.15 || c.r > 0.99) && (c.r + c.g > 1.9 || c.r + c.g + c.b < 1.9)) { cm = c; return c.r + 1.0; }
+			break;
+		case 4u:  // diamond
+			if (c.b / max(c.r, 1e-3) > 1.5 || c.b > 0.8) { cm = c; return c.g + 1.5; }
+			break;
+		case 5u: {  // emerald
+			float dif = max(max(abs(c.r - c.g), abs(c.r - c.b)), abs(c.g - c.b));
+			if (dif > 0.4 || c.b > 0.85) { cm = c; return 2.0; }
+			break;
+		}
+		case 6u:  // lapis
+			if (c.r != c.g && c.b - c.r > 0.2) { cm = c; return 2.0; }
+			break;
+		case 7u:  // redstone
+		case 8u:  // (lit)
+			if (c.r - c.g > 0.2) { cm = float3(1.0, 0.1, 0.1); return c.r * pow(c.r, 1.5) * (t == 8u ? 4.5 : 4.0); }
+			break;
+		case 10u:  // nether quartz
+			if (c.g != c.b) { float b = c.b * 1.6; return b * b; }
+			break;
+		case 11u:  // nether gold
+			if (c.g != c.b) return c.g * 1.5;
+			break;
+		case 12u: {  // ancient debris (all of it, its bright lines most)
+			float g6 = c.g * 6.0;
+			cm = pow(max(c, 0.0), 0.75);
+			return 1.5 + 0.6 * min(g6 * g6, 8.0);
+		}
+		case 13u:  // gilded blackstone
+			if (c.r > c.b * 3.0) return c.g * 1.5;
+			break;
+		default:
+			break;
+	}
+	return 0.0;
+}
+
 static inline float imDither(float2 pixel, constant ImFrame &f) {
 	float d = fract(dot(pixel, float2(0.06711056, 0.00583715)) * 52.9829189);
 	return f.taa.z > 0.5 ? fract(d + 0.61803399 * float(f.flags.w & 63)) : d;
@@ -619,6 +670,11 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	}
 	// (Reimagined lights the texture's colours as they are and encodes only at the end; that lifts the mid tones and keeps the
 	// shadows open: its bright, lively look. Linearizing them first, as physically based packs do, gives a darker, moodier picture.)
+	// ores we know glow as Reimagined's (imOre); one we don't (modded) by its own colours (imEmission)
+	uint oreT = (cls == IM_MAT_ORE || cls == IM_MAT_NETHER_ORE) ? (mat >> 4) & 15u : 0u;
+	float3 oreCm = float3(1.0);
+	float oreE = oreT != 0u ? imOre(oreT, tex, oreCm) : 0.0;
+	if (oreE > 0.0) albedo *= oreCm;
 	float3 base = pow(max(albedo, 0.0), 2.2);
 	bool pbr = f.shadow.w > 0.5 && f.flags.y == 0;
 	ImSurf surf = pbr ? imSurface(cls, albedo, tex) : ImSurf{0.0, 0.0, 0.0, 0.04, 0.0};
@@ -778,7 +834,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		float gm = max(max(gl.r, gl.g), gl.b);
 		return pow(gm > 1e-4 ? gl.rgb / gm * saturate(gl.a * 1.5) : float3(0.0), 1.0 / 2.2) * 0.9 + base * 0.1;
 	}
-	float emit = imEmission(cls, tex);
+	float emit = oreT != 0u ? 0.0 : imEmission(cls, tex);
 	if (cls == IM_MAT_SCULK && emit > 0.0) {
 		// sculk's specks pulse (after Euphoria Patches): each speck its own slow breathing, from its block and its place in the
 		// texture, so a field of sculk twinkles instead of glowing flat
@@ -875,5 +931,11 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		ecol = ecol * pow(ecol / max(em, 1e-3), 0.35);
 	}
 	c = max(c, 0.0) + ecol * emit * airT;  // (the texture's colour: light given off isn't darkened by corner shading)
+	if (oreE > 0.0) {
+		// (Reimagined's light given off, linear, a quarter less in full daylight; through the tone curve (its own goes through
+		// Reimagined's), then doubled so the brightest specks pass white and the bloom haloes them)
+		float3 oe = pow(max(tex * oreCm * (oreE * oreE), 0.0), 2.2) * (1.0 - 0.25 * f.blockColor.w * sky);
+		c += imTonemap(oe * 0.5, f.tonemap) * (2.0 * airT);
+	}
 	return pow(c, 1.0 / 2.2);
 }
