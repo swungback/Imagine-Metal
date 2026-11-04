@@ -270,7 +270,9 @@ public final class ImagineFrame {
 			for (int i = 0; i < 3; i++) {
 				float fallback = f[i] * 0.6f + 0.2f * (f[i] + 1e-4f) / fl;
 				netherColor[i] = mix(fallback, Haze.netherPreset[i], Haze.netherKnown);
-				up[i] = (float) Math.pow((netherColor[i] + 0.5f * lava[i]) * (0.9f + 0.45f * vsB), 2.2);
+				// (Reimagined's ambient made linear at 1.6 rather than 2.2, and a little stronger: at 2.2 the caverns were near black
+				// beside the lava, darker than its shots)
+				up[i] = (float) Math.pow((netherColor[i] + 0.5f * lava[i]) * (0.9f + 0.45f * vsB), 1.6) * 1.4f;
 			}
 		} else if (Settings.endStyle == 1) {
 			// the End with its black hole: low over the islands, a bright white light from it (long shadows), the rest of the sky

@@ -628,7 +628,9 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 	// the light part lifted (Photon's dark darks, Reimagined's bright brights): above mid grey up to a quarter brighter, the lit
 	// ground, the sky and the lights; the shade and the dark untouched, so the picture spans more range instead of a brighter grey
 	float lumH = dot(c, float3(0.2126, 0.7152, 0.0722));
-	c *= 1.0 + 0.25 * smoothstep(0.18, 0.75, lumH);
+	// (fading out toward the top: lifting the bright sky and sunsets pushed them into the roll-off, washing their colour out)
+	float mxH = max(max(c.r, c.g), c.b);
+	c *= 1.0 + 0.25 * smoothstep(0.18, 0.5, lumH) * (1.0 - smoothstep(0.5, 0.85, mxH));
 	// (Reimagined's tone curve's "path to white": the very brightest light, lava's hot spots, a flame's core, the sun's glare,
 	// turns toward white, so lava reads yellow-hot instead of a flat orange)
 	float lum2 = dot(c, float3(0.2126, 0.7152, 0.0722));
