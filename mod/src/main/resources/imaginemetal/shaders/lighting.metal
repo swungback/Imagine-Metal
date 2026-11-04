@@ -142,12 +142,12 @@ static inline float imLuma(float3 c) {
 	return dot(c, float3(0.2126, 0.7152, 0.0722));
 }
 
-// Block light level 0..1 -> intensity: a hot core next to the source and a long reach (2.95 at level 15, 2.1 at 14, 1.0 at 12,
-// 0.5 at 10, 0.13 at 7, 0.04 at 5), so weak lights still light their surroundings: a redstone torch (level 7) or a soul torch
+// Block light level 0..1 -> intensity: a hot core next to the source and a long reach (3.0 at level 15, 2.2 at 14, 1.1 at 12,
+// 0.57 at 10, 0.15 at 7, 0.05 at 5), so weak lights still light their surroundings: a redstone torch (level 7) or a soul torch
 // (10) colours the wall it's on. The dark between lights comes from the grade (Bloom's resolve), not from cutting the reach.
 static inline float imBlockCurve(float b) {
 	float b2 = b * b, b4 = b2 * b2, b8 = b4 * b4;
-	return 1.8 * pow(b, 3.5) + 1.15 * b8;  // (brighter near the light, as Reimagined's)
+	return 2.2 * pow(b, 3.5) + 1.6 * b8;  // (brighter near the light, as Reimagined's)
 }
 
 // Sky light level 0..1 -> how much of the sky's light reaches the surface.
@@ -323,7 +323,7 @@ static float4 imBlockLight(float3 p, float3 n, constant ImFrame &f, texture3d<fl
 	if (m < 1e-4) return float4(warm, 0.0);
 	float3 hue = c.rgb / m;
 	float hl = imLuma(hue);
-	hue = max(hl + (hue - hl) * 1.2, 0.0);
+	hue = max(hl + (hue - hl) * 1.35, 0.0);
 	// (as bright as the torch colour, times how bright the sources here are: 1 for most, about half near lava)
 	hue *= max(max(warm.r, warm.g), warm.b) / max(max(max(hue.r, hue.g), hue.b), 1e-4) * min(m, 1.0);
 	float w = inside * smoothstep(0.0, 0.04, c.a);

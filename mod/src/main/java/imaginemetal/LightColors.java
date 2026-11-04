@@ -39,7 +39,7 @@ public final class LightColors {
 		// (lava and magma at about 70 % strength: a lava pool is dozens of level-15 lights at once and drowned whole rooms in orange;
 		// a colour's brightest channel below 1 makes that light dimmer, lighting.metal imBlockLight)
 		{"magma", new float[] {0.60f, 0.24f, 0.07f}},
-		{"lava", new float[] {0.95f, 0.48f, 0.16f}},  // (Reimagined's lava lights the walls around it brightly, orange-brown)
+		{"lava", new float[] {0.95f, 0.36f, 0.10f}},  // (a deeper red-orange: lava-lit stone read yellow)
 		{"enchanting_table", new float[] {0.70f, 0.50f, 1.00f}},
 		{"ender_chest", new float[] {0.40f, 0.80f, 0.70f}},
 		{"brewing_stand", new float[] {1.00f, 0.80f, 0.45f}},

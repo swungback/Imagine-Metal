@@ -82,7 +82,7 @@ public final class ImagineFrame {
 	// night (toward Reimagined's: a lavender-blue moonlight, its red above its green, a deep blue sky light; a little darker)
 	private static final float[] MOON = {0.12f, 0.11f, 0.20f};
 	private static final float[] NIGHT_SKY = {0.036f, 0.039f, 0.085f};
-	private static final float[] TORCH = {1.45f, 0.56f, 0.22f};  // (Reimagined's warm orange with a little blue left in it: lit stone stays stone, not mustard yellow)
+	private static final float[] TORCH = {1.45f, 0.50f, 0.12f};  // (Reimagined's hue, a little brighter: its torch rooms are lit further)
 	private static final float[] CAVE = {0.0055f, 0.0060f, 0.0085f};
 	private static final float[] END_LIGHT = {0.52f, 0.40f, 0.74f};
 	private static final float[] END_SKY = {0.095f, 0.068f, 0.15f};
@@ -272,7 +272,7 @@ public final class ImagineFrame {
 				netherColor[i] = mix(fallback, Haze.netherPreset[i], Haze.netherKnown);
 				// (Reimagined's ambient made linear at 1.6 rather than 2.2, and a little stronger: at 2.2 the caverns were near black
 				// beside the lava, darker than its shots)
-				up[i] = (float) Math.pow((netherColor[i] + 0.5f * lava[i]) * (0.9f + 0.45f * vsB), 1.6) * 1.4f;
+				up[i] = (float) Math.pow((netherColor[i] + 0.5f * lava[i]) * (0.9f + 0.45f * vsB), 1.35) * 1.9f;  // (brighter again: still too dark next to Reimagined)
 			}
 		} else if (Settings.endStyle == 1) {
 			// the End with its black hole: low over the islands, a bright white light from it (long shadows), the rest of the sky
