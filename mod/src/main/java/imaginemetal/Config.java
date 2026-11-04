@@ -53,8 +53,6 @@ public final class Config {
 		#
 		# A light in your hand lights what's around you; how bright moonlit nights are (1 = ours).
 		imaginemetal.heldLight=true
-		# Colours: 1 Reimagined's (bright, lively: the textures lit as they are), 0 linear (darker, moodier).
-		imaginemetal.colorStyle=1
 		# Plants and leaves sway in the wind.
 		imaginemetal.waving=true
 		# Water: 0 vanilla, 1 Reimagined (its colour, see-through, reflections), 2 Reimagined with waves.

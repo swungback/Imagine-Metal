@@ -45,7 +45,7 @@ public final class Bloom {
 		if (!Settings.shafts || !Reflections.valid || !(ImagineFrame.shaftOn || water) || !Shadows.valid()) return r;
 		r[0] = water ? 1f : 0f;
 		r[1] = ImagineFrame.shaftCover;
-		r[2] = Settings.shaftStrength * 0.6f;
+		r[2] = Settings.shaftStrength * 1.4f;
 		float rain = ImagineFrame.shaftRain, noon = ImagineFrame.shaftNoon, invNoon = 1f - noon, sunVis = ImagineFrame.shaftSunVis;
 		// (Reimagined's light shaft colours, COMPOSITE1 in lib/colors/lightAndAmbientColors.glsl: a sky blue at noon, deep orange at
 		// sunrise and sunset, a dark blue at night; in rain its rain light)

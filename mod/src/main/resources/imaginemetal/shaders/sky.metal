@@ -108,13 +108,15 @@ constant float IM_CLOUD_STRETCH = 4.0;   // half the clouds' thickness (blocks)
 constant float IM_CLOUD_ROUND = 0.125;
 
 static inline float imCloudMap(texture2d<float> ct, sampler s, float2 texel) {
+	// (wrapped into one positive copy of the map first: the old mirroring of negative coordinates turned the map around the
+	// moment the camera crossed the map's edge, every 3072 blocks, and the clouds jumped)
+	float2 sz = float2(ct.get_width(), ct.get_height());
 	float2 c = texel + 0.5;
-	float2 sg = sign(c);
-	c = abs(c) + 1.0;
+	c = c - floor(c / sz) * sz + sz;
 	float2 i = floor(c), fr = c - i;
 	fr = smoothstep(0.5 - IM_CLOUD_ROUND, 0.5 + IM_CLOUD_ROUND, fr);
-	c = (i + fr - 0.5) * sg;
-	return ct.sample(s, c / float2(ct.get_width(), ct.get_height())).r;
+	c = i + fr - 0.5;
+	return ct.sample(s, c / sz).r;
 }
 
 static float4 imClouds(float3 d, constant ImFrame &f, texture2d<float> ct, sampler s, float dither) {

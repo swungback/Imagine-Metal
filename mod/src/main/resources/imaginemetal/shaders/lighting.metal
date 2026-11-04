@@ -23,7 +23,7 @@ struct ImFrame {
 	float4 blockColor;   // rgb torch light at level 15 (linear), w how much daylight there is 0..1 (torches give way to it)
 	float4 minLight;     // rgb the least light anything gets (caves), w exposure
 	float4 tonemap;      // Lottes 2016: y = x^a / (x^(a d) b + c); x a, y d, z b, w c
-	float4 grade;        // x saturation, y vibrance, z colour style (1: Reimagined's, lighting the texture as it is), w 0
+	float4 grade;        // x saturation, y vibrance, zw 0
 	int4 flags;          // x dimension (0 overworld, 1 Nether, 2 End), y debug view, z 1 = the engine filled this frame, w frame index
 	float4 env;          // x how far underground the player is (0..1, eased), y how much it's night (0..1)
 	float4x4 shadowNear; // camera-relative world -> the near cascade's light clip (orthographic)
@@ -306,7 +306,7 @@ static float4 imBlockLight(float3 p, float3 n, constant ImFrame &f, texture3d<fl
 	hue = max(hl + (hue - hl) * 1.6, 0.0);
 	// (as bright as the torch colour, times how bright the sources here are: 1 for most, about half near lava)
 	hue *= max(max(warm.r, warm.g), warm.b) / max(max(max(hue.r, hue.g), hue.b), 1e-4) * min(m, 1.0);
-	float w = inside * smoothstep(0.0, 0.3, c.a);
+	float w = inside * smoothstep(0.0, 0.04, c.a);
 	return float4(mix(warm, hue, w), c.a * inside);
 }
 
@@ -639,7 +639,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	float skyF = imSkyCurve(sky);
 	// under water (the eyes in it): the sky light drops a level a block down, which left the sea floor nearly black; Reimagined's
 	// stays a lit blue-green, so the sky's light keeps at least about half
-	if (f.water.z > 0.5 && f.flags.x == 0) skyF = max(skyF, 0.3 * smoothstep(0.0, 0.2, sky));
+	if (f.water.z > 0.5 && f.flags.x == 0) skyF = max(skyF, 0.22);  // (no sudden change where the sky light runs out deeper down)
 
 	// direct light: wrapped N.L; until there are shadow maps, the sky light stands in for them (no sun under a roof)
 	float nl = dot(N, f.lightDir.xyz);
@@ -648,7 +648,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// off regardless, so a cave never catches sunlight through an imprecision of the map.
 	float2 sm = imShadow(p, n, pixel, f, smap, cmp);
 	float open = smoothstep(0.45, 0.9, sky);
-	float sun = mix(open, sm.x, sm.y) * smoothstep(0.0, 0.07, sky);
+	float sun = mix(open, sm.x, sm.y) * (f.water.z > 0.5 && f.flags.x == 0 ? 0.3 + 0.7 * smoothstep(0.0, 0.6, sky) : smoothstep(0.0, 0.07, sky));
 	float3 direct = f.lightColor.rgb * (wrap * sun);
 
 	// sky light: blue from above, warmer and dimmer from below
@@ -657,7 +657,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	ambient += f.auroraLight.rgb * (skyF * (0.12 + 0.88 * saturate(N.y)));
 	// under water: light scattered through the water reaches everything in a blue-green glow (Reimagined's sea floor is never
 	// black, even in the shade of kelp); dim at night
-	if (f.water.z > 0.5 && f.flags.x == 0) ambient += float3(0.10, 0.22, 0.26) * mix(0.12, 1.0, f.nightMiddle.w);
+	if (f.water.z > 0.5 && f.flags.x == 0) ambient += float3(0.04, 0.09, 0.12) * mix(0.12, 1.0, f.nightMiddle.w);
 
 	// torches: warm, weaker in full daylight
 	float4 bl = imBlockLight(p, n, f, lvol, lsamp);
@@ -682,8 +682,19 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 
 	float3 day = direct + ambient;
 	float3 lit = sqrt(day * day + torch * torch + f.minLight.rgb * f.minLight.rgb);
-	// (lively: the same contrast and colour, a fifth brighter; its extra saturation is in the grade, ImagineFrame)
-	float3 radiance = base * lit * face * (f.minLight.w * (f.grade.z > 0.5 ? 1.2 : 1.0));
+	// Complementary Reimagined adds its lights up in gamma space (on the texture as it is, linearized only afterwards,
+	// composite1 "pow(color, 2.2)"): where two lights meet, sun and sky, the sum comes out far brighter than added in linear light,
+	// while each alone stays as it is. That is its bright, contrasty sunlight over soft blue shade (measured on matching
+	// screenshots: our sunlit ground at half its brightness, the shade about equal). Done here in the same way, by day; nights
+	// and caves keep the plain sum.
+	if (f.nightMiddle.w > 0.0 && f.flags.x == 0) {
+		const float g = 1.0 / 2.2;
+		float3 dayG = pow(max(direct, 0.0), g) + pow(max(ambient, 0.0), g);
+		float3 tG = pow(max(torch, 0.0), g), mG = pow(max(f.minLight.rgb, 0.0), g);
+		float3 litG = pow(sqrt(dayG * dayG + tG * tG + mG * mG), 2.2);
+		lit = mix(lit, litG, f.nightMiddle.w);
+	}
+	float3 radiance = base * lit * face * f.minLight.w;
 
 	// the sun's highlight (on top of the light, before the tone curve: a bright one blooms); a metal's in its own colour
 	if (pbr && surf.g > 0.0) {
