@@ -283,10 +283,14 @@ fragment float4 im_bloom_ao(ImBloomOut in [[stage_in]], depth2d<float> depth [[t
 		float sd;
 		float3 Q = imbPos(depth, suv, size, p, sd);
 		float front = length(S) - length(Q);  // (> 0: the depth there is in front of the point)
-		occ += smoothstep(0.02, 0.1, front) * (1.0 - smoothstep(radius, radius * 2.5, front));
+		// (a margin growing with distance: far away the depth's precision alone puts flat ground "in front" of its own sample
+		// points, which darkened distant sand and grass in faint crawling patches)
+		occ += smoothstep(0.03 + dist * 0.006, 0.12 + dist * 0.012, front) * (1.0 - smoothstep(radius, radius * 2.5, front));
 	}
 	float ao = 1.0 - occ / float(n);
 	ao *= ao;  // (deeper in the corners)
+	// (ground seen at a very low angle: the normal from the depth is least reliable there, so less occlusion)
+	ao = mix(1.0, ao, smoothstep(0.05, 0.25, abs(dot(N, P / max(dist, 1e-3)))));
 	ao = mix(1.0, ao, 1.0 - smoothstep(64.0, 128.0, dist));
 	return float4(ao, 0.0, 0.0, 1.0);
 }
