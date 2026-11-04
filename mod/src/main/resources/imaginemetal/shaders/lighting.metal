@@ -609,9 +609,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	}
 	// (Reimagined lights the texture's colours as they are and encodes only at the end; that lifts the mid tones and keeps the
 	// shadows open: its bright, lively look. Linearizing them first, as physically based packs do, gives a darker, moodier picture.)
-	// (lively: halfway, a 1.6 curve: dark and mid tones lifted, bright ones (sand, snow) about where they were, so they don't
-	// blow out to white the way the full Reimagined way does with this lighting)
-	float3 base = pow(max(albedo, 0.0), f.grade.z > 0.5 ? 1.6 : 2.2);
+	float3 base = pow(max(albedo, 0.0), 2.2);
 	bool pbr = f.shadow.w > 0.5 && f.flags.y == 0;
 	ImSurf surf = pbr ? imSurface(cls, albedo, tex) : ImSurf{0.0, 0.0, 0.0, 0.04, 0.0};
 	float3 V = -normalize(p);
@@ -657,6 +655,9 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	float3 ambient = mix(f.ambientDown.rgb, f.ambientUp.rgb, N.y * 0.5 + 0.5) * skyF;
 	// the aurora's light: from the sky above, so tops take it fully, sides a little, undersides none
 	ambient += f.auroraLight.rgb * (skyF * (0.12 + 0.88 * saturate(N.y)));
+	// under water: light scattered through the water reaches everything in a blue-green glow (Reimagined's sea floor is never
+	// black, even in the shade of kelp); dim at night
+	if (f.water.z > 0.5 && f.flags.x == 0) ambient += float3(0.10, 0.22, 0.26) * mix(0.12, 1.0, f.nightMiddle.w);
 
 	// torches: warm, weaker in full daylight
 	float4 bl = imBlockLight(p, n, f, lvol, lsamp);
@@ -681,7 +682,8 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 
 	float3 day = direct + ambient;
 	float3 lit = sqrt(day * day + torch * torch + f.minLight.rgb * f.minLight.rgb);
-	float3 radiance = base * lit * face * f.minLight.w;
+	// (lively: the same contrast and colour, a fifth brighter; its extra saturation is in the grade, ImagineFrame)
+	float3 radiance = base * lit * face * (f.minLight.w * (f.grade.z > 0.5 ? 1.2 : 1.0));
 
 	// the sun's highlight (on top of the light, before the tone curve: a bright one blooms); a metal's in its own colour
 	if (pbr && surf.g > 0.0) {

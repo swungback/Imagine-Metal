@@ -2338,6 +2338,15 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 			float fr = 1.0 - saturate(dot(fnT, -normalize(in.imPos)));
 			fr *= fr;
 			color.a = mix(color.a, 1.0, fr * fr);
+			if (imf.water.z > 0.5) {
+				// (from below: past a steep angle the surface mirrors the water under it (total internal reflection), so it reads as
+				// the deep water's colour, not the bright sky behind it, which showed as a white band along the far surface)
+				float3 wfc0 = pow(max(fog.FogColor.rgb, 1e-3), float3(0.33, 0.21, 0.26)) * 0.2;
+				float fb = 1.0 - saturate(abs(dot(fnT, normalize(in.imPos))));
+				float tir = smoothstep(0.25, 0.55, fb);
+				color.rgb = mix(color.rgb, pow(imPresent(wfc0, imf), 1.0 / 2.2), tir);
+				color.a = mix(color.a, 1.0, tir);
+			}
 			// what's under the water turns blue (Reimagined's translucentMult: the biome's water colour, normalized; less far away)
 			if (imf.water.z < 0.5) {
 				float3 wt = getColor(in).rgb;
