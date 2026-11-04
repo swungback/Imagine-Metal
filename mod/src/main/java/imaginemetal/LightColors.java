@@ -19,7 +19,7 @@ public final class LightColors {
 		{"sea_lantern", new float[] {0.60f, 0.90f, 1.00f}},
 		{"sea_pickle", new float[] {0.55f, 0.95f, 0.70f}},
 		{"conduit", new float[] {0.55f, 0.85f, 1.00f}},
-		{"beacon", new float[] {0.30f, 0.80f, 1.00f}},
+		{"beacon", new float[] {0.10f, 0.42f, 1.00f}},
 		{"end_rod", new float[] {0.90f, 0.85f, 1.00f}},
 		{"end_gateway", new float[] {0.60f, 0.40f, 1.00f}},
 		{"end_portal", new float[] {0.40f, 0.70f, 0.60f}},

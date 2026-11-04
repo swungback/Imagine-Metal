@@ -63,28 +63,25 @@ public final class Sky {
 
 	private static boolean cloudsFailed, texturesSet;
 
+	/** this frame's bob and hurt tilt (GameRendererBobMixin), multiplied into the projection as Minecraft does; identity if none */
+	private static final Matrix4f BOB = new Matrix4f();
+
+	public static void noteBob(org.joml.Matrix4fc pose) {
+		if (pose == null || !pose.isFinite()) BOB.identity();
+		else BOB.set(pose);
+	}
+
 	/**
-	 * The terrain's projection relative to the camera's own (view bobbing, hurt tilt, nausea, FOV effects), measured where the
-	 * terrain draws (Reflections.noteClip) and carried to the next frame's sky: bobbing changes slowly, the camera's turn doesn't,
-	 * so the sky takes the camera's current matrix and only the bob from the frame before.
+	 * Clip -> view direction for this frame: the camera's projection, Minecraft's bob and its rotation, in the order Minecraft
+	 * builds the level's projection (projection * bob, then the view rotation), so the sky bobs exactly with the land.
 	 */
-	static final Matrix4f BOB = new Matrix4f();
-
-	static void noteTerrainClip(org.joml.Matrix4fc clip) {
-		Matrix4f cam = Minecraft.getInstance().gameRenderer.mainCamera().getViewRotationProjectionMatrix(new Matrix4f());
-		Matrix4f r = new Matrix4f(clip).mul(cam.invert());
-		// (a bob is a small turn and shift; anything far from that is a projection this doesn't understand: no bob then)
-		boolean small = r.isFinite();
-		Matrix4f id = new Matrix4f();
-		for (int c = 0; c < 4 && small; c++) for (int k = 0; k < 4; k++) if (Math.abs(r.get(c, k) - id.get(c, k)) > 0.35f) small = false;
-		BOB.set(small ? r : id);
-	}
-
-	/** Clip -> view direction for this frame: the camera's matrix with the terrain's bob. */
 	private static Matrix4f skyRot() {
-		Matrix4f m = Minecraft.getInstance().gameRenderer.mainCamera().getViewRotationProjectionMatrix(new Matrix4f());
-		return new Matrix4f(BOB).mul(m).invert();
+		Matrix4f p = ImagineFrame.camProj, v = ImagineFrame.camView;
+		if (p == null || v == null)
+			return Minecraft.getInstance().gameRenderer.mainCamera().getViewRotationProjectionMatrix(new Matrix4f()).invert();
+		return new Matrix4f(p).mul(BOB).mul(v).invert();
 	}
+
 
 	/** At the end of Minecraft's sky pass (after its sun, moon and stars): our clouds and the aurora over them. */
 	public static void drawAfter() {

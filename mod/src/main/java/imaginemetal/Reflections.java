@@ -32,7 +32,6 @@ public final class Reflections {
 	/** (OwnTerrain, every frame it draws) the transform the terrain draws with this frame. */
 	public static void noteClip(Matrix4fc clip, double x, double y, double z) {
 		clipNow.set(clip);
-		Sky.noteTerrainClip(clip);
 		nowX = x;
 		nowY = y;
 		nowZ = z;

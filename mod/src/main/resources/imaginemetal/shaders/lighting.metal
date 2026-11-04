@@ -588,9 +588,13 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	float3 torch = bl.rgb * imBlockCurve(max(block, bl.a)) * (1.0 - 0.45 * f.blockColor.w * smoothstep(0.5, 1.0, sky));
 	// the light in the player's hands: a level falling one a block from the eye, as a placed light would, softer at the edge
 	if (f.held.w > 0.0) {
-		float hl = saturate(f.held.w - length(p) / 15.0);
+		// (as placed coloured lights are: 4 levels stronger, the colour's saturation pushed 1.6x, as bright as the torch colour)
+		float hl = saturate(min(f.held.w + 4.0 / 15.0, 1.0) - length(p) / 15.0);
 		if (hl > 0.0) {
-			float3 hc = f.held.rgb * (max(max(f.blockColor.r, f.blockColor.g), f.blockColor.b) / max(max(max(f.held.r, f.held.g), f.held.b), 1e-3));
+			float3 hh = f.held.rgb;
+			float hlum = imLuma(hh);
+			hh = max(hlum + (hh - hlum) * 1.6, 0.0);
+			float3 hc = hh * (max(max(f.blockColor.r, f.blockColor.g), f.blockColor.b) / max(max(max(hh.r, hh.g), hh.b), 1e-3));
 			float facing = 0.6 + 0.4 * saturate(dot(N, -normalize(p)));
 			torch = max(torch, hc * imBlockCurve(hl) * facing * (1.0 - 0.45 * f.blockColor.w * smoothstep(0.5, 1.0, sky)));
 		}
