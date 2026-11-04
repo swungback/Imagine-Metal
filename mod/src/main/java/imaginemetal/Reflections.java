@@ -38,6 +38,11 @@ public final class Reflections {
 		nowSet = true;
 	}
 
+	/** Whether capture will copy this frame's depth (the End's sky is drawn behind it, Sky.drawEndLate). */
+	static boolean willCapture() {
+		return (Settings.pbr || Settings.waterStyle > 0 || Settings.glassReflections) && !failed && Engine.TERRAIN;
+	}
+
 	/** After the level's passes, before the bloom: the picture and depth become the next frame's history. */
 	public static void capture() {
 		if (!nowSet || !(Settings.pbr || Settings.waterStyle > 0 || Settings.glassReflections) || failed || !Engine.TERRAIN) {

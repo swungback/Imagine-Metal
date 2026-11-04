@@ -9,8 +9,8 @@
 typedef struct {
 	id<MTLDevice> device;
 	id<MTLLibrary> lib;
-	id<MTLRenderPipelineState> pipeline[2];  // 0 the sky (replaces every pixel), 1 clouds and aurora (blended over)
-	MTLPixelFormat format[2];
+	id<MTLRenderPipelineState> pipeline[3];  // 0 the sky (replaces every pixel), 1 clouds and aurora (blended over), 2 the End's sky (where the depth is clear)
+	MTLPixelFormat format[3];
 	id<MTLTexture> clouds, noise;
 	id<MTLSamplerState> repeat;
 } ImSky;
@@ -62,17 +62,34 @@ int im_sky_textures(ImSky *s, const void *clouds, int w, int h, const void *nois
 
 // Draws the sky into target. frame: ImFrame (frameBytes); rot: 16 floats, clip -> view direction (column-major).
 // mode 0: the sky (every pixel replaced); mode 1: the clouds and the aurora, blended over what's there (premultiplied alpha).
+static int im_sky_draw_any(Enc *enc, ImSky *s, id<MTLTexture> target, id<MTLTexture> depth, const void *frame, int frameBytes, const float *rot, int mode, char *err, int errCap);
+
 int im_sky_draw(Enc *enc, ImSky *s, id<MTLTexture> target, const void *frame, int frameBytes, const float *rot, int mode, char *err, int errCap) {
-	if (!s || !target || mode < 0 || mode > 1) return 0;
+	if (mode < 0 || mode > 1) return 0;
+	return im_sky_draw_any(enc, s, target, nil, frame, frameBytes, rot, mode, err, errCap);
+}
+
+id<MTLTexture> mc_im_ssr_depth(void);  // mcown.m: this frame's depth copy (Reflections), nil before the first
+
+// The End's sky after the level has drawn: over the pixels whose depth (this frame's copy, Reflections) is still clear (mode 2).
+// Returns 0 drawn, 1 with err, 2 no depth of this size (the caller draws it the old way).
+int im_sky_draw_end(Enc *enc, ImSky *s, id<MTLTexture> target, const void *frame, int frameBytes, const float *rot, char *err, int errCap) {
+	id<MTLTexture> depth = mc_im_ssr_depth();
+	if (!depth || !target || depth.width != target.width || depth.height != target.height) return 2;
+	return im_sky_draw_any(enc, s, target, depth, frame, frameBytes, rot, 2, err, errCap);
+}
+
+static int im_sky_draw_any(Enc *enc, ImSky *s, id<MTLTexture> target, id<MTLTexture> depth, const void *frame, int frameBytes, const float *rot, int mode, char *err, int errCap) {
+	if (!s || !target) return 0;
 	if (mode == 1 && (!s->clouds || !s->noise)) return 0;
 	if (!s->pipeline[mode] || s->format[mode] != target.pixelFormat) {
 		@autoreleasepool {
 			[s->pipeline[mode] release];
 			s->pipeline[mode] = nil;
 			MTLRenderPipelineDescriptor *pd = [[MTLRenderPipelineDescriptor new] autorelease];
-			pd.label = mode == 0 ? @"Imagine Metal sky" : @"Imagine Metal clouds";
+			pd.label = mode == 1 ? @"Imagine Metal clouds" : @"Imagine Metal sky";
 			pd.vertexFunction = [[s->lib newFunctionWithName:@"im_sky_vs"] autorelease];
-			pd.fragmentFunction = [[s->lib newFunctionWithName:mode == 0 ? @"im_sky_fs" : @"im_clouds_fs"] autorelease];
+			pd.fragmentFunction = [[s->lib newFunctionWithName:mode == 0 ? @"im_sky_fs" : mode == 2 ? @"im_sky_end_fs" : @"im_clouds_fs"] autorelease];
 			pd.colorAttachments[0].pixelFormat = target.pixelFormat;
 			if (mode == 1) {
 				pd.colorAttachments[0].blendingEnabled = YES;
@@ -105,6 +122,7 @@ int im_sky_draw(Enc *enc, ImSky *s, id<MTLTexture> target, const void *frame, in
 			[r setFragmentTexture:s->noise atIndex:1];
 			[r setFragmentSamplerState:s->repeat atIndex:0];
 		}
+		if (mode == 2) [r setFragmentTexture:depth atIndex:2];
 		[r setCullMode:MTLCullModeNone];
 		[r setFragmentBytes:frame length:(NSUInteger) frameBytes atIndex:0];
 		[r setFragmentBytes:rot length:16 * sizeof(float) atIndex:1];

@@ -82,10 +82,10 @@ public final class ImagineFrame {
 	// night (toward Reimagined's: a lavender-blue moonlight, its red above its green, a deep blue sky light; a little darker)
 	private static final float[] MOON = {0.12f, 0.11f, 0.20f};
 	private static final float[] NIGHT_SKY = {0.036f, 0.039f, 0.085f};
-	private static final float[] TORCH = {1.45f, 0.50f, 0.12f};  // (Reimagined's hue, a little brighter: its torch rooms are lit further)
+	private static final float[] TORCH = {1.45f, 0.56f, 0.22f};  // (Reimagined's warm orange with a little blue left in it: lit stone stays stone, not mustard yellow)
 	private static final float[] CAVE = {0.0055f, 0.0060f, 0.0085f};
-	private static final float[] END_LIGHT = {0.40f, 0.30f, 0.62f};
-	private static final float[] END_SKY = {0.10f, 0.07f, 0.15f};
+	private static final float[] END_LIGHT = {0.52f, 0.40f, 0.74f};
+	private static final float[] END_SKY = {0.095f, 0.068f, 0.15f};
 	/** where the End's black hole hangs (Settings.endStyle 1): low in the sky, so the islands throw long shadows */
 	private static final float[] BLACK_HOLE = {0.70f, 0.26f, -0.67f};
 	/** The moon's light by phase (vanilla's index: 0 full ... 4 new). */
@@ -282,7 +282,7 @@ public final class ImagineFrame {
 			lightDir[2] = BLACK_HOLE[2];
 			normalize(lightDir);
 			// (IterationT's End: the islands bright in a warm white light, the shadows nearly black)
-			float[] bl = {1.95f, 1.82f, 1.5f}, sk = {0.03f, 0.031f, 0.036f};
+			float[] bl = {1.9f, 1.62f, 1.3f}, sk = {0.03f, 0.03f, 0.04f};
 			for (int i = 0; i < 3; i++) {
 				light[i] = bl[i];
 				up[i] = sk[i];

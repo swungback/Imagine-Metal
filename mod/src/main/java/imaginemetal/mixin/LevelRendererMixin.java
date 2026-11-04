@@ -45,6 +45,7 @@ abstract class LevelRendererMixin {
 	@Inject(method = "render", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/framegraph/FrameGraphBuilder;execute(Lcom/mojang/blaze3d/resource/GraphicsResourceAllocator;Lcom/mojang/blaze3d/framegraph/FrameGraphBuilder$Inspector;)V", shift = At.Shift.AFTER))
 	private void imaginemetal$bloom(CallbackInfo ci) {
 		Reflections.capture();
+		imaginemetal.Sky.drawEndLate();
 		Bloom.render();
 	}
 }

@@ -142,12 +142,12 @@ static inline float imLuma(float3 c) {
 	return dot(c, float3(0.2126, 0.7152, 0.0722));
 }
 
-// Block light level 0..1 -> intensity: a hot core next to the source and a long reach (3.0 at level 15, 2.2 at 14, 1.1 at 12,
-// 0.57 at 10, 0.15 at 7, 0.05 at 5), so weak lights still light their surroundings: a redstone torch (level 7) or a soul torch
+// Block light level 0..1 -> intensity: a hot core next to the source and a long reach (2.95 at level 15, 2.1 at 14, 1.0 at 12,
+// 0.5 at 10, 0.13 at 7, 0.04 at 5), so weak lights still light their surroundings: a redstone torch (level 7) or a soul torch
 // (10) colours the wall it's on. The dark between lights comes from the grade (Bloom's resolve), not from cutting the reach.
 static inline float imBlockCurve(float b) {
 	float b2 = b * b, b4 = b2 * b2, b8 = b4 * b4;
-	return 2.2 * pow(b, 3.5) + 1.6 * b8;  // (brighter near the light, as Reimagined's)
+	return 1.8 * pow(b, 3.5) + 1.15 * b8;  // (brighter near the light, as Reimagined's)
 }
 
 // Sky light level 0..1 -> how much of the sky's light reaches the surface.
@@ -201,6 +201,14 @@ static inline float imShadowPcf(depth2d_array<float> smap, sampler cmp, float2 u
 	return lit / wsum;
 }
 
+// The depth one shadow texel spans along a surface at this slope (tan of the light's angle to the normal), in the cascade's depth
+// units, times k texels (the filter's reach): an orthographic cascade, so its x and z rows give a texel's size and depth's scale.
+static inline float imSlopeBias(float4x4 m, float slope, float k, uint res) {
+	float xs = length(float3(m[0][0], m[1][0], m[2][0])), zs = length(float3(m[0][2], m[1][2], m[2][2]));
+	float texel = 2.0 / max(xs * float(res), 1e-6);
+	return zs * texel * slope * k * 0.5;
+}
+
 // How much of the sun reaches p (camera-relative, n its face normal), from two cascades: the near one (sharp, around the player)
 // where it covers p, the far one beyond, blended across a band so the switch doesn't show. Both are snapped to world-fixed texel
 // grids, so a shadow stays put as the player walks. x: 1 lit, 0 shadowed; y: how much the maps cover p (1 inside, fading to 0 at
@@ -211,6 +219,9 @@ static float2 imShadow(float3 p, float3 n, float2 pixel, constant ImFrame &f, de
 	// of the surface and a fixed offset leaves the surface shadowing itself in crawling stripes
 	float nl = dot(n, f.lightDir.xyz);
 	float grazing = 0.6 + 1.6 * sqrt(saturate(1.0 - nl * nl));
+	// (and a depth bias growing with the slope: on ground the light grazes, one shadow texel spans more depth than a fixed bias
+	// covers, and past the near cascade, with its coarser texels, the ground shadowed itself in stripes, line, gap, line)
+	float slope = min(sqrt(saturate(1.0 - nl * nl)) / max(abs(nl), 0.05), 4.0);
 	// the near cascade
 	float4 c0 = f.shadowNear * float4(p + n * (f.shadow.x * grazing), 1.0);
 	float e0 = max(abs(c0.x), abs(c0.y));
@@ -218,7 +229,7 @@ static float2 imShadow(float3 p, float3 n, float2 pixel, constant ImFrame &f, de
 	float litNear = 1.0;
 	if (nearW > 0.0) {
 		float2 uv = float2(0.5 + 0.5 * c0.x, 0.5 - 0.5 * c0.y);
-		litNear = imShadowPcf(smap, cmp, uv, c0.z - 0.00006, 0);
+		litNear = imShadowPcf(smap, cmp, uv, c0.z - 0.00006 - imSlopeBias(f.shadowNear, slope, 2.0, smap.get_width()), 0);
 		if (nearW >= 1.0) return float2(litNear, 1.0);
 	}
 	// the far cascade
@@ -227,8 +238,9 @@ static float2 imShadow(float3 p, float3 n, float2 pixel, constant ImFrame &f, de
 	if (e1 > 0.98 || c1.z > 1.0 || c1.z < 0.0) return nearW > 0.0 ? float2(litNear, nearW) : float2(1.0, 0.0);
 	float2 uv1 = float2(0.5 + 0.5 * c1.x, 0.5 - 0.5 * c1.y);
 	float o1 = 0.75 / float(smap.get_width());
-	float litFar = 0.25 * (smap.sample_compare(cmp, uv1 + float2(-o1, -o1), 1, c1.z - 0.00012) + smap.sample_compare(cmp, uv1 + float2(o1, -o1), 1, c1.z - 0.00012)
-		+ smap.sample_compare(cmp, uv1 + float2(-o1, o1), 1, c1.z - 0.00012) + smap.sample_compare(cmp, uv1 + float2(o1, o1), 1, c1.z - 0.00012));
+	float z1 = c1.z - 0.00012 - imSlopeBias(f.shadowFar, slope, 1.5, smap.get_width());
+	float litFar = 0.25 * (smap.sample_compare(cmp, uv1 + float2(-o1, -o1), 1, z1) + smap.sample_compare(cmp, uv1 + float2(o1, -o1), 1, z1)
+		+ smap.sample_compare(cmp, uv1 + float2(-o1, o1), 1, z1) + smap.sample_compare(cmp, uv1 + float2(o1, o1), 1, z1));
 	float cover = 1.0 - smoothstep(0.9, 0.98, e1);
 	return float2(mix(litFar, litNear, nearW), max(cover, nearW));
 }
@@ -261,7 +273,7 @@ static float imEmission(uint cls, float3 tex) {
 		// (hot cores: the brightest texels far past white, so the bloom haloes them, the darker ones lower so the texture reads)
 		case IM_MAT_EMITTER: return 3.4 * l * l * l + 0.4 * l;
 		case IM_MAT_GLOW_GEM: return 0.0;  // (crying obsidian: its veins only, imShade)
-		case IM_MAT_LAVA: return 1.6 + 3.2 * l * l;  // (Reimagined's: brighter where the texture is, its hot spots near white)
+		case IM_MAT_LAVA: return 1.35 + 3.0 * l * l;  // (Reimagined's: brighter where the texture is, its hot spots near white)
 		case IM_MAT_FLAME: return 4.0 * smoothstep(0.62, 0.92, hi) * smoothstep(0.15, 0.4, sat);
 		// ores: every pixel with clear colour against the grey stone around it (the whole speck, its coloured edge too; iron's pale
 		// specks count; a speck's near-grey highlights and coal's black specks don't), at a faint glow that keeps the texture's own
@@ -311,7 +323,7 @@ static float4 imBlockLight(float3 p, float3 n, constant ImFrame &f, texture3d<fl
 	if (m < 1e-4) return float4(warm, 0.0);
 	float3 hue = c.rgb / m;
 	float hl = imLuma(hue);
-	hue = max(hl + (hue - hl) * 1.35, 0.0);
+	hue = max(hl + (hue - hl) * 1.2, 0.0);
 	// (as bright as the torch colour, times how bright the sources here are: 1 for most, about half near lava)
 	hue *= max(max(warm.r, warm.g), warm.b) / max(max(max(hue.r, hue.g), hue.b), 1e-4) * min(m, 1.0);
 	float w = inside * smoothstep(0.0, 0.04, c.a);
@@ -972,6 +984,8 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	}
 	// light given off: on top of the tone-mapped light, unclamped (the picture is HDR: Bloom's resolve maps it to the screen)
 	float3 ecol = pow(max(tex, 0.0), 2.2);
+	// (lava: its darker crust a deep red-orange, only its hot spots running to yellow-white, as Reimagined's)
+	if (cls == IM_MAT_LAVA) ecol *= mix(float3(1.0, 0.55, 0.38), float3(1.0, 0.9, 0.8), smoothstep(0.55, 0.95, imLuma(tex)));
 	if (cls == IM_MAT_ORE || cls == IM_MAT_NETHER_ORE) {
 		// (Reimagined's glowing ores: each speck's own colour made deeper (colour x colour^k: redstone's red pure, diamond's
 		// cyan, emerald's green), then glowing well past white so the bloom gives every speck a halo; the stone stays dark)

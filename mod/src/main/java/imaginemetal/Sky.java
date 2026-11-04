@@ -118,10 +118,44 @@ public final class Sky {
 		}
 	}
 
+	private static boolean lateFailed;
+	/** This frame's End sky is drawn after the level (drawEndLate) rather than at the end of the sky pass. */
+	private static boolean late;
+
+	/**
+	 * The End's sky once the level has drawn (before the bloom), over the pixels the level left empty (their depth still clear).
+	 * Drawn in the sky pass, the End's sky never showed: something of the level's passes there cleared over it. Falls back to
+	 * the sky pass's drawing when there's no depth copy this frame (Reflections off).
+	 */
+	public static void drawEndLate() {
+		if (!late) return;
+		late = false;
+		if (!Reflections.valid) return;  // (no depth copy this frame)
+		try {
+			Object encoder = MetalBridge.encoder(((FrontendCommandEncoder) RenderSystem.getDevice().createCommandEncoder()).backend());
+			if (encoder == null) return;
+			var target = Minecraft.getInstance().gameRenderer.mainRenderTarget().getColorTexture();
+			if (target == null) return;
+			MetalBridge.flushClear(encoder, target);
+			try (MemoryStack stack = MemoryStack.stackPush()) {
+				long err = stack.ncalloc(1, 1024, 1);
+				long m = stack.nmalloc(16, 64);
+				skyRot().getToAddress(m);
+				int r = ImNative.skyDrawEnd(MetalBridge.enc(encoder), state, MetalBridge.textureHandle(target), ImagineFrame.address(), ImagineFrame.SIZE, m, err, 1024);
+				if (r == 1) throw new IllegalStateException(MemoryUtil.memUTF8(err));
+			}
+		} catch (Throwable t) {
+			lateFailed = true;
+			System.out.println("[Imagine Metal] End sky (after the level) off: " + t);
+		}
+	}
+
 	/** At the end of Minecraft's sky pass (after its sun, moon and stars): our clouds and the aurora over them. */
 	public static void drawAfter() {
 		if (end && active && state != 0) {
-			drawEnd();
+			// (after the level, when this frame has a depth copy to draw it behind; else here)
+			if (!lateFailed && Reflections.willCapture()) late = true;
+			else drawEnd();
 			return;
 		}
 		if (!active || cloudsFailed || state == 0) return;

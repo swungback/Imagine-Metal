@@ -35,6 +35,9 @@ final class ImNative {
 	private static final MethodHandle SKY_NEW = fn("im_sky_new", FunctionDescriptor.of(JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT), false);
 	private static final MethodHandle SKY_DRAW = fn("im_sky_draw", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT,
 		JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_INT), false);
+	private static final MethodHandle SKY_DRAW_END = fn("im_sky_draw_end", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT,
+		JAVA_LONG, JAVA_LONG, JAVA_INT), false);
+	private static final MethodHandle GPU_MS = fn("im_gpu_ms", FunctionDescriptor.of(java.lang.foreign.ValueLayout.JAVA_DOUBLE), false);
 	private static final MethodHandle SKY_TEXTURES = fn("im_sky_textures", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_INT,
 		JAVA_LONG, JAVA_INT, JAVA_INT), false);
 
@@ -182,6 +185,22 @@ final class ImNative {
 	static int skyDraw(long enc, long state, long target, long frame, int frameBytes, long rot, int mode, long err, int errCap) {
 		try {
 			return (int) SKY_DRAW.invokeExact(enc, state, target, frame, frameBytes, rot, mode, err, errCap);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
+	static double gpuMs() {
+		try {
+			return (double) GPU_MS.invokeExact();
+		} catch (Throwable t) {
+			return 0.0;
+		}
+	}
+
+	static int skyDrawEnd(long enc, long state, long target, long frame, int frameBytes, long rot, long err, int errCap) {
+		try {
+			return (int) SKY_DRAW_END.invokeExact(enc, state, target, frame, frameBytes, rot, err, errCap);
 		} catch (Throwable t) {
 			throw new IllegalStateException(t);
 		}

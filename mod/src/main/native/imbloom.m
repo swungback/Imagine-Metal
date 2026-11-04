@@ -293,6 +293,18 @@ static int imbCheck(id<MTLTexture> t, const char *what, char *err, int errCap) {
 // This frame's bloom and HDR resolve. src: the picture as drawn; dst: the game's main image. src == dst: the glow is added in
 // place (no HDR image). Otherwise src is the HDR image: the glow is added to it and the result mapped into dst, which is written
 // whole (strength 0: the mapping alone, no glow). 0 = done, 1 = failed (err filled).
+static volatile double imGpuSum;
+static volatile int imGpuN;
+
+// The level's command buffers' average GPU time (ms) since the last call (Perf), 0 if none finished.
+double im_gpu_ms(void) {
+	double s = imGpuSum;
+	int n = imGpuN;
+	imGpuSum = 0.0;
+	imGpuN = 0;
+	return n > 0 ? s / n * 1000.0 : 0.0;
+}
+
 int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst, float strength, float threshold, float knee, float haze,
 	float toe, char *err, int errCap) {
 	if (!b || !src || !dst) return 0;
@@ -314,6 +326,14 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 	}
 	imbChain(b, (int) src.width, (int) src.height);
 	id<MTLCommandBuffer> cmd = mc_frame_cmd(enc);
+	// (the GPU's time for this command buffer, for the perf line: what the frame rate is actually waiting on)
+	if (cmd) [cmd addCompletedHandler:^(id<MTLCommandBuffer> c) {
+		double t = c.GPUEndTime - c.GPUStartTime;
+		if (t > 0.0 && t < 1.0) {
+			imGpuSum += t;
+			imGpuN++;
+		}
+	}];
 	@autoreleasepool {
 		ImBloomParams p = {{1.0f / (float) src.width, 1.0f / (float) src.height, threshold, knee}, {strength, (float) b->levels, haze, 0}, {toe, 0, 0, 0},
 			{b->shaft[0], b->shaft[1], 0, b->shaft[6]}, {b->shaft[3], b->shaft[4], b->shaft[5], 0}};

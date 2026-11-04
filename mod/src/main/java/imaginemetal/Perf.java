@@ -32,6 +32,7 @@ final class Perf {
 		frames++;
 		if (now - since < 10_000_000_000L) return;
 		StringBuilder b = new StringBuilder("[Imagine Metal] perf: ").append(Math.round(frames / ((now - since) / 1e9))).append(" fps");
+		b.append(String.format(java.util.Locale.ROOT, ", gpu %.1f ms", ImNative.gpuMs()));
 		for (int i = 0; i < NAMES.length; i++) {
 			b.append(String.format(java.util.Locale.ROOT, ", %s %.2f ms (max %.1f)", NAMES[i], NANOS[i] / 1e6 / frames, MAX[i] / 1e6));
 			NANOS[i] = 0;

@@ -266,7 +266,22 @@ static float3 imBlackHoleSky(float3 d, constant ImFrame &f, thread float3 &hdr) 
 	return col;
 }
 
+static float4 imSkyPixel(ImSkyOut in, constant ImFrame &f, constant float4x4 &rot);
+
 fragment float4 im_sky_fs(ImSkyOut in [[stage_in]], constant ImFrame &f [[buffer(0)]], constant float4x4 &rot [[buffer(1)]]) {
+	return imSkyPixel(in, f, rot);
+}
+
+// The End's sky, drawn once the level has (Sky.drawEndLate): only where nothing was drawn (the depth still at its clear), so no
+// pass of Minecraft's can clear over it, and the bloom that follows picks up the black hole's glow.
+fragment float4 im_sky_end_fs(ImSkyOut in [[stage_in]], constant ImFrame &f [[buffer(0)]], constant float4x4 &rot [[buffer(1)]],
+	depth2d<float> depth [[texture(2)]]) {
+	uint2 px = min(uint2(in.pos.xy), uint2(depth.get_width() - 1, depth.get_height() - 1));
+	if (depth.read(px) < 0.99999) discard_fragment();
+	return imSkyPixel(in, f, rot);
+}
+
+static float4 imSkyPixel(ImSkyOut in, constant ImFrame &f, constant float4x4 &rot) {
 	// (the backend flips vertex y so its images keep GL's row order: this pixel is where clip y = -ndc.y lands)
 	float4 q = rot * float4(in.ndc.x, -in.ndc.y, 0.5, 1.0);
 	float3 d = normalize(q.xyz / q.w);
