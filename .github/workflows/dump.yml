@@ -27,6 +27,8 @@ jobs:
           mkdir -p out
           for j in $(find ~/.gradle/caches .gradle mod/.gradle -name '*.jar' -path '*minecraft*' 2>/dev/null); do
             for f in $(unzip -l "$j" 2>/dev/null | awk '{print $4}' | grep -E "$FILES"); do
-              echo "===== $j :: $f"; unzip -p "$j" "$f"; echo
+              echo "===== $j :: $f"
+              if [[ "$f" == *.class ]]; then rm -rf cls; mkdir cls; unzip -q -o "$j" "$f" -d cls; javap -p -c "cls/$f" | grep -vE '^\s+[0-9]+: (aload|iload|fload|dload|astore|istore|fstore|dup|pop|ldc|iconst|fconst|bipush|sipush|checkcast)' ; else unzip -p "$j" "$f"; fi
+              echo
             done
           done
