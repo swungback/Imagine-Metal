@@ -67,6 +67,10 @@ public final class Config {
 		imaginemetal.bloomFog=true
 		# A rainbow opposite the sun as the rain clears.
 		imaginemetal.rainbows=true
+		# The Nether as Reimagined has it: each biome its own glowing haze (orange wastes, teal soul sand valleys, ash-grey deltas),
+		# and its storm: slow drifting clouds of that haze through the caverns.
+		imaginemetal.netherFog=true
+		imaginemetal.netherStorm=true
 		# TAA: smooth edges and less grain (the terrain sampled at a new sub-pixel spot each frame, averaged over frames).
 		imaginemetal.taa=true
 		# In the rain the world turns wet and glossy, with puddles on top of blocks (needs PBR).

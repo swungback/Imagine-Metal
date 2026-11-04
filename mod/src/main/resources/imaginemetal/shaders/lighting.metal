@@ -13,7 +13,7 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// Per-frame values, written by imaginemetal.ImagineFrame (same layout, 832 bytes) and bound at fragment buffer 30 (and at buffer 0
+// Per-frame values, written by imaginemetal.ImagineFrame (same layout, 848 bytes) and bound at fragment buffer 30 (and at buffer 0
 // of the sky pass, sky.metal).
 struct ImFrame {
 	float4 lightDir;     // xyz unit direction toward the light that casts this frame's light (sun by day, moon by night), w 1 = sun
@@ -60,6 +60,7 @@ struct ImFrame {
 	float4 water;        // x water style (0 vanilla, 1 Reimagined, 2 Reimagined with waves), y 1 = glass reflections, z 1 = eyes in water,
 	                     // w how wet the world is (rain, eased; 0 in dry biomes or with the setting off)
 	float4 taa;          // TAA: xy this frame's sub-pixel jitter (Minecraft's clip units, y up), z 1 = on
+	float4 nether;       // the Nether's haze (Reimagined's netherColor as the terrain shows it, linear), w its full distance (0: not ours)
 };
 
 static inline float imSqrt2(float x) { x = 1.0 - x; x *= x; x *= x; return 1.0 - x; }

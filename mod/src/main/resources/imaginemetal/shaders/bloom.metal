@@ -184,6 +184,67 @@ static inline float imbSmooth(float x) {
 	return x * x * (3.0 - 2.0 * x);
 }
 
+// Reimagined's Nether storm (lib/atmospherics/netherStorm.glsl, on by default): slow clouds of the biome's haze drifting through
+// the caverns. Along the view ray, out to the haze's full distance, a lumpy 3D noise (a plain value noise, linearly blended as
+// Reimagined's noise texture is) on a slanted lattice (taller than wide), raised to the 8th so only its peaks show, thickest at
+// height 28 and thinning out over 200 blocks above (ten times faster below). Reimagined adds four sizes of it; the two finest
+// (a block and half a block) are far finer than the steps along the ray, so here their average stands in for them. Its lattice
+// and its wind are whole repeats of the camera's 4096-block wrap and the clock's hourly one: no jump at either.
+// Returns how much of the haze covers the pixel (0..1).
+static inline float imbHash3(int3 q, int3 per) {
+	q = ((q % per) + per) % per;
+	uint h = uint(q.x) * 1597334677u ^ uint(q.y) * 3812015801u ^ uint(q.z) * 2654435761u;
+	h = (h ^ (h >> 16)) * 2246822519u;
+	h ^= h >> 13;
+	return float(h & 0xffffffu) / 16777216.0;
+}
+
+static inline float imbNoise3(float3 q, int3 per) {
+	float3 fi = floor(q), u = q - fi;
+	int3 i = int3(fi);
+	float a = mix(mix(imbHash3(i, per), imbHash3(i + int3(1, 0, 0), per), u.x),
+		mix(imbHash3(i + int3(0, 1, 0), per), imbHash3(i + int3(1, 1, 0), per), u.x), u.y);
+	float b = mix(mix(imbHash3(i + int3(0, 0, 1), per), imbHash3(i + int3(1, 0, 1), per), u.x),
+		mix(imbHash3(i + int3(0, 1, 1), per), imbHash3(i + int3(1, 1, 1), per), u.x), u.y);
+	return mix(a, b, u.z);
+}
+
+static float imbStorm(float3 dir, float len, bool open, float j, constant ImBloomParams &p, constant ImVlFrame &f) {
+	float maxDist = max(p.shaft.w, 32.0);
+	float rayEnd = open ? maxDist : min(len, maxDist);
+	const int N = 12;
+	float stepLen = maxDist / float(N);
+	float t0 = f.world.w;
+	// (the wind: Reimagined's 0.002 a second on its noise texture, here on the lattice, a whole number of cells an hour)
+	float windW = t0 * (512.0 / 3600.0), wind1 = t0 * (1024.0 / 3600.0);
+	float a = 0.0;
+	for (int i = 0; i < N; i++) {
+		float t = (float(i) + 1.0 + j) * stepLen;
+		if (t > rayEnd) break;
+		float3 wp = f.world.xyz + dir * t;
+		// (its slant: height and x together, as Reimagined's lattice, so the clouds lean)
+		float3 q = float3(wp.x, wp.y + wp.x, wp.z);
+		// a slow warp first (cells of 8 blocks), then the two coarse sizes (4 and 2 blocks across, 16 and 8 tall)
+		float3 warp = float3(imbNoise3(q * 0.125 - windW, int3(512, 512, 512)));
+		float3 l1 = q * float3(0.25, 0.0625, 0.25) + warp * float3(2.56, 0.64, 2.56);
+		float alt = abs(wp.y - 28.0);
+		if (wp.y < 28.0) alt *= 10.0;
+		alt = 1.0 - min(alt / 200.0, 1.0);
+		float alt4 = alt * alt;
+		alt4 *= alt4;
+		float fade = saturate(1.0 - t / maxDist);
+		fade = fade * (2.0 - fade);
+		float n1 = imbNoise3(l1 + wind1, int3(1024, 256, 1024));
+		float n2 = imbNoise3(l1 * 2.0 - wind1 * 2.0, int3(2048, 512, 2048));
+		n1 *= n1; n1 *= n1; n1 *= n1;
+		n2 *= n2; n2 *= n2; n2 *= n2;
+		// (the two finest sizes: their mean, E[n^8] of this noise, 0.0229 each)
+		a += (n1 + n2 + 2.0 * 0.0229) * alt4 * fade;
+	}
+	// (Reimagined steps 8 blocks: each of these stands for stepLen / 8 of its samples; its strength 0.40)
+	return saturate(a * (stepLen / 8.0) * 0.40);
+}
+
 // Light shafts: Complementary Reimagined's volumetric light (lib/atmospherics/volumetricLight/volumetricLight.glsl), at half size.
 // Along each pixel's view ray out to the render distance, points checked against the sun's shadow maps (more of them near the eye),
 // each standing for its slice of a fog that thickens with distance; the lit share of that fog is the light scattered toward the eye.
@@ -199,6 +260,11 @@ static float4 imbShaftsNow(ImBloomOut in, depth2d<float> depth, depth2d_array<fl
 	float3 P = w.xyz / w.w;
 	float len = length(P);
 	float3 dir = P / max(len, 1e-4);
+	if (p.shaft.x < -1.5) {
+		// (the Nether: its storm instead, a new step offset each frame)
+		float js = fract(52.9829189 * fract(dot(in.pos.xy, float2(0.06711056, 0.00583715))) + 0.61803399 * float(f.flags.w & 1023));
+		return float4(imbStorm(dir, len, sky, js, p, f), len, 0.0, 1.0);
+	}
 	bool water = p.shaft.x < -0.5;
 	float intense = water ? 1.0 : p.shaft.y;
 	float rain = f.dayUp.w, sunVis = f.nightMiddle.w, noon = f.dayDown.w, invNoon = f.sunsetDown.w;
@@ -443,7 +509,9 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 				sw += wgt;
 			}
 		sh /= max(sw, 1e-4);
-		c += p.shaftColor.rgb * (sh * p.shaft.z);
+		// (the Nether's storm: the haze over the picture; the light shafts: light added)
+		if (p.shaft.x < -1.5) c = mix(c, p.shaftColor.rgb, saturate(sh * p.shaft.z));
+		else c += p.shaftColor.rgb * (sh * p.shaft.z);
 	}
 	if (p.mix.x != 0.0) {
 		float3 glow = imbTent(src, s, in.uv, p.texel.xy) / p.mix.y;

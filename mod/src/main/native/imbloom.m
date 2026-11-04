@@ -36,6 +36,7 @@ typedef struct {
 	id<MTLTexture> shaftTex;  // the light shafts at half size (r the light, g the distance it was traced to)
 	id<MTLTexture> shaftHist[2];  // their history, ping-ponged: this frame's result blended over the last
 	int shaftIdx, shaftValid;
+	float shaftMode;          // the last frame's mode (shaft[0] < -1.5: the Nether's storm): a change drops the history
 	float shaft[8];           // im_bloom_shafts: sun uv, strength, colour
 	float taaJitter[3];       // im_bloom_taa: jitter (uv), 1 = on
 	float taaPrevJ[2];        // the last frame's
@@ -292,7 +293,11 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 		const void *frame = mc_im_frame_bytes(&frameLen);
 		id<MTLTexture> shafts = nil;
 		if (!(b->shaft[2] > 0.0f)) b->shaftValid = 0;
-		if (!inPlace && b->shaft[2] > 0.0f && depth && smap && scmp && frame && depth.width == src.width && depth.height == src.height) {
+		// (the Nether's storm needs no shadow maps; the light shafts do)
+		BOOL storm = b->shaft[0] < -1.5f;
+		if ((b->shaftMode < -1.5f) != storm) b->shaftValid = 0;
+		b->shaftMode = b->shaft[0];
+		if (!inPlace && b->shaft[2] > 0.0f && depth && (storm || (smap && scmp)) && frame && depth.width == src.width && depth.height == src.height) {
 			if (!b->shafts) b->shafts = imbPipeline(b, @"im_bloom_shafts", MTLPixelFormatRG16Float, NO, err, errCap);
 			NSUInteger sw = src.width / 2 > 1 ? src.width / 2 : 1, sh = src.height / 2 > 1 ? src.height / 2 : 1;
 			if (b->shafts && (!b->shaftHist[0] || b->shaftHist[0].width != sw || b->shaftHist[0].height != sh)) {

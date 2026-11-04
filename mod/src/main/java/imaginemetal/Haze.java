@@ -23,6 +23,14 @@ public final class Haze {
 	/** how much the camera is in the deep dark (eased): Euphoria Patches' intense deep dark */
 	static float deepDark;
 	private static float targetDeepDark;
+	/**
+	 * Reimagined's netherColor for the biome around the camera (NETHER_COLOR_MODE 3, its gamma-space colour), eased as you walk
+	 * between biomes; netherKnown: how much the camera is in one of the five it knows (elsewhere: from the fog colour, ImagineFrame)
+	 */
+	static final float[] netherPreset = {0.4f, 0.14f, 0.06f};
+	static float netherKnown;
+	private static final float[] netherTarget = {0.4f, 0.14f, 0.06f};
+	private static float targetKnown;
 	private static final float[] target = new float[3];
 	private static float targetHumid, targetCold;
 	private static int counter;
@@ -71,6 +79,13 @@ public final class Haze {
 			targetCold = b == SNOWY ? 1f : 0f;
 			targetDry = b == ARID ? 1f : 0f;
 			targetDeepDark = name.contains("deep_dark") ? 1f : 0f;
+			float[] nc = name.contains("nether_wastes") ? new float[] {0.4f, 0.14f, 0.06f}
+				: name.contains("crimson_forest") ? new float[] {0.36f, 0.07f, 0.05f}
+				: name.contains("warped_forest") ? new float[] {0.18f, 0.1f, 0.25f}
+				: name.contains("basalt_deltas") ? new float[] {0.25f, 0.235f, 0.23f}
+				: name.contains("soul_sand_valley") ? new float[] {0.1f, 0.24f, 0.24f} : null;
+			targetKnown = nc != null ? 1f : 0f;
+			if (nc != null) System.arraycopy(nc, 0, netherTarget, 0, 3);
 		}
 		float k = started ? 1f - (float) Math.exp(-dt / 2.5f) : 1f;
 		started = true;
@@ -79,6 +94,10 @@ public final class Haze {
 		cold += (targetCold - cold) * k;
 		dry += (targetDry - dry) * k;
 		deepDark += (targetDeepDark - deepDark) * k;
+		// (Reimagined eases these over seconds too: crossing into a soul sand valley the haze turns teal as you walk in)
+		float kn = k >= 1f ? 1f : 1f - (float) Math.exp(-dt / 4f);
+		for (int i = 0; i < 3; i++) netherPreset[i] += (netherTarget[i] - netherPreset[i]) * kn;
+		netherKnown += (targetKnown - netherKnown) * kn;
 	}
 
 	/** Photon's Mie density for this time of day (sunY, sunX: the sun's direction) and rain. */

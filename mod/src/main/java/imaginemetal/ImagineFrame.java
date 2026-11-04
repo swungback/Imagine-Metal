@@ -14,7 +14,7 @@ import org.joml.Vector4f;
 import org.lwjgl.system.MemoryUtil;
 
 /**
- * The lighting's per-frame values (lighting.metal ImFrame, 832 bytes): where the sun or moon is, the colours of its light, of
+ * The lighting's per-frame values (lighting.metal ImFrame, 848 bytes): where the sun or moon is, the colours of its light, of
  * the sky's light and of torches for this time of day and weather, the cave floor, the tone curve. Made once per frame at
  * LevelRenderer.render's start (LevelRendererMixin) and handed to the backend, which binds it on every terrain draw.
  *
@@ -22,7 +22,7 @@ import org.lwjgl.system.MemoryUtil;
  * a deep orange golden hour, blue-violet nights), tuned for our pipeline.
  */
 public final class ImagineFrame {
-	static final int SIZE = 832;
+	static final int SIZE = 848;
 	private static final ByteBuffer BUF = MemoryUtil.memAlloc(SIZE).order(ByteOrder.LITTLE_ENDIAN);
 	private static final long ADDRESS = MemoryUtil.memAddress(BUF);
 	private static int frame;
@@ -44,6 +44,12 @@ public final class ImagineFrame {
 	static float jitterX, jitterY;
 	/** this frame's dimension (0 overworld, 1 Nether, 2 End) */
 	static int dimNow;
+	/** the Nether (Reimagined's netherColor, gamma), its haze as the terrain shows it (linear, tone-mapped) and its storm's colour */
+	static final float[] netherColor = {0.4f, 0.14f, 0.06f}, netherFog = new float[3], netherStorm = new float[3];
+	/** this frame's Nether haze is ours (Settings.netherFog, in the Nether, eyes in air) */
+	static boolean netherHaze;
+	/** the Nether haze's full distance (blocks): 256 or the render distance, the nearer */
+	static float netherFar = 256f;
 
 	private static float halton(int i, int b) {
 		float f = 1f, r = 0f;
@@ -251,10 +257,19 @@ public final class ImagineFrame {
 			sunDir[1] = sy;
 			normalize(sunDir);
 		} else if (dim == 1) {
-			// the Nether: no sun; its haze colour lights everything, warm from below (the lava sea)
+			// the Nether: no sun. Reimagined's netherColor (NETHER_COLOR_MODE 3): its own colour for each of the five biomes (eased
+			// as you walk between them), elsewhere the fog's colour, brightened; it lights everything (with a little of the lava
+			// sea's glow, by the brightness setting, as Reimagined's ambient) and is the haze and the storm.
 			Vector4f fc = camera.fogData.color;
-			float[] f = {fc.x, fc.y, fc.z};
-			for (int i = 0; i < 3; i++) up[i] = (float) Math.pow(Math.max(f[i], 0f), 2.2) * 0.9f + new float[] {0.08f, 0.03f, 0.015f}[i];
+			float[] f = {Math.max(fc.x, 0f), Math.max(fc.y, 0f), Math.max(fc.z, 0f)};
+			float fl = (float) Math.sqrt((f[0] + 1e-4f) * (f[0] + 1e-4f) + (f[1] + 1e-4f) * (f[1] + 1e-4f) + (f[2] + 1e-4f) * (f[2] + 1e-4f));
+			float vsB = game.lightmapRenderState.brightness;
+			float[] lava = {0.15f, 0.06f, 0.01f};
+			for (int i = 0; i < 3; i++) {
+				float fallback = f[i] * 0.6f + 0.2f * (f[i] + 1e-4f) / fl;
+				netherColor[i] = mix(fallback, Haze.netherPreset[i], Haze.netherKnown);
+				up[i] = (float) Math.pow((netherColor[i] + 0.5f * lava[i]) * (0.9f + 0.45f * vsB), 2.2);
+			}
 		} else {
 			// the End: a lavender light from above, a violet sky
 			lightDir[0] = 0.3f;
@@ -421,6 +436,19 @@ public final class ImagineFrame {
 		jitterX = taaOn ? (halton(hi, 2) - 0.5f) * 2f / tw : 0f;
 		jitterY = taaOn ? (halton(hi, 3) - 0.5f) * 2f / th : 0f;
 		put(jitterX, jitterY, taaOn ? 1f : 0f, 0f);
+		// the Nether's haze (Reimagined's border fog there: up to 256 blocks or the render distance, thickening evenly with the
+		// distance, in netherColor) and its storm (netherColor x 3), as the terrain's light ends up
+		netherHaze = dim == 1 && Settings.netherFog && camera.fogType == net.minecraft.world.level.material.FogType.NONE;
+		float[] ncl = new float[3], nsl = new float[3];
+		for (int i = 0; i < 3; i++) {
+			ncl[i] = (float) Math.pow(netherColor[i], 2.2);
+			nsl[i] = (float) Math.pow(netherColor[i] * 3f, 2.2);
+		}
+		System.arraycopy(present(ncl), 0, netherFog, 0, 3);
+		System.arraycopy(present(nsl), 0, netherStorm, 0, 3);
+		float farM = Math.min(Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f, 256f);
+		netherFar = farM;
+		put(netherFog[0], netherFog[1], netherFog[2], netherHaze ? farM : 0f);
 		if (BUF.position() != SIZE) throw new IllegalStateException("ImFrame is " + BUF.position() + " bytes, not " + SIZE);
 	}
 
@@ -435,6 +463,24 @@ public final class ImagineFrame {
 			v[1] /= l;
 			v[2] /= l;
 		}
+	}
+
+	public static void netherClear(Vector4f fogColor) {
+		if (!netherHaze || fogColor == null) return;
+		fogColor.set((float) Math.pow(netherFog[0], 1 / 2.2), (float) Math.pow(netherFog[1], 1 / 2.2), (float) Math.pow(netherFog[2], 1 / 2.2), fogColor.w);
+	}
+
+	/** light (linear) as the terrain's ends up (lighting.metal imPresent): exposure, the tone curve, the grade */
+	static float[] present(float[] c) {
+		float[] o = new float[3];
+		for (int i = 0; i < 3; i++) {
+			double x = Math.max(c[i] * 0.9f, 1e-6f);
+			o[i] = (float) (Math.pow(x, TM_A) / (Math.pow(x, TM_A * TM_D) * TM_B + TM_C));
+		}
+		float l = luma(o), sat = Math.max(o[0], Math.max(o[1], o[2])) - Math.min(o[0], Math.min(o[1], o[2]));
+		float k = 1.04f + 0.08f * (1f - sat);
+		for (int i = 0; i < 3; i++) o[i] = Math.max(l + (o[i] - l) * k, 0f);
+		return o;
 	}
 
 	private static float luma(float[] c) {

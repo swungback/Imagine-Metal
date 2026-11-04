@@ -42,6 +42,14 @@ public final class Bloom {
 	 */
 	private static float[] shafts() {
 		float[] r = new float[6];
+		if (ImagineFrame.dimNow == 1) {
+			// the Nether: its storm (Reimagined's), in the same pass: x -2, z on, rgb its colour (netherColor x 3)
+			if (!Settings.netherStorm || !ImagineFrame.netherHaze || !Reflections.valid) return r;
+			r[0] = -2f;
+			r[2] = 1f;
+			System.arraycopy(ImagineFrame.netherStorm, 0, r, 3, 3);
+			return r;
+		}
 		boolean water = ImagineFrame.underwater;
 		if (!Settings.shafts || !Reflections.valid || !(ImagineFrame.shaftOn || water) || !Shadows.valid()) return r;
 		// (x: -1 eyes in water, else the sky light at the eyes, squared; sealed underground there's no air the sun lights)
@@ -126,7 +134,7 @@ public final class Bloom {
 					System.out.println("[Imagine Metal] bloom on");
 				}
 				float[] sh = shafts();
-				ImNative.bloomShafts(state, sh[0], sh[1], sh[2], sh[3], sh[4], sh[5], Settings.shadowRange);
+				ImNative.bloomShafts(state, sh[0], sh[1], sh[2], sh[3], sh[4], sh[5], sh[0] < -1.5f ? ImagineFrame.netherFar : Settings.shadowRange);
 				// Reimagined's bloom fog strengths (rain 8, night 3, cave 14, water 14; x its bloom strength 0.12 x 8.33), as a share
 				// here: how strongly distant things dissolve into glow
 				float fogK = 0f;

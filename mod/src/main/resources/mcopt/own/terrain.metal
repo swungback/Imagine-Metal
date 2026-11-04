@@ -2392,6 +2392,12 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 		bf *= bf;
 		imFog = 1.0 - exp(-3.0 * bf);
 		if (max(imFog, imFade) > 0.001) imFogColor = pow(imPresent(imSkyColor(dir, imf, false), imf), 1.0 / 2.2);
+	} else if (imf.flags.x == 1 && imf.nether.w > 0.0) {
+		// the Nether (Reimagined's border fog there, mainFog.glsl): the biome's glowing haze, thickening evenly out to 256 blocks
+		// or the render distance (Minecraft's own dark red wall of fog close by is replaced)
+		float dist = length(in.imPos);
+		imFog = saturate(dist / imf.nether.w);
+		imFogColor = pow(imf.nether.rgb, 1.0 / 2.2);
 	} else if (imf.water.z > 0.5 && imf.flags.x == 0 && imf.water.x > 0.5) {
 		// under water (Reimagined's): the biome's water fog colour, pushed toward its blue-green, thickening with the square of
 		// the distance (clear close by, a deep blue wall at about 60 blocks)

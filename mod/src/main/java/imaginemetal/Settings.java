@@ -37,6 +37,8 @@ public final class Settings {
 	public static volatile boolean intenseDeepDark = Engine.flag("imaginemetal.intenseDeepDark", true);
 	public static volatile boolean taa = Engine.flag("imaginemetal.taa", true);
 	public static volatile boolean rainbows = Engine.flag("imaginemetal.rainbows", true);
+	public static volatile boolean netherFog = Engine.flag("imaginemetal.netherFog", true);
+	public static volatile boolean netherStorm = Engine.flag("imaginemetal.netherStorm", true);
 	public static volatile boolean bloomFog = Engine.flag("imaginemetal.bloomFog", true);
 	public static volatile boolean shadowFarAlternate = Engine.flag("imaginemetal.shadowFarAlternate", true);
 	public static volatile boolean ssao = Engine.flag("imaginemetal.ssao", true);
@@ -85,6 +87,8 @@ public final class Settings {
 		v.put("imaginemetal.ssao", String.valueOf(ssao));
 		v.put("imaginemetal.bloomFog", String.valueOf(bloomFog));
 		v.put("imaginemetal.rainbows", String.valueOf(rainbows));
+		v.put("imaginemetal.netherFog", String.valueOf(netherFog));
+		v.put("imaginemetal.netherStorm", String.valueOf(netherStorm));
 		v.put("imaginemetal.taa", String.valueOf(taa));
 		v.put("imaginemetal.intenseDeepDark", String.valueOf(intenseDeepDark));
 		v.put("imaginemetal.wet", String.valueOf(wet));
