@@ -2402,11 +2402,20 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 	} else if (imf.flags.x == 2 && imf.nether.w < 0.0) {
 		// the End (Reimagined's border fog there): the far islands fade into its violet sky toward the edge of the render
 		// distance (in place of Minecraft's black)
-		float bf = length(in.imPos) / -imf.nether.w;
+		float dist = length(in.imPos);
+		float bf = dist / -imf.nether.w;
 		bf *= bf;
 		bf *= bf;
 		imFog = 1.0 - exp(-3.0 * bf);
-		imFogColor = pow(imPresent(imf.nether.x > 0.5 ? float3(0.004, 0.0042, 0.005) : float3(0.095, 0.07, 0.15) * 1.65, imf), 1.0 / 2.2);
+		imFogColor = pow(imPresent(float3(0.095, 0.07, 0.15) * 1.65, imf), 1.0 / 2.2);
+		if (imf.nether.x > 0.5) {
+			// (the black hole's End, after IterationT's: a thin warm haze lit by the black hole, glowing toward it, so the far
+			// islands fade into a bright mist on its side and into the dark on the other)
+			float nu = dot(in.imPos / max(dist, 1e-3), normalize(imf.lightDir.xyz));
+			float hg = 0.0795775 * (1.0 - 0.49) / pow(1.0 + 0.49 - 1.4 * nu, 1.5);
+			imFog = max(1.0 - exp(-min(dist, 512.0) * 0.0028), imFog);
+			imFogColor = pow(imPresent(float3(0.55, 0.5, 0.42) * (0.01 + 0.9 * hg), imf), 1.0 / 2.2);
+		}
 	} else if (imf.water.z > 0.5 && imf.flags.x == 0 && imf.water.x > 0.5) {
 		// under water (Reimagined's): the biome's water fog colour, pushed toward its blue-green, thickening with the square of
 		// the distance (clear close by, a deep blue wall at about 60 blocks)

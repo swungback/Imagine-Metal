@@ -77,68 +77,192 @@ static float imShootingStar(float3 d, float t, float period, float seed) {
 }
 
 // rot: clip -> view direction (the inverse of the camera's rotation and projection, no translation)
-// The End's black hole (Settings.endStyle 1, after Iteration's End): a black sky thick with white stars, and low over the
-// islands a black hole, its shadow ringed by a thin white photon ring, the accretion disk seen almost edge-on crossing in front of
-// it as a blazing band (brighter on the side turning toward us, orange on the other), the disk's far side bent up over the top and
-// under the bottom into a halo, a wide glow scattering over the sky around it, and a vast dark planet beside it, only its rim lit.
-// rgb: light (linear, through the tone curve as the terrain's); hdr: the cores past white, added after it (the bloom haloes them).
+// The End's black hole (Settings.endStyle 1), after IterationT's End (its look studied, written here from scratch): a black sky
+// of small stars of every star colour, a black hole low over the islands seen from eight units away, its light bent by its
+// gravity (each step of the ray turned toward it by 1/r^2), a thin hot accretion disk tilted almost edge-on that the bending
+// wraps over the top and under the bottom of the shadow, white-blue at its inner edge and orange outward, brighter on the side
+// turning toward us; a bright glow hugging the shadow. Beside it a vast ringed planet, its rings seen nearly edge-on as a band
+// of streaks across the sky, lit and shadowed by the black hole's light. rgb: light (linear, through the tone curve as the
+// terrain's); hdr: the brightest parts, added after it so the bloom haloes them.
+
+// a black body's colour at temperature t (kelvin; Planckian locus, normalized to its brightest channel)
+static float3 imBlackbody(float t) {
+	t = clamp(t, 1000.0, 40000.0) / 100.0;
+	float3 c;
+	c.r = t <= 66.0 ? 1.0 : saturate(1.292936 * pow(t - 60.0, -0.1332047592));
+	c.g = t <= 66.0 ? saturate(0.3900816 * log(t) - 0.6318414) : saturate(1.1298909 * pow(t - 60.0, -0.0755148492));
+	c.b = t >= 66.0 ? 1.0 : (t <= 19.0 ? 0.0 : saturate(0.5432068 * log(t - 10.0) - 1.1962541));
+	return c * c;  // (to linear, roughly)
+}
+
+static inline float imBhHash(float3 q) {
+	uint3 u = uint3(int3(floor(q)));
+	uint h = u.x * 1597334677u ^ u.y * 3812015801u ^ u.z * 2654435761u;
+	h = (h ^ (h >> 16)) * 2246822519u;
+	h ^= h >> 13;
+	return float(h & 0xffffffu) / 16777216.0;
+}
+
+static inline float imBhNoise2(float2 q) {
+	float2 i = floor(q), u = q - i;
+	u = u * u * (3.0 - 2.0 * u);
+	float a = imBhHash(float3(i, 7.0)), b = imBhHash(float3(i + float2(1, 0), 7.0));
+	float c = imBhHash(float3(i + float2(0, 1), 7.0)), d = imBhHash(float3(i + float2(1, 1), 7.0));
+	return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+static inline float imMiePhase(float g, float nu) {
+	float gg = g * g;
+	return 0.1193662 * (1.0 - gg) / (2.0 + gg) * (1.0 + nu * nu) * pow(1.0 + gg - 2.0 * g * nu, -1.5);
+}
+
 static float3 imBlackHoleSky(float3 d, constant ImFrame &f, thread float3 &hdr) {
 	float3 B = normalize(f.lightDir.xyz);
 	float3 R = normalize(cross(B, float3(0.0, 1.0, 0.0)));
 	float3 U = cross(R, B);
-	float z = dot(d, B);
-	float x = dot(d, R), y = dot(d, U);
-	float r = z > 0.0 ? length(float2(x, y)) : 2.0;
-	const float rs = 0.032;  // the shadow's radius (radians, about two degrees)
-	float yb = y - 0.07 * x;   // (the disk a little tilted)
+	float t = f.world.w;
 	hdr = float3(0.0);
 
-	// the stars: tiny, white, everywhere (thinner in the glow)
-	float2 sc = (0.65 * d / (abs(d.y) + length(d.xz))).xz * 0.5;
-	if (d.y < 0.0) sc += 100.0;
-	float2 cell = floor(sc * 1400.0) / 1400.0;
-	float st = imStarNoise(cell) * imStarNoise(cell + 0.1) * imStarNoise(cell + 0.23);
-	st = max(st - 0.62, 0.0);
-	st *= st;
-	float3 col = float3(0.004, 0.0042, 0.005) + float3(0.9, 0.93, 1.0) * st * 9.0;
+	// the black hole's own frame: the singularity at the origin, the eye 8 units back along the view to it; the disk's normal
+	// tilted 0.1 rad toward us and rolled 0.35 rad
+	const float tilt = 0.1, roll = -0.35;
+	float3 Ur = U * cos(roll) + R * sin(roll), Rr = R * cos(roll) - U * sin(roll);
+	float3 Nd = normalize(Ur * cos(tilt) - B * sin(tilt));
+	float3 Xd = Rr;
+	float3 Zd = normalize(cross(Xd, Nd));
 
-	// the planet: far and huge, beside the black hole, its night side dark (hiding the stars), only the rim facing the light lit
-	float3 Pc = normalize(B * 0.82 - R * 0.52 - U * 0.24);
-	const float Rp = 0.50;
-	float cp = dot(d, Pc);
-	float phi = acos(clamp(cp, -1.0, 1.0));
-	float3 tb = normalize(B - Pc * dot(B, Pc));
-	float3 dd = d - Pc * cp;
-	float facing = dot(dd / max(length(dd), 1e-4), tb);
-	if (phi < Rp) col = float3(0.010, 0.010, 0.012) * (1.0 + 2.0 * smoothstep(Rp - 0.08, Rp, phi) * saturate(facing));
-	float rim = exp(-pow((phi - Rp) / 0.0022, 2.0)) * smoothstep(-0.2, 0.8, facing);
-	float atmo = phi > Rp ? exp(-(phi - Rp) / 0.012) * saturate(facing) : 0.0;
-	col += float3(0.85, 0.9, 1.0) * (rim * 1.4 + atmo * 0.08);
-	hdr += float3(0.9, 0.95, 1.0) * rim * 0.6;
-
-	// the glow scattered around it, and a thin flare across it along the disk
-	float glow = exp(-r / 0.10) * 0.55 + exp(-r / 0.45) * 0.10;
-	float flare = z > 0.0 ? exp(-pow(yb / 0.0035, 2.0)) * exp(-abs(x) / 0.30) : 0.0;
-	col += float3(1.0, 0.96, 0.9) * (glow + flare * 0.5);
-
-	// the disk, nearly edge-on: a band from just outside the shadow outward, in front of it (it crosses the shadow too)
-	float ax = abs(x);
-	float bw = rs * 0.11 + ax * 0.03;
-	float band = z > 0.0 ? exp(-pow(yb / bw, 2.0)) * smoothstep(rs * 1.05, rs * 1.6, ax) * exp(-(ax - rs) / (rs * 2.8)) : 0.0;
-	// (Doppler: the side turning toward us brighter and whiter, the other dimmer and orange)
-	float3 diskC = x < 0.0 ? float3(1.0, 0.97, 0.92) * 1.3 : float3(1.0, 0.62, 0.32) * 0.85;
-	// the photon ring, and the disk's far side lensed over the top and under the bottom
-	float ring = exp(-pow((r - rs * 1.07) / (rs * 0.06), 2.0));
-	float halo = exp(-pow((r - rs * 1.32) / (rs * 0.20), 2.0)) * (0.45 + 0.55 * smoothstep(0.0, rs * 1.2, abs(y)));
-	float3 light = float3(1.0, 0.97, 0.93) * (ring * 3.0 + halo * 1.6) + diskC * band * 3.2;
-	if (r < rs) {
-		// the shadow: black, but for the disk's band crossing in front of it
-		col = diskC * band * 3.2;
-		hdr = diskC * band * 2.0;
-		return col;
+	float3 col = float3(0.0), res = float3(0.0);
+	float trans = 1.0;
+	float3 rd = d;
+	float near = dot(d, B);
+	if (near > 0.82) {
+		const int STEPS = 44;
+		const float stepLen = 0.23;
+		const float inner = 0.5, width = 3.5;
+		float noise = fract(dot(d.xy * 4093.0 + d.z * 811.0, float2(0.06711056, 0.00583715)) * 52.9829189);
+		float3 pos = -B * 8.0 + rd * (3.0 + stepLen * noise);
+		for (int i = 0; i < STEPS; i++) {
+			if (trans < 0.001) break;
+			float r2 = dot(pos, pos);
+			rd = normalize(rd - pos * (rsqrt(r2) / (r2 + 1e-6)) * 0.06);
+			pos += rd * stepLen;
+			float3 dp = float3(dot(pos, Xd), dot(pos, Nd), dot(pos, Zd));
+			float r = length(dp);
+			float h = dp.y;
+			float rg = 1.0 - saturate((r - inner) / width * 0.5);
+			float thick = 0.1 * rg;
+			float fr = abs(r - inner) + 0.4;
+			fr *= fr;
+			float bloom = 1.0 / (h * h * 40.0 + fr * fr * 0.04 + 0.00002) * saturate(2.0 - abs(h) / max(thick, 1e-4));
+			bloom *= bloom;
+			float x4 = rg * rg;
+			x4 *= x4;
+			float dr = 12.207 * x4 * (1.0 - rg);
+			float dens = saturate(saturate(dr * saturate(1.0 - abs(h) / max(thick, 1e-4)) * 0.7) + bloom * 0.1);
+			if (dens > 0.0001) {
+				// (rings of denser and thinner gas, drifting slowly)
+				float2 q = float2(r * 3.5 + t * 0.03, h * 0.35);
+				float fbm = imBhNoise2(q) * 0.5 + imBhNoise2(q * 2.5 + 3.1) * 0.435 + imBhNoise2(q * 6.25 + 7.7) * 0.378;
+				fbm = fbm * 0.75 + 0.11;
+				fbm *= fbm;
+				fbm *= fbm;
+				dens *= fbm * dr;
+				float gr = 1.0 - rg;
+				gr *= gr;
+				float glow = 1.0 / (gr * gr * 400.0 + 0.002);
+				float3 gc = imBlackbody(2700.0 + glow * 50.0) * glow;
+				float ph = atan2(-dp.z, -dp.x);
+				gc *= sin(ph - 1.07) * 0.75 + 1.0;  // (Doppler)
+				float st = exp2(-dens * 7.0);
+				trans *= st;
+				res += (1.0 - st) * trans * gc;
+			}
+			// the glow close around the shadow
+			float L = length(dp - float3(0.0, 0.05, 0.0));
+			float td = length(float2(L - 1.0, L - 0.01));
+			if (r > 0.5) res += float3(0.78, 0.86, 1.0) * (0.1 / (pow(td, 3.5) + 0.001)) * trans;
+		}
+		res *= 1.0 / float(STEPS);
+		res *= smoothstep(0.82, 0.88, near);
+		rd = normalize(mix(d, rd, smoothstep(0.82, 0.9, near)));
 	}
-	col += light;
-	hdr += float3(1.0, 0.97, 0.93) * (ring * 2.5 + halo * 0.8) + diskC * band * 2.0 + float3(1.0) * exp(-r / 0.05) * 0.25;
+
+	// the stars (seen through the bent light): a grid on the sphere, a few cells lit, each its black body's colour
+	{
+		float3 sp = rd * 384.0;
+		float3 cell = floor(sp), fq = sp - cell;
+		float rr = dot(fq - 0.5, fq - 0.5);
+		float h1 = imBhHash(cell), h2 = imBhHash(cell + 31.7);
+		float c = saturate((h1 - 0.993) / 0.007);
+		col += 0.06 * saturate(1.0 - rr / 0.25) * c * c * imBlackbody(mix(4000.0, 8000.0, h2));
+	}
+
+	// the ringed planet: its centre beside the black hole, 1.75 of its radii away (so it fills a wide part of the sky); its rings
+	// from 1.6 to 2.6 radii in a plane passing just beside the eye, so they cross the sky as a band of thin streaks
+	float3 P = normalize(B * 0.55 - R * 0.78 + U * 0.08);
+	float3 C = P * 1.75;
+	float3 Nr = normalize(U * 0.97 + R * 0.12 + B * 0.2);
+	Nr = normalize(Nr - P * dot(Nr, P));
+	float hOff = 0.014;  // (the eye's height over the ring plane, in planet radii)
+	float3 Cr = C - Nr * (dot(C, Nr) + hOff);  // (the plane through the planet's centre, moved so the eye is hOff above it)
+	float b = dot(rd, C);
+	float disc = b * b - (dot(C, C) - 1.0);
+	float tPlanet = disc > 0.0 ? b - sqrt(disc) : -1.0;
+	float VdotL = dot(rd, B);
+	float mie = imMiePhase(0.8, VdotL);
+	if (tPlanet > 0.0) {
+		float3 Xp = rd * tPlanet;
+		float3 Np = normalize(Xp - C);
+		float nl = saturate(dot(Np, B)), nv = saturate(dot(Np, -rd));
+		float3 alb = float3(0.98, 0.87, 0.55);
+		// (a bright, rough planet: its lit side's light spread like a thick cloud deck's)
+		float3 surf = alb * nl * (0.12 / (nl + nv + 0.2));
+		// (the rings' shadow on it)
+		float tr = dot(Cr - Xp, Nr) / dot(B, Nr);
+		if (tr > 0.0) {
+			float rho = length(Xp + B * tr - Cr);
+			if (rho > 1.6 && rho < 2.6) surf *= 0.35 + 0.65 * imBhNoise2(float2(rho * 9.0, 0.0));
+		}
+		col = surf * 0.6 + float3(0.012, 0.012, 0.014);
+		// (its atmosphere's rim, toward the light)
+		float rim = pow(1.0 - nv, 6.0) * (0.3 + 0.7 * saturate(dot(Np, B) + 0.3));
+		col += float3(0.65, 0.7, 1.0) * rim * 0.25;
+		hdr += float3(0.65, 0.7, 1.0) * pow(1.0 - nv, 24.0) * saturate(dot(Np, B) + 0.2) * 0.8;
+	} else {
+		// the atmosphere's glow just outside the rim
+		float edge = disc + 0.06;
+		if (edge > 0.0) col += float3(0.65, 0.7, 1.0) * saturate(edge / 0.06) * saturate(edge / 0.06) * 0.03 * (0.3 + mie * 6.0);
+	}
+	// the rings
+	{
+		float dn = dot(rd, Nr);
+		float tr = abs(dn) > 1e-5 ? dot(Cr, Nr) / dn : -1.0;
+		if (tr > 0.0 && (tPlanet < 0.0 || tr < tPlanet)) {
+			float3 X = rd * tr - Cr;
+			float rho = length(X);
+			if (rho > 1.6 && rho < 2.6) {
+				float pos = rho * 0.5 + 0.69, acc = 0.0, al = 0.5;
+				for (int i = 0; i < 5; i++) {
+					acc += al * imBhNoise2(float2(pos * 64.0, 3.0));
+					pos *= 4.0;
+					al *= 0.5;
+				}
+				float ring = pow(saturate(acc + 0.025 - 0.1) * 1.5, 3.0) * smoothstep(1.6, 1.76, rho);
+				// (in the planet's shadow: dark)
+				float3 Xc = rd * tr - C;
+				float sd = length(cross(B, Xc));
+				ring *= 0.98 * max(smoothstep(0.8, 1.2, sd), step(0.0, dot(B, Xc))) + 0.02;
+				col *= exp2(-ring * 3.0);
+				ring *= 1.0 + mie * 10.0;
+				float3 rc = float3(1.0, 0.85, 0.6) * ring * 0.09;
+				col += rc;
+				hdr += rc * 0.4;
+			}
+		}
+	}
+
+	col = col * trans + res;
+	hdr += min(res * 0.35, float3(3.0));
 	return col;
 }
 

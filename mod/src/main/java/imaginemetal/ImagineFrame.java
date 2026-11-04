@@ -87,7 +87,7 @@ public final class ImagineFrame {
 	private static final float[] END_LIGHT = {0.40f, 0.30f, 0.62f};
 	private static final float[] END_SKY = {0.10f, 0.07f, 0.15f};
 	/** where the End's black hole hangs (Settings.endStyle 1): low in the sky, so the islands throw long shadows */
-	private static final float[] BLACK_HOLE = {0.70f, 0.17f, -0.69f};
+	private static final float[] BLACK_HOLE = {0.70f, 0.26f, -0.67f};
 	/** The moon's light by phase (vanilla's index: 0 full ... 4 new). */
 	private static final float[] MOON_PHASE = {1f, 0.8f, 0.6f, 0.4f, 0.25f, 0.4f, 0.6f, 0.8f};
 
@@ -281,7 +281,8 @@ public final class ImagineFrame {
 			lightDir[1] = BLACK_HOLE[1];
 			lightDir[2] = BLACK_HOLE[2];
 			normalize(lightDir);
-			float[] bl = {1.55f, 1.45f, 1.32f}, sk = {0.055f, 0.058f, 0.068f};
+			// (IterationT's End: the islands bright in a warm white light, the shadows nearly black)
+			float[] bl = {1.95f, 1.82f, 1.5f}, sk = {0.03f, 0.031f, 0.036f};
 			for (int i = 0; i < 3; i++) {
 				light[i] = bl[i];
 				up[i] = sk[i];
