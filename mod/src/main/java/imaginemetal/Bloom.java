@@ -40,11 +40,14 @@ public final class Bloom {
 	 */
 	private static float[] shafts() {
 		float[] r = new float[6];
-		if (!Settings.shafts || !Reflections.valid || !ImagineFrame.shaftOn || !Shadows.valid()) return r;
-		float k = (0.35f + 0.65f * Math.max(1f - ImagineFrame.shaftNoon, ImagineFrame.cave)) * (1f - 0.7f * ImagineFrame.shaftRain);
+		boolean water = ImagineFrame.underwater;
+		if (!Settings.shafts || !Reflections.valid || !(ImagineFrame.shaftOn || water) || !Shadows.valid()) return r;
+		float k = water ? 0.8f * (1f - 0.6f * ImagineFrame.shaftRain)
+			: (0.35f + 0.65f * Math.max(1f - ImagineFrame.shaftNoon, ImagineFrame.cave)) * (1f - 0.7f * ImagineFrame.shaftRain);
+		r[0] = water ? 1f : 0f;
 		r[2] = k * Settings.shaftStrength;
-		r[3] = ImagineFrame.shaftColor[0];
-		r[4] = ImagineFrame.shaftColor[1];
+		r[3] = ImagineFrame.shaftColor[0] * (water ? 0.35f : 1f);
+		r[4] = ImagineFrame.shaftColor[1] * (water ? 0.75f : 1f);
 		r[5] = ImagineFrame.shaftColor[2];
 		return r;
 	}

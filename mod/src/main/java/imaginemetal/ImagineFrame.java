@@ -32,7 +32,7 @@ public final class ImagineFrame {
 	static float cave, night;
 	/** the light shafts (Bloom): the light's direction and colour, this frame's sky ours (overworld, eyes in air), rain */
 	static final float[] shaftDir = new float[3], shaftColor = new float[3];
-	static boolean shaftOn;
+	static boolean shaftOn, underwater;
 	static float shaftRain, shaftNoon;
 	private static float wet;
 	private static boolean failed;
@@ -317,6 +317,7 @@ public final class ImagineFrame {
 		// the sky and the haze (ours only in the overworld with the eyes in air: in water, lava or snow Minecraft's fog stays)
 		boolean ourFog = dim == 0 && Settings.sky && camera.fogType == net.minecraft.world.level.material.FogType.NONE;
 		shaftOn = ourFog;
+		underwater = dim == 0 && Settings.sky && camera.fogType == net.minecraft.world.level.material.FogType.WATER;
 		Haze.update(level, cam, dt);
 		put(dayUp[0], dayUp[1], dayUp[2], rain);
 		put(dayMid[0], dayMid[1], dayMid[2], sunFactor);

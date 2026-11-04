@@ -112,6 +112,14 @@ fragment float4 im_bloom_composite(ImBloomOut in [[stage_in]], float4 dst [[colo
 	return float4(pow(saturate(c), 1.0 / 2.2), dst.a);
 }
 
+static inline float imbNoise(float2 q) {
+	float2 i = floor(q), u = fract(q);
+	u = u * u * (3.0 - 2.0 * u);
+	float a = fract(sin(dot(i, float2(127.1, 311.7))) * 43758.5453), b = fract(sin(dot(i + float2(1, 0), float2(127.1, 311.7))) * 43758.5453);
+	float c = fract(sin(dot(i + float2(0, 1), float2(127.1, 311.7))) * 43758.5453), d = fract(sin(dot(i + float2(1, 1), float2(127.1, 311.7))) * 43758.5453);
+	return mix(mix(a, b, u.x), mix(c, d, u.y), u.y);
+}
+
 // The start of lighting.metal's ImFrame (the frame's values, bound as they are): the light, and the sun's shadow maps.
 struct ImVlFrame {
 	float4 lightDir;     // xyz toward the light (sun by day, moon by night)
@@ -122,6 +130,8 @@ struct ImVlFrame {
 	float4x4 shadowNear;
 	float4x4 shadowFar;
 	float4 shadow;       // y 1 = the maps are valid this frame
+	float4 pad1[23];
+	float4 world;        // xyz the camera's world position (wrapped every 4096 blocks), w seconds
 };
 
 // Light shafts (volumetric, after Complementary Reimagined's; at a quarter of the size): along each pixel's view ray, out to the
@@ -137,27 +147,42 @@ fragment float4 im_bloom_shafts(ImBloomOut in [[stage_in]], depth2d<float> depth
 	float3 P = w.xyz / w.w;
 	float len = length(P);
 	float3 dir = P / max(len, 1e-4);
-	float L = d >= 0.99999 ? 96.0 : min(len, 96.0);
+	bool water = p.shaft.x > 0.5;  // (eyes under water: shorter reach, denser, and the light falls in beams through the waves)
+	float L = d >= 0.99999 ? (water ? 48.0 : 96.0) : min(len, water ? 48.0 : 96.0);
 	const int n = 12;
 	float j = fract(52.9829189 * fract(dot(in.pos.xy, float2(0.06711056, 0.00583715))));
-	float lit = 0.0;
+	float lit = 0.0, known = 0.0;
 	for (int i = 0; i < n; i++) {
 		float t = (float(i) + j) / float(n);
 		float3 q = dir * (L * t * t);  // (denser near the eye, where the beams are big on screen)
 		float4 c0 = f.shadowNear * float4(q, 1.0);
-		float s = 1.0;
+		// (outside both maps nothing is known: those points don't count, rather than counting as lit, which drew walls of haze
+		// at the maps' edges)
+		float beam = 1.0;
+		if (water) {
+			// (the waves above focus the light into moving beams: a pattern on the surface, carried down along the light)
+			float3 wq = q + f.world.xyz;
+			float2 s2 = (wq.xz - f.lightDir.xz * (wq.y / max(f.lightDir.y, 0.2))) * 0.35;
+			float tt = f.world.w * 0.4;
+			float nz = imbNoise(s2 + float2(tt, tt * 0.7)) * 0.6 + imbNoise(s2 * 2.1 - float2(tt * 0.8, tt)) * 0.4;
+			beam = 0.15 + 0.85 * smoothstep(0.45, 0.75, nz);
+		}
 		if (max(abs(c0.x), abs(c0.y)) < 0.95 && c0.z > 0.0 && c0.z < 1.0) {
-			s = smap.sample_compare(cmp, float2(0.5 + 0.5 * c0.x, 0.5 - 0.5 * c0.y), 0, c0.z - 0.0001);
+			lit += smap.sample_compare(cmp, float2(0.5 + 0.5 * c0.x, 0.5 - 0.5 * c0.y), 0, c0.z - 0.0001) * beam;
+			known += 1.0;
 		} else {
 			float4 c1 = f.shadowFar * float4(q, 1.0);
-			if (max(abs(c1.x), abs(c1.y)) < 0.98 && c1.z > 0.0 && c1.z < 1.0)
-				s = smap.sample_compare(cmp, float2(0.5 + 0.5 * c1.x, 0.5 - 0.5 * c1.y), 1, c1.z - 0.0002);
+			if (max(abs(c1.x), abs(c1.y)) < 0.98 && c1.z > 0.0 && c1.z < 1.0) {
+				lit += smap.sample_compare(cmp, float2(0.5 + 0.5 * c1.x, 0.5 - 0.5 * c1.y), 1, c1.z - 0.0002) * beam;
+				known += 1.0;
+			}
 		}
-		lit += s;
 	}
-	lit /= float(n);
-	float amount = lit * (1.0 - exp(-L * 0.02));
-	amount *= 1.0 - 0.8 * smoothstep(0.75, 1.0, lit);
+	if (known < 0.5) return float4(0.0);
+	L *= known / float(n);
+	lit /= known;
+	float amount = lit * (1.0 - exp(-L * (water ? 0.06 : 0.02)));
+	if (!water) amount *= 1.0 - 0.8 * smoothstep(0.75, 1.0, lit);
 	float vl = dot(dir, f.lightDir.xyz);
 	float ph = 0.25 + 2.2 * pow(saturate(vl * 0.5 + 0.5), 6.0);
 	return float4(amount * ph, 0.0, 0.0, 1.0);

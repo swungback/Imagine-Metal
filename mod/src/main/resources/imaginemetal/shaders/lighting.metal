@@ -220,7 +220,9 @@ static float2 imShadow(float3 p, float3 n, float2 pixel, constant ImFrame &f, de
 	float e1 = max(abs(c1.x), abs(c1.y));
 	if (e1 > 0.98 || c1.z > 1.0 || c1.z < 0.0) return nearW > 0.0 ? float2(litNear, nearW) : float2(1.0, 0.0);
 	float2 uv1 = float2(0.5 + 0.5 * c1.x, 0.5 - 0.5 * c1.y);
-	float litFar = imShadowPcf(smap, cmp, uv1, c1.z - 0.00012, 1);
+	float o1 = 0.75 / float(smap.get_width());
+	float litFar = 0.25 * (smap.sample_compare(cmp, uv1 + float2(-o1, -o1), 1, c1.z - 0.00012) + smap.sample_compare(cmp, uv1 + float2(o1, -o1), 1, c1.z - 0.00012)
+		+ smap.sample_compare(cmp, uv1 + float2(-o1, o1), 1, c1.z - 0.00012) + smap.sample_compare(cmp, uv1 + float2(o1, o1), 1, c1.z - 0.00012));
 	float cover = 1.0 - smoothstep(0.9, 0.98, e1);
 	return float2(mix(litFar, litNear, nearW), max(cover, nearW));
 }
