@@ -429,7 +429,9 @@ public final class OwnQuads {
 				int[] mt = this.mat[b];
 				for (int i = 0, n = this.count[b]; i < n; i++) {
 					int m = mt[i];
-					MemoryUtil.memPutByte(dst++, (byte) (grid[m & 4095] & 15 | (m >>> 12 & 15) << 4));
+					int gb = grid[m & 4095], wave = gb >> 4 & 3;
+					int corners = wave == 2 ? 15 : wave == 1 ? m >>> 12 & 15 : 0;
+					MemoryUtil.memPutByte(dst++, (byte) (gb & 15 | corners << 4));
 				}
 			}
 		}

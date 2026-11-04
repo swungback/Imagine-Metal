@@ -29,6 +29,7 @@ public final class Settings {
 	public static volatile float auroraBrightness = Config.number("imaginemetal.auroraBrightness", 1f, 0.25f, 3f);
 	public static volatile float auroraInfluence = Config.number("imaginemetal.auroraInfluence", 1f, 0f, 3f);
 	public static volatile boolean heldLight = Engine.flag("imaginemetal.heldLight", true);
+	public static volatile boolean waving = Engine.flag("imaginemetal.waving", true);
 	public static volatile float nightBrightness = Config.number("imaginemetal.nightBrightness", 1f, 0.25f, 2f);
 	public static volatile float normals = Config.number("imaginemetal.generatedNormals", 0f, 0f, 4f);
 	public static volatile boolean bloom = Engine.flag("imaginemetal.bloom", true);
@@ -63,6 +64,7 @@ public final class Settings {
 		v.put("imaginemetal.auroraBrightness", String.format(java.util.Locale.ROOT, "%.2f", auroraBrightness));
 		v.put("imaginemetal.auroraInfluence", String.format(java.util.Locale.ROOT, "%.2f", auroraInfluence));
 		v.put("imaginemetal.heldLight", String.valueOf(heldLight));
+		v.put("imaginemetal.waving", String.valueOf(waving));
 		v.put("imaginemetal.nightBrightness", String.format(java.util.Locale.ROOT, "%.2f", nightBrightness));
 		v.put("imaginemetal.generatedNormals", String.format(java.util.Locale.ROOT, "%.2f", normals));
 		v.put("imaginemetal.bloom", String.valueOf(bloom));

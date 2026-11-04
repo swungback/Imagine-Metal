@@ -1,7 +1,12 @@
 package imaginemetal;
 
 import java.util.concurrent.ConcurrentHashMap;
+import net.minecraft.core.BlockPos;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -66,14 +71,40 @@ public final class Materials {
 	private Materials() {
 	}
 
-	/** The class of state (cached; called from the section compile threads). */
+	/**
+	 * The class of state (low 4 bits) and how it waves (bits 4-5: 0 not, 1 a grounded plant's top, 2 the whole block: leaves, vines,
+	 * a tall plant's upper half). Cached; called from the section compile threads.
+	 */
 	public static byte of(BlockState state) {
 		Byte c = CACHE.get(state);
 		if (c == null) {
-			c = classify(state);
+			c = (byte) (classify(state) | (Settings.waving ? wave(state) : 0) << 4);
 			CACHE.put(state, c);
 		}
 		return c;
+	}
+
+	/** Forget every block's class (a setting that changes them: the chunks are rebuilt after). */
+	public static void clearCache() {
+		CACHE.clear();
+	}
+
+	private static int wave(BlockState state) {
+		try {
+			if (state.is(BlockTags.LEAVES)) return 2;
+			String name = state.getBlock().toString().toLowerCase(java.util.Locale.ROOT);
+			if (name.contains(":vine}") || name.contains("weeping_vines") || name.contains("twisting_vines")) return 2;
+			boolean plant = state.is(BlockTags.FLOWERS) || state.is(BlockTags.SAPLINGS) || state.is(BlockTags.CROPS)
+				|| state.is(BlockTags.REPLACEABLE_BY_TREES) || name.contains("grass}") || name.contains("fern") || name.contains("bush")
+				|| name.contains("seagrass") || name.contains("sugar_cane");
+			if (!plant || state.isSolidRender()) return 0;
+			if (!state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).isEmpty()) return 0;
+			if (state.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF) && state.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF) == DoubleBlockHalf.UPPER)
+				return 2;
+			return 1;
+		} catch (Throwable t) {
+			return 0;
+		}
 	}
 
 	private static boolean any(String name, String[] parts) {

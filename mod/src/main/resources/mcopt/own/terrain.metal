@@ -1817,7 +1817,27 @@ vertex VOut own_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant Dr
 	VOut ov = ownVertex(vi, origin, uploadMs, df, arenaRaw, proj, g, t, lightmap, lightSampler, rel);
 #ifdef IM_SHADE
 	// (Imagine Metal) the face's material byte: solid / cutout units of sections compiled with materials on
-	if (!TRANSLUCENT && !QUADS && imMatOff != 0xffffffffu) ov.imMat = ((device const uchar *) arenaRaw)[imMatOff + quad];
+	if (!TRANSLUCENT && !QUADS && imMatOff != 0xffffffffu) {
+		ov.imMat = ((device const uchar *) arenaRaw)[imMatOff + quad];
+		// waving plants and leaves (Materials: the corner bits are set only for blocks that wave; all four: the whole quad, leaves
+		// and the upper half of tall plants; else the corners above the quad's middle, a plant's top): a breeze from where the
+		// vertex is in the world and the time, so shared corners move together and the plant stays in one piece
+		uint wc = (ov.imMat >> 4) & 15u;
+		if (wc != 0u && (wc == 15u || ((wc >> corner) & 1u) != 0u)) {
+			float3 wp = float3(origin & 1023) + rel;
+			float tw = g.GameTime * 1200.0;
+			float amp = wc == 15u ? 0.045 : 0.085;
+			float ph = wp.x * 0.55 + wp.z * 0.38;
+			float3 d = float3(sin(tw * 1.6 + ph) * 0.7 + sin(tw * 2.9 + wp.z * 1.3) * 0.3,
+				sin(tw * 2.1 + wp.x * 0.9 + wp.z * 0.7) * (wc == 15u ? 0.25 : 0.1),
+				cos(tw * 1.3 + ph * 0.8) * 0.6 + sin(tw * 3.3 + wp.x * 1.1) * 0.3) * amp;
+			float4x4 m = CPU_CLIP ? df.clip : proj.ProjMat * t.ModelViewMat;
+			float4 dc = m * float4(d, 0.0);
+			dc.y = -dc.y;
+			ov.pos += dc;
+			ov.imPos += d;
+		}
+	}
 	// (the face's texture rectangle: from this corner's uv and the opposite corner's, which span it; the generated normals wrap in it)
 	if (!QUADS && !F_POSONLY) {
 		float2 uvo = ownUv(vi ^ 2u, arenaRaw);

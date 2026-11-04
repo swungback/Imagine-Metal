@@ -53,6 +53,8 @@ public final class Config {
 		#
 		# A light in your hand lights what's around you; how bright moonlit nights are (1 = ours).
 		imaginemetal.heldLight=true
+		# Plants and leaves sway in the wind.
+		imaginemetal.waving=true
 		imaginemetal.nightBrightness=1
 		imaginemetal.generatedNormals=0
 		#

@@ -98,6 +98,11 @@ public final class SettingsScreen extends OptionsSubScreen {
 						"How strongly the aurora's light tints the world below it (the snow turns its colour)."));
 			}
 			case SURFACES -> {
+				this.list.addBig(toggle("Waving plants", Settings.waving, v -> {
+					Settings.waving = v;
+					Materials.clearCache();
+					Minecraft.getInstance().levelRenderer.allChanged();
+				}, "Grass, flowers, crops and leaves sway in the wind."));
 				this.list.addSmall(toggle("PBR", Settings.pbr, v -> Settings.pbr = v,
 					"Sun highlights on every block by its texture, and reflections traced on screen: metal, gems and polished stone clearly, rough blocks at low angles."),
 					slider("Generated normals", 0, 4, 0.25f, Settings.normals, v -> Settings.normals = v, v -> v == 0 ? "Off" : pct(v),
