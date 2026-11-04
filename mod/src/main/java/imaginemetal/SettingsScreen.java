@@ -89,7 +89,7 @@ public final class SettingsScreen extends OptionsSubScreen {
 					"Reimagined's soft depth: in rain, at night, in caves and under water, distant things dissolve into a gentle glow."),
 					toggle("Rainbows", Settings.rainbows, v -> Settings.rainbows = v, "A rainbow opposite the sun as the rain clears."));
 				this.list.addSmall(toggle("Light shafts", Settings.shafts, v -> Settings.shafts = v,
-					"Beams of sunlight around leaves, mountains and cave mouths when you look toward the sun."),
+					"Beams of sunlight around leaves, mountains and cave mouths when you look toward the sun; in the End, its violet beams rising out of the void."),
 					slider("Shaft strength", 0, 3, 0.05f, Settings.shaftStrength, v -> Settings.shaftStrength = v, SettingsScreen::pct,
 						"How bright the light shafts are."));
 				this.list.addSmall(cycle("Stars", new String[] {"Minecraft's", "Reimagined, twinkling"}, Settings.stars, v -> Settings.stars = v,

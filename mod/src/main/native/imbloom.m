@@ -298,12 +298,12 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 		if ((b->shaftMode < -1.5f) != storm) b->shaftValid = 0;
 		b->shaftMode = b->shaft[0];
 		if (!inPlace && b->shaft[2] > 0.0f && depth && (storm || (smap && scmp)) && frame && depth.width == src.width && depth.height == src.height) {
-			if (!b->shafts) b->shafts = imbPipeline(b, @"im_bloom_shafts", MTLPixelFormatRG16Float, NO, err, errCap);
+			if (!b->shafts) b->shafts = imbPipeline(b, @"im_bloom_shafts", MTLPixelFormatRGBA16Float, NO, err, errCap);
 			NSUInteger sw = src.width / 2 > 1 ? src.width / 2 : 1, sh = src.height / 2 > 1 ? src.height / 2 : 1;
 			if (b->shafts && (!b->shaftHist[0] || b->shaftHist[0].width != sw || b->shaftHist[0].height != sh)) {
 				for (int k = 0; k < 2; k++) {
 					[b->shaftHist[k] release];
-					MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRG16Float width:sw height:sh
+					MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA16Float width:sw height:sh
 						mipmapped:NO];
 					td.storageMode = MTLStorageModePrivate;
 					td.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;

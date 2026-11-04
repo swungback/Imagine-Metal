@@ -50,6 +50,18 @@ public final class Bloom {
 			System.arraycopy(ImagineFrame.netherStorm, 0, r, 3, 3);
 			return r;
 		}
+		if (ImagineFrame.dimNow == 2) {
+			// the End: Reimagined's ender beams, in the same pass: x -3, y the shadow maps' reach (0: none), z strength, rgb their
+			// violet (Reimagined's: its End ambient light cubed, normalized, x 2.5)
+			if (!Settings.shafts || !Reflections.valid || !Sky.active) return r;
+			r[0] = -3f;
+			r[1] = Shadows.valid() ? Settings.shadowRange : 0f;
+			r[2] = Settings.shaftStrength;
+			float[] el = {0.68f, 0.51f, 1.07f};
+			float l3 = (float) Math.sqrt(Math.pow(el[0], 6) + Math.pow(el[1], 6) + Math.pow(el[2], 6));
+			for (int i = 0; i < 3; i++) r[3 + i] = (float) Math.pow(el[i], 3) / l3 * 2.5f;
+			return r;
+		}
 		boolean water = ImagineFrame.underwater;
 		if (!Settings.shafts || !Reflections.valid || !(ImagineFrame.shaftOn || water) || !Shadows.valid()) return r;
 		// (x: -1 eyes in water, else the sky light at the eyes, squared; sealed underground there's no air the sun lights)
@@ -134,7 +146,8 @@ public final class Bloom {
 					System.out.println("[Imagine Metal] bloom on");
 				}
 				float[] sh = shafts();
-				ImNative.bloomShafts(state, sh[0], sh[1], sh[2], sh[3], sh[4], sh[5], sh[0] < -1.5f ? ImagineFrame.netherFar : Settings.shadowRange);
+				ImNative.bloomShafts(state, sh[0], sh[1], sh[2], sh[3], sh[4], sh[5], sh[0] < -2.5f ? Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f
+					: sh[0] < -1.5f ? ImagineFrame.netherFar : Settings.shadowRange);
 				// Reimagined's bloom fog strengths (rain 8, night 3, cave 14, water 14; x its bloom strength 0.12 x 8.33), as a share
 				// here: how strongly distant things dissolve into glow
 				float fogK = 0f;

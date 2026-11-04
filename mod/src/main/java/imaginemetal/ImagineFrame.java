@@ -448,7 +448,9 @@ public final class ImagineFrame {
 		System.arraycopy(present(nsl), 0, netherStorm, 0, 3);
 		float farM = Math.min(Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f, 256f);
 		netherFar = farM;
-		put(netherFog[0], netherFog[1], netherFog[2], netherHaze ? farM : 0f);
+		// (the End: w minus the render distance, for Reimagined's border fog there into its violet sky)
+		boolean endFog = dim == 2 && Settings.sky && camera.fogType == net.minecraft.world.level.material.FogType.NONE;
+		put(netherFog[0], netherFog[1], netherFog[2], netherHaze ? farM : endFog ? -Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f : 0f);
 		if (BUF.position() != SIZE) throw new IllegalStateException("ImFrame is " + BUF.position() + " bytes, not " + SIZE);
 	}
 

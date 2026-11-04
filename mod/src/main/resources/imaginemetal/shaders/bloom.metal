@@ -245,6 +245,91 @@ static float imbStorm(float3 dir, float len, bool open, float j, constant ImBloo
 	return saturate(a * (stepLen / 8.0) * 0.40);
 }
 
+// Reimagined's ender beams (lib/atmospherics/volumetricLight/enderBeams.glsl, in its End volumetric light): tall columns of violet
+// light rising out of the void around height 68, from a slow noise over the world's x and z (so they stand upright), each as
+// tall as the noise there says, reaching higher the farther out they are; past a few hundred blocks a hot orange creeps into
+// them. Traced as Reimagined's End light: out to 1536 blocks (96 chunks), the near part through the shadow maps (the islands
+// cast shadows into the beams), the air past the land's fog included. Returns r violet, g the distance, b orange.
+static inline float imbHashP(int2 q, int2 per) {
+	q = ((q % per) + per) % per;
+	uint h = uint(q.x) * 1597334677u ^ uint(q.y) * 3812015801u;
+	h = (h ^ (h >> 16)) * 2246822519u;
+	h ^= h >> 13;
+	return float(h & 0xffffffu) / 16777216.0;
+}
+
+// (linearly blended, as Reimagined's noise texture; per: its repeat in cells, a whole number over the 4096-block wrap)
+static inline float imbNoiseL(float2 q, int2 per) {
+	float2 fi = floor(q), u = q - fi;
+	int2 i = int2(fi);
+	return mix(mix(imbHashP(i, per), imbHashP(i + int2(1, 0), per), u.x), mix(imbHashP(i + int2(0, 1), per), imbHashP(i + int2(1, 1), per), u.x), u.y);
+}
+
+static float4 imbEnd(float3 dir, float len, bool open, float j, depth2d_array<float> smap, sampler cmp, constant ImBloomParams &p,
+	constant ImVlFrame &f) {
+	const float maxD = 1536.0;
+	float rd = max(p.shaft.w, 32.0);   // the render distance (blocks)
+	float shadowReach = p.shaft.y;     // the shadow maps' reach (0: none this frame)
+	// (Reimagined: past the land's fog the rays go on to the end, so beams stand in front of the far islands too)
+	float bf = len / rd;
+	bf *= bf;
+	bf *= bf;
+	bf = 1.0 - exp(-3.0 * bf);
+	float rayEnd = open ? maxD : mix(min(len, maxD), maxD, bf);
+	float active = min(min(rd, shadowReach > 0.0 ? shadowReach : rd) * 0.98, maxD);
+	const int NN = 16, NF = 4;
+	int total = rayEnd <= active ? NN : NN + NF;
+	float w = f.world.w * (256.0 / 3600.0);  // (the wind, a whole number of repeats an hour)
+	float vio = 0.0, org = 0.0, last = 0.0;
+	for (int i = 0; i <= total; i++) {
+		float next, dens = 1.0;
+		float3 q;
+		if (i <= NN) {
+			float t = (float(i) + j) / float(NN);
+			next = pow(t, 1.3) * active;
+			if (next >= rayEnd) break;
+			q = dir * next;
+			if (shadowReach > 0.0) {
+				float4 c0 = f.shadowNear * float4(q, 1.0);
+				if (max(abs(c0.x), abs(c0.y)) < 0.95 && c0.z > 0.0 && c0.z < 1.0) {
+					dens = smap.sample_compare(cmp, float2(0.5 + 0.5 * c0.x, 0.5 - 0.5 * c0.y), 0, c0.z - 0.0001);
+				} else {
+					float4 c1 = f.shadowFar * float4(q, 1.0);
+					if (max(abs(c1.x), abs(c1.y)) < 0.98 && c1.z > 0.0 && c1.z < 1.0)
+						dens = smap.sample_compare(cmp, float2(0.5 + 0.5 * c1.x, 0.5 - 0.5 * c1.y), 1, c1.z - 0.0002);
+				}
+			}
+		} else {
+			float t = (float(i - NN) + j) / float(NF);
+			next = mix(active, maxD, pow(t, 2.5));
+			if (next >= rayEnd) break;
+			q = dir * next;
+		}
+		float cw = imbSmooth(pow(saturate(last / maxD), 0.55));
+		float nw = imbSmooth(pow(saturate(next / maxD), 0.55));
+		float slice = nw - cw;
+		last = next;
+		// the beam here
+		float2 xz = f.world.xz + q.xz;
+		float lxz = length(q.xz);
+		float noise = (imbNoiseL(xz / 64.0 - w, int2(64)) * 0.5 + imbNoiseL(xz / 256.0 + w * 0.5, int2(16)) * 2.0
+			+ imbNoiseL(xz / 16.0 - w, int2(256)) * 0.5) / 3.0;
+		float fire = imbNoiseL(xz / 128.0 - w, int2(32));
+		float reach = (2000.0 * noise * noise + 40.0 * fire) * 0.001 * (250.0 + 0.5 * lxz);
+		float altDis = abs(f.world.y + q.y - 68.0);
+		float af = 0.5 * (1.0 - smoothstep(0.0, reach, altDis)) + 0.5 * (1.0 - smoothstep(0.0, 4.0 * reach, altDis));
+		float af2 = af * af;
+		float n = noise * noise * 0.7 + 0.3 * fire;
+		n = pow(max(n * af2 * af2, 0.0), 1.75);
+		float k = n * (1.0 + smoothstep(0.0, 128.0, lxz)) * dens * slice;
+		float fm = fire - 0.5;
+		fm *= fm;
+		vio += k;
+		org += k * 300.0 * (0.0015 + 0.2 * smoothstep(0.0, 256.0, lxz) * fm * fm);
+	}
+	return float4(vio, len, org, 1.0);
+}
+
 // Light shafts: Complementary Reimagined's volumetric light (lib/atmospherics/volumetricLight/volumetricLight.glsl), at half size.
 // Along each pixel's view ray out to the render distance, points checked against the sun's shadow maps (more of them near the eye),
 // each standing for its slice of a fog that thickens with distance; the lit share of that fog is the light scattered toward the eye.
@@ -261,8 +346,9 @@ static float4 imbShaftsNow(ImBloomOut in, depth2d<float> depth, depth2d_array<fl
 	float len = length(P);
 	float3 dir = P / max(len, 1e-4);
 	if (p.shaft.x < -1.5) {
-		// (the Nether: its storm instead, a new step offset each frame)
+		// (the Nether: its storm instead; the End: its beams. A new step offset each frame)
 		float js = fract(52.9829189 * fract(dot(in.pos.xy, float2(0.06711056, 0.00583715))) + 0.61803399 * float(f.flags.w & 1023));
+		if (p.shaft.x < -2.5) return imbEnd(dir, len, sky, js, smap, cmp, p, f);
 		return float4(imbStorm(dir, len, sky, js, p, f), len, 0.0, 1.0);
 	}
 	bool water = p.shaft.x < -0.5;
@@ -357,6 +443,7 @@ fragment float4 im_bloom_shafts(ImBloomOut in [[stage_in]], depth2d<float> depth
 				// (the history only where it was the same distance: an edge that moved shows the new value)
 				float same = 1.0 - smoothstep(0.05, 0.2, abs(h.g - len) / max(len, 1.0));
 				res.r = mix(res.r, h.r, 0.85 * same);
+				res.b = mix(res.b, h.b, 0.85 * same);
 			}
 		}
 	}
@@ -499,18 +586,22 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 			float4 ww = p.clipInv * float4(in.uv * 2.0 - 1.0, dd >= 0.99999 ? 0.9999 : dd, 1.0);
 			myLen = length(ww.xyz / ww.w);
 		}
-		float sh = 0.0, sw = 0.0;
+		float sh = 0.0, sb = 0.0, sw = 0.0;
 		for (int y = -1; y <= 1; y++)
 			for (int x = -1; x <= 1; x++) {
-				float2 sv = shafts.sample(s, in.uv + st * float2(x, y)).rg;
+				float3 sv = shafts.sample(s, in.uv + st * float2(x, y)).rgb;
 				float wgt = (2.0 - abs(float(x))) * (2.0 - abs(float(y)));
 				if (myLen >= 0.0) wgt *= 1.0 / (1.0 + 20.0 * abs(sv.g - myLen) / max(myLen, 1.0));
 				sh += sv.r * wgt;
+				sb += sv.b * wgt;
 				sw += wgt;
 			}
 		sh /= max(sw, 1e-4);
-		// (the Nether's storm: the haze over the picture; the light shafts: light added)
-		if (p.shaft.x < -1.5) c = mix(c, p.shaftColor.rgb, saturate(sh * p.shaft.z));
+		sb /= max(sw, 1e-4);
+		// (the Nether's storm: the haze over the picture; the End's beams: violet light, with a hot orange part farther out (b);
+		// the light shafts: light added)
+		if (p.shaft.x < -2.5) c += (p.shaftColor.rgb * sh + float3(1.0, 0.3, 0.0) * sb) * p.shaft.z;
+		else if (p.shaft.x < -1.5) c = mix(c, p.shaftColor.rgb, saturate(sh * p.shaft.z));
 		else c += p.shaftColor.rgb * (sh * p.shaft.z);
 	}
 	if (p.mix.x != 0.0) {
