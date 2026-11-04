@@ -247,7 +247,11 @@ Own *mco_new(Ctx *ctx, const char *source, int compact, int fat, int cpuClip, ch
 			}
 			if (c == 4) w->fsCutoutLevel = fs;
 			else if (c == 3) w->fsSolidLevel = fs;
-			else if (c == 2) w->fsTranslucent = fs;
+			else if (c == 2) {
+				// (Imagine Metal: its own translucent stage, blending by itself; own_fs where the library has none)
+				id<MTLFunction> tr = [lib newFunctionWithName:@"own_fs_tr" constantValues:cv error:nil];
+				w->fsTranslucent = tr ? tr : fs;
+			}
 			else if (cut) w->fsCutout = fs;
 			else w->fsSolid = fs;
 		}
@@ -556,7 +560,7 @@ static id<MTLFunction> ownStage(Own *w, int kind, int vertex, char *err, int err
 		: frag == 8 ? @"own_fs_tex"
 		: frag == 7 ? @"own_fs_pos"
 		: frag == 6 ? @"own_fs_alpha"
-		: frag == 2 ? @"own_fs_flat" : @"own_fs";
+		: frag == 2 ? @"own_fs_flat" : frag == 3 && w->fsTranslucent && [w->fsTranslucent.name isEqualToString:@"own_fs_tr"] ? @"own_fs_tr" : @"own_fs";
 	NSString *key = [NSString stringWithFormat:@"%@ %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d%@", name, vertex ? vsMode | translucent << 2 | quads << 3 : frag, half, lean, nonidx,
 		rev, tight, posonly, occA, occB, (kind >> 29) & 1, oracle, fogvert, fogvertAll, fogvertT, qflat, group ? @" g" : @""];
 	id<MTLFunction> fn = w->functions[key];
@@ -652,7 +656,7 @@ static id<MTLRenderPipelineState> ownPipeline(Own *w, Enc *enc, int cutout, char
 			if (!enc->colors[c]) continue;
 			pd.colorAttachments[c].pixelFormat = enc->colors[c].pixelFormat;
 			pd.colorAttachments[c].writeMask = c == 0 && (cutout & 15) != 6 && !(cutout & (1 << 30)) ? MTLColorWriteMaskAll : MTLColorWriteMaskNone;
-			if (c == 0 && (cutout & 15) == 3) {
+			if (c == 0 && (cutout & 15) == 3 && ![pd.fragmentFunction.name isEqualToString:@"own_fs_tr"]) {
 				// vanilla's BlendFunction.TRANSLUCENT
 				pd.colorAttachments[c].blendingEnabled = YES;
 				pd.colorAttachments[c].sourceRGBBlendFactor = MTLBlendFactorSourceAlpha;

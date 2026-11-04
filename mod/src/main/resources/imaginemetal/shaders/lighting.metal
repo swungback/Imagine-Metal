@@ -278,7 +278,7 @@ static float4 imBlockLight(float3 p, float3 n, constant ImFrame &f, texture3d<fl
 	if (f.lightVol.w < 0.5) return float4(warm, 0.0);
 	float3 uvw = (p + n * 0.5 - f.lightVol.xyz) / f.lightSize.xyz;
 	float3 e = min(uvw, 1.0 - uvw) * f.lightSize.xyz;  // blocks to the grid's nearest side
-	float inside = smoothstep(1.0, 6.0, min(min(e.x, e.y), e.z));
+	float inside = smoothstep(1.0, 14.0, min(min(e.x, e.y), e.z));  // (a long fade: walking toward a light, its colour comes in gradually)
 	if (inside <= 0.0) return float4(warm, 0.0);
 	// a trilinear filter by hand that leaves solid voxels out (they hold a < 0): blending their nothing into the light next to
 	// a wall made dark smears along the block grid, like shadows; this is the leak-proof filter Complementary uses too
@@ -304,7 +304,7 @@ static float4 imBlockLight(float3 p, float3 n, constant ImFrame &f, texture3d<fl
 	hue = max(hl + (hue - hl) * 1.6, 0.0);
 	// (as bright as the torch colour, times how bright the sources here are: 1 for most, about half near lava)
 	hue *= max(max(warm.r, warm.g), warm.b) / max(max(max(hue.r, hue.g), hue.b), 1e-4) * min(m, 1.0);
-	float w = inside * smoothstep(0.0, 0.1, c.a);
+	float w = inside * smoothstep(0.0, 0.3, c.a);
 	return float4(mix(warm, hue, w), c.a * inside);
 }
 
@@ -448,7 +448,7 @@ static float imHighlight(float3 N, float3 V, float3 L, float nl, float smooth) {
 // passing behind anything (it escaped: the sky is a fair guess); a = -1: it went behind something whose far side the screen
 // doesn't show (blocked: nothing is known, the surface keeps its own colour).
 static float4 imReflect(float3 p, float3 n, float3 R, float lod, float dither, constant ImFrame &f, texture2d<float> hc, depth2d<float> hd,
-	sampler hs) {
+	sampler hs, bool thinTest) {
 	float dist = length(p);
 	float3 q = p + f.histShift.xyz + n * (0.03 + dist * 0.004);
 	float2 size = float2(hd.get_width(), hd.get_height());
@@ -468,10 +468,12 @@ static float4 imReflect(float3 p, float3 n, float3 R, float lod, float dither, c
 		if (diff > 0.02 + length(r) * 0.004) {
 			// (only just behind a surface counts as reaching it: far behind is passing behind something thin in front, a torch, a
 			// fence, whose back the screen doesn't show)
-			if (diff > 0.15 + stepLen * 0.6) return float4(0.0, 0.0, 0.0, -1.0);
+			// (water and glass skip this: their rays run long and flat toward hills, and passing well behind one in a single step
+			// is normal there; the check after the refinement still catches a miss)
+			if (thinTest && diff > 0.15 + stepLen * 0.6) return float4(0.0, 0.0, 0.0, -1.0);
 			float a = tPrev, b = t;
 			float2 uv = float2(0.0);
-			for (int j = 0; j < 5; j++) {
+			for (int j = 0; j < 6; j++) {
 				float m = 0.5 * (a + b);
 				float3 rm = q + R * m;
 				float4 cm = f.histClip * float4(rm, 1.0);
@@ -564,6 +566,15 @@ static float3 imWaterNormal(float3 p, float3 n, constant ImFrame &f) {
 	return normalize(float3(-g.x, 1.0, -g.y));
 }
 
+// Smooth value noise (one a unit), for shapes in the world.
+static inline float imValueNoise(float2 q) {
+	float2 i = floor(q), u = fract(q);
+	u = u * u * (3.0 - 2.0 * u);
+	float a = fract(sin(dot(i, float2(127.1, 311.7))) * 43758.5453), b = fract(sin(dot(i + float2(1, 0), float2(127.1, 311.7))) * 43758.5453);
+	float c = fract(sin(dot(i + float2(0, 1), float2(127.1, 311.7))) * 43758.5453), d = fract(sin(dot(i + float2(1, 1), float2(127.1, 311.7))) * 43758.5453);
+	return mix(mix(a, b, u.x), mix(c, d, u.y), u.y);
+}
+
 static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint mat, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp,
 	texture3d<float> lvol, sampler lsamp, float2 uv, float4 rect, texture2d<float> atlas, texture2d<float> hc, depth2d<float> hd, sampler hs) {
 	if (f.flags.z == 0) return albedo * (0.2 + 0.8 * max(light.x, light.y)); // the engine hasn't filled a frame yet
@@ -592,28 +603,27 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	ImSurf surf = pbr ? imSurface(cls, albedo, tex) : ImSurf{0.0, 0.0, 0.0, 0.04, 0.0};
 	float3 V = -normalize(p);
 	if (kind == 1u && f.water.x > 1.5 && n.y > 0.5) N = imWaterNormal(p, n, f);
-	// wet in the rain (after Reimagined's): what's under the open sky turns darker and glossy, puddles lie flat and mirror-like on
-	// the tops of blocks, in patches from a world-space noise; sides only a little
+	// rain puddles (Reimagined's, RAIN_PUDDLES 1): on tops of blocks under the open sky, away from torches; their shape from three
+	// sizes of noise over the world (in the texture's pixels), so they lie in wide organic pools that grow as the rain goes on;
+	// a puddle is a flat mirror. The rest of the world only gets a little glossier.
 	if (pbr && f.water.w > 0.0 && kind == 0u && cls != IM_MAT_LAVA && cls != IM_MAT_EMITTER) {
-		float wet = f.water.w * smoothstep(0.8, 0.97, light.y);
-		if (wet > 0.0) {
-			float2 wq = floor((p.xz + f.world.xz) * 16.0 + 0.001) * (0.3 / 16.0);  // (in the texture's pixels, like everything else)
-			float2 wi = floor(wq), wf = fract(wq);
-			wf = wf * wf * (3.0 - 2.0 * wf);
-			float h00 = fract(sin(dot(wi, float2(127.1, 311.7))) * 43758.5453), h10 = fract(sin(dot(wi + float2(1, 0), float2(127.1, 311.7))) * 43758.5453);
-			float h01 = fract(sin(dot(wi + float2(0, 1), float2(127.1, 311.7))) * 43758.5453), h11 = fract(sin(dot(wi + float2(1, 1), float2(127.1, 311.7))) * 43758.5453);
-			float pn = mix(mix(h00, h10, wf.x), mix(h01, h11, wf.x), wf.y);
-			float puddle = step(0.6, pn) * step(0.5, n.y) * smoothstep(0.6, 1.0, wet) * (cls == IM_MAT_FOLIAGE ? 0.0 : 1.0);
-			float wf2 = wet * max(puddle, cls == IM_MAT_FOLIAGE ? 0.15 : n.y > 0.5 ? 0.4 : 0.2);
-			base *= 1.0 - 0.3 * wf2 * (1.0 - puddle * 0.3);
-			surf.d = max(surf.d, wf2 * 0.95);
-			surf.g = max(surf.g, wf2 * 0.9);
-			surf.hl = max(surf.hl, wf2);
-			if (puddle > 0.5) N = n;  // (standing water is flat)
+		float pmix = saturate(light.y * 32.0 - 31.0) * saturate((1.0 - 1.15 * light.x) * 10.0);
+		float up = max(n.y - 0.5, 0.0) * 2.0;
+		pmix *= up * up;
+		float wetF = f.water.w;
+		float w4 = wetF * wetF;
+		if (w4 * w4 * pmix > 1e-5) {
+			float2 wq = floor((p.xz + f.world.xz) * 16.0 + 0.001) * (0.1 / 16.0) * 0.05 * 128.0;  // (Reimagined's scale on a 128-texel noise)
+			float form = imValueNoise(wq) * 3.0 + imValueNoise(wq * 0.5 + 17.3) * 5.0 + imValueNoise(wq * 0.25 + 41.7) * 8.0;
+			form *= sqrt(1.0 - (1.0 - wetF) * (1.0 - wetF)) * 0.5625 + 0.4375;
+			pmix *= saturate(form - 8.5);  // (Reimagined: - 7 on its noise texture; this smoother noise needs a higher cut for the same share)
+			surf.g = mix(surf.g, 0.7 - wetF * 0.3, pmix);
+			surf.hl = mix(surf.hl, 1.5, pmix);
+			surf.d = mix(surf.d, 1.0, 1.0 - (1.0 - pmix) * (1.0 - pmix));
+			N = normalize(mix(N, n, 1.0 - (1.0 - pmix) * (1.0 - pmix)));
 		}
+		surf.d = max(surf.d, 0.3 * wetF * saturate(n.y));
 	}
-	float block = light.x, sky = light.y;
-	float skyF = imSkyCurve(sky);
 
 	// direct light: wrapped N.L; until there are shadow maps, the sky light stands in for them (no sun under a roof)
 	float nl = dot(N, f.lightDir.xyz);
@@ -622,7 +632,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// off regardless, so a cave never catches sunlight through an imprecision of the map.
 	float2 sm = imShadow(p, n, pixel, f, smap, cmp);
 	float open = smoothstep(0.45, 0.9, sky);
-	float sun = mix(open, sm.x, sm.y) * smoothstep(0.02, 0.3, sky);
+	float sun = mix(open, sm.x, sm.y) * smoothstep(0.0, 0.07, sky);
 	float3 direct = f.lightColor.rgb * (wrap * sun);
 
 	// sky light: blue from above, warmer and dimmer from below
@@ -731,7 +741,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			float lod = (1.0 - surf.d) * 5.0;
 			// (a fixed dither: without TAA a per-frame one would only shimmer)
 			float dither = fract(dot(pixel, float2(0.06711056, 0.00583715)) * 52.9829189);
-			float4 hit = f.histShift.w > 0.5 ? imReflect(p, n, R, lod, dither, f, hc, hd, hs) : float4(0.0);
+			float4 hit = f.histShift.w > 0.5 ? imReflect(p, n, R, lod, dither, f, hc, hd, hs, true) : float4(0.0);
 			float open = smoothstep(0.6, 1.0, sky);
 			float3 skyR = float3(0.0);
 			if (open * smoothstep(-0.1, 0.2, R.y) > 0.0)
@@ -758,7 +768,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			float dither = fract(dot(pixel, float2(0.06711056, 0.00583715)) * 52.9829189);
 			// (traced only within 64 blocks: past that the reflection is the sky, cheaper and without the depth's banding)
 			float dist = length(p);
-			float4 hit = f.histShift.w > 0.5 && dist < 64.0 ? imReflect(p, n, R, kind == 1u ? 0.0 : 1.5, dither, f, hc, hd, hs) : float4(0.0);
+			float4 hit = f.histShift.w > 0.5 && dist < 64.0 ? imReflect(p, n, R, kind == 1u ? 0.0 : 1.5, dither, f, hc, hd, hs, false) : float4(0.0);
 			hit.a = hit.a > 0.0 ? hit.a * (1.0 - smoothstep(40.0, 64.0, dist)) : hit.a;
 			float open = smoothstep(0.6, 1.0, sky);
 			float3 skyR = float3(0.0);

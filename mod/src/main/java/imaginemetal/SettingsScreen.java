@@ -212,7 +212,7 @@ public final class SettingsScreen extends OptionsSubScreen {
 		Minecraft mc = Minecraft.getInstance();
 		if (mc.level == null) return;
 		try {
-			mc.levelRenderer.invalidateCompiledGeometry(mc.level, mc.options, mc.gameRenderer.mainCamera(), mc.getBlockColors());
+			mc.levelExtractor.allChanged();  // (what F3+A does)
 		} catch (Throwable t) {
 			System.out.println("imaginemetal: couldn't rebuild the chunks (" + t + "); press F3+A");
 		}

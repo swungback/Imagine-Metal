@@ -2276,12 +2276,12 @@ static float linear_fog_value(float vertexDistance, float fogStart, float fogEnd
 constant bool CUTOUT [[function_constant(0)]];
 constant float CUTOUT_LIMIT [[function_constant(5)]];  // vanilla's ALPHA_CUTOUT: 0.5 cutout, 0.1 translucent
 
-fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]], constant Terrain &t [[buffer(23)]], constant Fog &fog [[buffer(24)]],
-	texture2d<float> atlas [[texture(16)]], sampler atlasSampler [[sampler(14)]]
+// own_fs's work (own_fs and, with Imagine Metal, own_fs_tr call it). imTint (Imagine Metal): how the translucent pass tints what's
+// behind this fragment (water blue, stained glass its colour; 1: not at all).
+static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, constant Fog &fog, texture2d<float> atlas, sampler atlasSampler
 #ifdef IM_SHADE
-	, constant ImFrame &imf [[buffer(30)]], depth2d_array<float> imShadowMap [[texture(20)]], sampler imShadowCmp [[sampler(13)]]
-	, texture3d<float> imLightVol [[texture(21)]], sampler imLightSampler [[sampler(12)]]
-	, texture2d<float> imHistColor [[texture(22)]], depth2d<float> imHistDepth [[texture(23)]], sampler imHistSampler [[sampler(11)]]
+	, constant ImFrame &imf, depth2d_array<float> imShadowMap, sampler imShadowCmp, texture3d<float> imLightVol, sampler imLightSampler
+	, texture2d<float> imHistColor, depth2d<float> imHistDepth, sampler imHistSampler, thread float3 &imTint
 #endif
 	) {
 #ifdef OWN_TPROBE
@@ -2334,14 +2334,30 @@ fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]],
 			wc = sqrt(wc) * float3(1.0, 0.85, 0.8);
 			color.rgb = texel.rgb * texel.rgb * wc;
 			float a = 1.0 - (1.0 - color.a) * (1.0 - color.a);
-			color.a = a * (0.45 + 0.4 * smoothstep(2.0, 24.0, length(in.imPos)));
+			color.a = a * (0.3 + 0.4 * smoothstep(4.0, 48.0, length(in.imPos)));
 			float fr = 1.0 - saturate(dot(fnT, -normalize(in.imPos)));
 			fr *= fr;
 			color.a = mix(color.a, 1.0, fr * fr);
+			// what's under the water turns blue (Reimagined's translucentMult: the biome's water colour, normalized; less far away)
+			if (imf.water.z < 0.5) {
+				float3 wt = getColor(in).rgb;
+				wt = 1.0 - (1.0 - wt) * (1.0 - wt);
+				wt = normalize(max(wt, 1e-3));
+				wt.g *= 0.88;
+				float far = length(in.imPos) / max(imf.fogParams.x, 16.0);
+				far *= far;
+				imTint = mix(wt, float3(1.0), saturate(far * far));
+			}
 		} else if (imKind == 2u) {
-			// Reimagined's translucent tweaks: a little clearer up close
+			// Reimagined's translucent tweaks: a little clearer up close; what's behind takes the glass's colour
 			float d = length(in.imPos);
 			color.a = mix(color.a, color.a * color.a, smoothstep(4.0, 0.5, d) * 0.5);
+			float a4 = color.a * color.a;
+			a4 *= a4;
+			float3 gt = mix(float3(0.666), color.rgb * (1.0 - a4), color.a);
+			float far = length(in.imPos) / max(imf.fogParams.x, 16.0);
+			far *= far;
+			imTint = mix(gt, float3(1.0), saturate(far * far));
 		}
 	}
 	color.rgb = imShade(color.rgb, texel.rgb, in.imPos, in.imLight, in.imMat | (imKind << 8), in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler,
@@ -2367,6 +2383,43 @@ fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]],
 	return float4(mix(color.rgb, fog.FogColor.rgb, fogValue * fog.FogColor.a), color.a);
 #endif
 }
+
+fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]], constant Terrain &t [[buffer(23)]], constant Fog &fog [[buffer(24)]],
+	texture2d<float> atlas [[texture(16)]], sampler atlasSampler [[sampler(14)]]
+#ifdef IM_SHADE
+	, constant ImFrame &imf [[buffer(30)]], depth2d_array<float> imShadowMap [[texture(20)]], sampler imShadowCmp [[sampler(13)]]
+	, texture3d<float> imLightVol [[texture(21)]], sampler imLightSampler [[sampler(12)]]
+	, texture2d<float> imHistColor [[texture(22)]], depth2d<float> imHistDepth [[texture(23)]], sampler imHistSampler [[sampler(11)]]
+#endif
+	) {
+#ifdef IM_SHADE
+	float3 imTint = float3(1.0);
+	return ownFsBody(in, g, t, fog, atlas, atlasSampler, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imHistColor, imHistDepth,
+		imHistSampler, imTint);
+#else
+	return ownFsBody(in, g, t, fog, atlas, atlasSampler);
+#endif
+}
+
+#ifdef IM_SHADE
+// (Imagine Metal) the translucent pass with its own blending (Apple GPUs read the pixel underneath straight from tile memory;
+// the pipeline's blending is off): what's behind is first tinted, as Reimagined does it (water turns what's under it blue, stained
+// glass its colour), then the fragment laid over it by its alpha, in linear light.
+fragment float4 own_fs_tr(VOut in [[stage_in]], float4 imDst [[color(0)]], constant Globals &g [[buffer(22)]], constant Terrain &t [[buffer(23)]],
+	constant Fog &fog [[buffer(24)]], texture2d<float> atlas [[texture(16)]], sampler atlasSampler [[sampler(14)]]
+	, constant ImFrame &imf [[buffer(30)]], depth2d_array<float> imShadowMap [[texture(20)]], sampler imShadowCmp [[sampler(13)]]
+	, texture3d<float> imLightVol [[texture(21)]], sampler imLightSampler [[sampler(12)]]
+	, texture2d<float> imHistColor [[texture(22)]], depth2d<float> imHistDepth [[texture(23)]], sampler imHistSampler [[sampler(11)]]
+	) {
+	float3 imTint = float3(1.0);
+	float4 c = ownFsBody(in, g, t, fog, atlas, atlasSampler, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imHistColor, imHistDepth,
+		imHistSampler, imTint);
+	float a = saturate(c.a);
+	float3 behind = pow(max(imDst.rgb, 0.0), 2.2) * imTint;
+	float3 col = mix(behind, pow(max(c.rgb, 0.0), 2.2), a);
+	return float4(pow(col, 1.0 / 2.2), a + imDst.a * (1.0 - a));
+}
+#endif
 
 // The per-quad path's lists drawn by mesh shading (-Dmcopt.own.frag.qmesh, with -Dmcopt.own.quads): a threadgroup per 32 listed quads
 // (list df.listBase: its count and start from qargs), a thread per quad: its owner section looked up once per quad (not per vertex),
