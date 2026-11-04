@@ -738,6 +738,8 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	}
 	float block = light.x, sky = light.y;
 	float skyF = imSkyCurve(sky);
+	// (the Nether has no sky light, so its ambient (Reimagined's netherColor, ambientUp) reached nothing: it lights everything)
+	if (f.flags.x == 1) skyF = 1.0;
 	// under water (the eyes in it): the sky light drops a level a block down, which left the sea floor nearly black; Reimagined's
 	// stays a lit blue-green, so the sky's light keeps at least about half
 	if (f.water.z > 0.5 && f.flags.x == 0) skyF = max(skyF, 0.22);  // (no sudden change where the sky light runs out deeper down)
@@ -1017,6 +1019,8 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 	float3 n = particle ? -normalize(p) : nrm / nlen;
 	float block = saturate(light.x), sky = saturate(light.y);
 	float skyF = imSkyCurve(sky);
+	// (the Nether has no sky light, so its ambient (Reimagined's netherColor, ambientUp) reached nothing: it lights everything)
+	if (f.flags.x == 1) skyF = 1.0;
 	if (f.water.z > 0.5 && f.flags.x == 0) skyF = max(skyF, 0.22);
 	float nl = dot(n, f.lightDir.xyz);
 	float wrap = particle ? 0.6 : max(nl + 0.4, 0.0) * (1.0 / 1.4);

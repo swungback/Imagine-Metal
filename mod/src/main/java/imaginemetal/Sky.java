@@ -118,7 +118,7 @@ public final class Sky {
 		}
 	}
 
-	private static boolean lateFailed;
+	private static boolean lateFailed, loggedLate;
 	/** This frame's End sky is drawn after the level (drawEndLate) rather than at the end of the sky pass. */
 	private static boolean late;
 
@@ -128,9 +128,9 @@ public final class Sky {
 	 * the sky pass's drawing when there's no depth copy this frame (Reflections off).
 	 */
 	public static void drawEndLate() {
-		if (!late) return;
 		late = false;
-		if (!Reflections.valid) return;  // (no depth copy this frame)
+		// (by the dimension, not the sky pass's hooks: in the End those never got as far as drawing it)
+		if (ImagineFrame.dimNow != 2 || !Settings.sky || failed || lateFailed || !Engine.TERRAIN || !Reflections.valid) return;
 		try {
 			Object encoder = MetalBridge.encoder(((FrontendCommandEncoder) RenderSystem.getDevice().createCommandEncoder()).backend());
 			if (encoder == null) return;
@@ -139,6 +139,20 @@ public final class Sky {
 			MetalBridge.flushClear(encoder, target);
 			try (MemoryStack stack = MemoryStack.stackPush()) {
 				long err = stack.ncalloc(1, 1024, 1);
+				if (state == 0) {
+					var source = MemoryUtil.memUTF8(Engine.resource("/imaginemetal/shaders/lighting.metal") + "\n" + Engine.resource("/imaginemetal/shaders/sky.metal"));
+					try {
+						state = ImNative.skyNew(MetalBridge.ctx(encoder), MemoryUtil.memAddress(source), err, 1024);
+					} finally {
+						MemoryUtil.memFree(source);
+					}
+					if (state == 0) throw new IllegalStateException(MemoryUtil.memUTF8(err));
+					System.out.println("[Imagine Metal] sky on");
+				}
+				if (!loggedLate) {
+					loggedLate = true;
+					System.out.println("[Imagine Metal] End sky on (after the level)");
+				}
 				long m = stack.nmalloc(16, 64);
 				skyRot().getToAddress(m);
 				int r = ImNative.skyDrawEnd(MetalBridge.enc(encoder), state, MetalBridge.textureHandle(target), ImagineFrame.address(), ImagineFrame.SIZE, m, err, 1024);
@@ -154,8 +168,7 @@ public final class Sky {
 	public static void drawAfter() {
 		if (end && active && state != 0) {
 			// (after the level, when this frame has a depth copy to draw it behind; else here)
-			if (!lateFailed && Reflections.willCapture()) late = true;
-			else drawEnd();
+			if (lateFailed || !Reflections.willCapture()) drawEnd();
 			return;
 		}
 		if (!active || cloudsFailed || state == 0) return;
