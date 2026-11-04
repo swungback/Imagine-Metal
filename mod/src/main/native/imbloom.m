@@ -14,7 +14,9 @@ typedef struct {
 	float mix[4];
 	float grade[4];
 	float shaft[4];       // xy the sun on screen (uv), z strength (0: no light shafts), w 1 / aspect
-	float shaftColor[4];  // rgb the light's colour (linear)
+	float shaftColor[4];  // rgb the light's colour (linear), w ambient occlusion strength (0 off)
+	float clip[16];       // this frame's camera-relative world -> clip (the ambient occlusion)
+	float clipInv[16];
 } ImBloomParams;
 
 id<MTLTexture> mc_im_ssr_depth(void);  // mcown.m: this frame's depth copy (Reflections), nil before the first
@@ -25,6 +27,9 @@ typedef struct {
 	id<MTLRenderPipelineState> prefilter, down, up, composite, resolve, shafts;
 	id<MTLTexture> shaftTex;  // the light shafts at a quarter of the size
 	float shaft[8];           // im_bloom_shafts: sun uv, strength, colour
+	id<MTLRenderPipelineState> ao;
+	id<MTLTexture> aoTex;     // the ambient occlusion at half size
+	float aoStrength, aoClip[32];
 	MTLPixelFormat compositeFormat, resolveFormat;
 	id<MTLTexture> chain;
 	id<MTLTexture> views[IM_BLOOM_MAX];
@@ -138,8 +143,16 @@ void im_bloom_shafts(ImBloom *b, float sx, float sy, float strength, float r, fl
 	b->shaft[5] = bl;
 }
 
+// This frame's ambient occlusion (imaginemetal.Bloom): strength (0 off) and the terrain's transform and its inverse (32 floats).
+void im_bloom_ao(ImBloom *b, float strength, const float *clips) {
+	if (!b) return;
+	b->aoStrength = strength;
+	if (clips) memcpy(b->aoClip, clips, sizeof b->aoClip);
+}
+
 static void imbPass3(id<MTLCommandBuffer> cmd, id<MTLTexture> target, MTLLoadAction load, id<MTLRenderPipelineState> ps,
-	id<MTLTexture> src, id<MTLSamplerState> s, const ImBloomParams *p, NSString *label, id<MTLTexture> second, id<MTLTexture> third) {
+	id<MTLTexture> src, id<MTLSamplerState> s, const ImBloomParams *p, NSString *label, id<MTLTexture> second, id<MTLTexture> third,
+	id<MTLTexture> fourth) {
 	MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
 	rp.colorAttachments[0].texture = target;
 	rp.colorAttachments[0].loadAction = load;
@@ -152,6 +165,7 @@ static void imbPass3(id<MTLCommandBuffer> cmd, id<MTLTexture> target, MTLLoadAct
 	[r setFragmentTexture:src atIndex:0];
 	if (second) [r setFragmentTexture:second atIndex:1];
 	if (third) [r setFragmentTexture:third atIndex:2];
+	if (fourth) [r setFragmentTexture:fourth atIndex:3];
 	[r setFragmentSamplerState:s atIndex:0];
 	[r setFragmentBytes:p length:sizeof *p atIndex:0];
 	[r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
@@ -160,7 +174,7 @@ static void imbPass3(id<MTLCommandBuffer> cmd, id<MTLTexture> target, MTLLoadAct
 
 static void imbPass(id<MTLCommandBuffer> cmd, id<MTLTexture> target, MTLLoadAction load, id<MTLRenderPipelineState> ps,
 	id<MTLTexture> src, id<MTLSamplerState> s, const ImBloomParams *p, NSString *label, id<MTLTexture> second) {
-	imbPass3(cmd, target, load, ps, src, s, p, label, second, nil);
+	imbPass3(cmd, target, load, ps, src, s, p, label, second, nil, nil);
 }
 
 static int imbCheck(id<MTLTexture> t, const char *what, char *err, int errCap) {
@@ -220,6 +234,29 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 			}
 			err[0] = 0;  // (a failed shafts pipeline only turns the shafts off)
 		}
+		// the ambient occlusion (HDR path): from the same depth copy, at half size
+		id<MTLTexture> aoT = nil;
+		if (!inPlace && b->aoStrength > 0.0f && depth && depth.width == src.width && depth.height == src.height) {
+			if (!b->ao) b->ao = imbPipeline(b, @"im_bloom_ao", MTLPixelFormatR16Float, NO, err, errCap);
+			NSUInteger aw = src.width / 2 > 1 ? src.width / 2 : 1, ah = src.height / 2 > 1 ? src.height / 2 : 1;
+			if (b->ao && (!b->aoTex || b->aoTex.width != aw || b->aoTex.height != ah)) {
+				[b->aoTex release];
+				MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR16Float width:aw height:ah
+					mipmapped:NO];
+				td.storageMode = MTLStorageModePrivate;
+				td.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+				b->aoTex = [b->device newTextureWithDescriptor:td];
+				b->aoTex.label = @"Imagine Metal ambient occlusion";
+			}
+			if (b->ao && b->aoTex) {
+				memcpy(p.clip, b->aoClip, sizeof p.clip);
+				memcpy(p.clipInv, b->aoClip + 16, sizeof p.clipInv);
+				imbPass(cmd, b->aoTex, MTLLoadActionDontCare, b->ao, src, b->linear, &p, @"Imagine Metal ambient occlusion", depth);
+				aoT = b->aoTex;
+				p.shaftColor[3] = b->aoStrength;
+			}
+			err[0] = 0;
+		}
 		if (strength != 0.0f) {
 			imbPass(cmd, b->views[0], MTLLoadActionDontCare, b->prefilter, src, b->linear, &p, @"Imagine Metal bloom prefilter", nil);
 			for (int i = 1; i < b->levels; i++) {
@@ -239,7 +276,7 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 		p.texel[1] = 1.0f / (float) b->views[0].height;
 		if (inPlace) imbPass(cmd, dst, MTLLoadActionLoad, b->composite, b->views[0], b->linear, &p, @"Imagine Metal bloom composite", nil);
 		else imbPass3(cmd, dst, MTLLoadActionDontCare, b->resolve, b->views[0], b->linear, &p, @"Imagine Metal HDR resolve", src,
-			shafts ? shafts : b->views[0]);
+			shafts ? shafts : b->views[0], aoT ? aoT : b->views[0]);
 	}
 	return 0;
 }

@@ -22,7 +22,9 @@ struct ImBloomParams {
 	float4 mix;    // x strength (negative: debug, the glow alone), y number of levels (the chain's sum is divided by it), z haze, w 0
 	float4 grade;  // x how much the dark parts are deepened (the resolve's toe: 0 none)
 	float4 shaft;  // light shafts: xy the sun on screen (uv), z strength (0 none), w height / width
-	float4 shaftColor; // rgb the sun's (or moon's) light, linear
+	float4 shaftColor; // rgb the sun's (or moon's) light, linear; w ambient occlusion strength (0 none)
+	float4x4 clip;     // this frame's camera-relative world -> clip (y up: uv.y = ndc.y * 0.5 + 0.5), depth 0..1
+	float4x4 clipInv;
 };
 
 struct ImBloomOut {
@@ -134,10 +136,68 @@ fragment float4 im_bloom_shafts(ImBloomOut in [[stage_in]], depth2d<float> depth
 	return float4(sum / ws, 0.0, 0.0, 1.0);
 }
 
+// Ambient occlusion (at half size): corners, the ground under ledges, between close blocks a little darker. Eight points in the
+// half sphere above the surface (its normal from the neighbouring depths), half a block out, each counting as hidden when the depth
+// there lies in front of it (and not far in front: that's something else, nearer the eye). A fixed per-pixel turn of the pattern.
+static inline float3 imbPos(depth2d<float> depth, float2 uv, float2 size, constant ImBloomParams &p, thread float &d) {
+	d = depth.read(uint2(clamp(uv, 0.0, 0.9999) * size));
+	float4 w = p.clipInv * float4(uv * 2.0 - 1.0, d, 1.0);
+	return w.xyz / w.w;
+}
+
+fragment float4 im_bloom_ao(ImBloomOut in [[stage_in]], depth2d<float> depth [[texture(1)]], constant ImBloomParams &p [[buffer(0)]]) {
+	float2 size = float2(depth.get_width(), depth.get_height());
+	float2 uv = in.uv, t = 2.0 / size;
+	float d;
+	float3 P = imbPos(depth, uv, size, p, d);
+	if (d >= 0.99999) return float4(1.0);
+	float dd;
+	float3 px = imbPos(depth, uv + float2(t.x, 0.0), size, p, dd) - P, nx = P - imbPos(depth, uv - float2(t.x, 0.0), size, p, dd);
+	float3 py = imbPos(depth, uv + float2(0.0, t.y), size, p, dd) - P, ny = P - imbPos(depth, uv - float2(0.0, t.y), size, p, dd);
+	float3 ex = dot(px, px) < dot(nx, nx) ? px : nx, ey = dot(py, py) < dot(ny, ny) ? py : ny;  // (the nearer side: no smear across edges)
+	float3 N = normalize(cross(ex, ey));
+	if (dot(N, P) > 0.0) N = -N;
+	float3 T = normalize(abs(N.y) < 0.9 ? cross(N, float3(0.0, 1.0, 0.0)) : cross(N, float3(1.0, 0.0, 0.0)));
+	float3 Bt = cross(N, T);
+	float j = fract(52.9829189 * fract(dot(in.pos.xy, float2(0.06711056, 0.00583715))));
+	float dist = length(P);
+	float radius = 0.6;
+	float occ = 0.0;
+	const int n = 8;
+	for (int i = 0; i < n; i++) {
+		float a = (float(i) + j) * 2.39996;
+		float r = sqrt((float(i) + 0.5) / float(n));
+		float h = 0.15 + 0.85 * fract(j + float(i) * 0.618);
+		float3 o = (T * cos(a) * r + Bt * sin(a) * r) * sqrt(1.0 - h * h * 0.5) + N * h * 0.7;
+		float3 S = P + o * radius;
+		float4 c = p.clip * float4(S, 1.0);
+		if (c.w <= 0.05) continue;
+		float2 suv = c.xy / c.w * 0.5 + 0.5;
+		if (any(suv < 0.0) || any(suv > 1.0)) continue;
+		float sd;
+		float3 Q = imbPos(depth, suv, size, p, sd);
+		float front = length(S) - length(Q);  // (> 0: the depth there is in front of the point)
+		occ += smoothstep(0.02, 0.1, front) * (1.0 - smoothstep(radius, radius * 2.5, front));
+	}
+	float ao = 1.0 - occ / float(n);
+	ao = mix(1.0, ao, 1.0 - smoothstep(64.0, 128.0, dist));
+	return float4(ao, 0.0, 0.0, 1.0);
+}
+
 fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> src [[texture(0)]], sampler s [[sampler(0)]],
-	texture2d<float> hdr [[texture(1)]], texture2d<float> shafts [[texture(2)]], constant ImBloomParams &p [[buffer(0)]]) {
+	texture2d<float> hdr [[texture(1)]], texture2d<float> shafts [[texture(2)]], texture2d<float> aoT [[texture(3)]],
+	constant ImBloomParams &p [[buffer(0)]]) {
 	float4 h = hdr.read(uint2(in.pos.xy));
 	float3 c = imbLinear(h.rgb);
+	if (p.shaftColor.w > 0.0) {
+		// (four taps a half-size texel apart: the pattern's grain smoothed)
+		float2 at = 1.0 / float2(aoT.get_width(), aoT.get_height());
+		float ao = 0.25 * (aoT.sample(s, in.uv + at * float2(-0.75, -0.75)).r + aoT.sample(s, in.uv + at * float2(0.75, -0.75)).r
+			+ aoT.sample(s, in.uv + at * float2(-0.75, 0.75)).r + aoT.sample(s, in.uv + at * float2(0.75, 0.75)).r);
+		// (light given off isn't shaded: lava, glowing blocks)
+		float l = max(max(c.r, c.g), c.b);
+		c *= mix(1.0, ao, saturate(p.shaftColor.w) * (1.0 - smoothstep(1.0, 2.0, l)));
+	}
 	if (p.shaft.z > 0.0) {
 		// the beams: brightest near the sun, fading over the screen (the air lit along the way, seen against the light)
 		float sh = shafts.sample(s, in.uv).r;

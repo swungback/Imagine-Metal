@@ -105,6 +105,10 @@ public final class Bloom {
 				}
 				float[] sh = shafts();
 				ImNative.bloomShafts(state, sh[0], sh[1], sh[2], sh[3], sh[4], sh[5]);
+				long clips = stack.nmalloc(4, 128);
+				Reflections.CLIP.get(MemoryUtil.memFloatBuffer(clips, 16));
+				Reflections.CLIP_INV.get(MemoryUtil.memFloatBuffer(clips + 64, 16));
+				ImNative.bloomAo(state, Settings.ssao && Reflections.valid ? Settings.ssaoStrength : 0f, clips);
 				float s = Settings.debug == 3 ? -Math.max(strength, 0.5f) : strength;
 				if (ImNative.bloomRender(MetalBridge.enc(encoder), state, MetalBridge.textureHandle(src), MetalBridge.textureHandle(dst), s,
 					hdr ? HDR_THRESHOLD : LDR_THRESHOLD, hdr ? HDR_KNEE : LDR_KNEE, hdr ? HDR_HAZE : LDR_HAZE, toe(), err, 1024) != 0)

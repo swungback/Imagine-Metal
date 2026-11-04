@@ -23,6 +23,7 @@ final class ImNative {
 		JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT, JAVA_LONG, JAVA_INT), false);
 	private static final MethodHandle BLOOM_SHAFTS = fn("im_bloom_shafts", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT,
 		JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT), false);
+	private static final MethodHandle BLOOM_AO = fn("im_bloom_ao", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_FLOAT, JAVA_LONG), false);
 	private static final MethodHandle LIGHT_NEW = fn("im_light_new", FunctionDescriptor.of(JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_INT,
 		JAVA_LONG, JAVA_INT), false);
 	private static final MethodHandle LIGHT_UPLOAD = fn("im_light_upload", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT,
@@ -91,6 +92,14 @@ final class ImNative {
 	static void bloomShafts(long state, float sx, float sy, float strength, float r, float g, float b) {
 		try {
 			BLOOM_SHAFTS.invokeExact(state, sx, sy, strength, r, g, b);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
+	static void bloomAo(long state, float strength, long clips) {
+		try {
+			BLOOM_AO.invokeExact(state, strength, clips);
 		} catch (Throwable t) {
 			throw new IllegalStateException(t);
 		}
