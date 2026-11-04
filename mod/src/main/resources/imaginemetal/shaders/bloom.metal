@@ -619,18 +619,27 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 	// everything brighter stay as they are. Strong in caves and at night (lights stand out of the dark), off in daylight.
 	float lum = dot(c, float3(0.2126, 0.7152, 0.0722));
 	if (p.grade.x > 0.0 && lum < 0.18) c *= pow(max(lum, 1e-6) / 0.18, p.grade.x);
+	// the light part lifted (Photon's dark darks, Reimagined's bright brights): above mid grey up to a quarter brighter, the lit
+	// ground, the sky and the lights; the shade and the dark untouched, so the picture spans more range instead of a brighter grey
+	float lumH = dot(c, float3(0.2126, 0.7152, 0.0722));
+	c *= 1.0 + 0.25 * smoothstep(0.18, 0.75, lumH);
 	// (Reimagined's tone curve's "path to white": the very brightest light, lava's hot spots, a flame's core, the sun's glare,
 	// turns toward white, so lava reads yellow-hot instead of a flat orange)
 	float lum2 = dot(c, float3(0.2126, 0.7152, 0.0722));
 	float m = max(max(c.r, c.g), c.b);
 	c = mix(c, float3(m), smoothstep(0.8, 3.0, lum2) * 0.55);
 	m = max(max(c.r, c.g), c.b);
-	const float t = 0.85;
+	const float t = 0.88;
 	if (m > t) c *= (t + (1.0 - t) * (m - t) / ((m - t) + (1.0 - t))) / m;
 	float3 o = pow(saturate(c), 1.0 / 2.2);
 	// Reimagined's vignette (final.glsl VIGNETTE_R, on by default): the corners a little darker, less where it's bright
 	float2 vc = in.uv - 0.5;
-	o *= 1.0 - 0.6 * dot(vc, vc) * (1.0 - dot(o, float3(0.2126, 0.7152, 0.0722)));
+	o *= 1.0 - 0.4 * dot(vc, vc) * (1.0 - dot(o, float3(0.2126, 0.7152, 0.0722)));
+	// (a triangular dither of one 8-bit step: smooth gradients on walls and in the sky without bands)
+	float2 dp = in.pos.xy;
+	float d1 = fract(52.9829189 * fract(dot(dp, float2(0.06711056, 0.00583715))));
+	float d2 = fract(52.9829189 * fract(dot(dp + 17.0, float2(0.06711056, 0.00583715))));
+	o += (d1 + d2 - 1.0) / 255.0;
 	return float4(o, h.a);
 }
 

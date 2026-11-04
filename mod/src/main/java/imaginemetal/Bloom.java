@@ -22,7 +22,7 @@ public final class Bloom {
 	 */
 	private static final float HDR_THRESHOLD = 1.0f, HDR_KNEE = 0.5f, LDR_THRESHOLD = 0.3f, LDR_KNEE = 0.25f;
 	/** The share of every pixel's light that glows regardless of brightness (the overall soft haze). */
-	private static final float HDR_HAZE = 0.04f, LDR_HAZE = 0.06f;
+	private static final float HDR_HAZE = 0.025f, LDR_HAZE = 0.06f;  // (0.04 left a grey veil over everything)
 
 	/**
 	 * How much the resolve deepens the dark parts (the grade's toe, an exponent: 0 none): Photon's contrast where the user likes it,

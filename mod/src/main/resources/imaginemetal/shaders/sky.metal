@@ -109,7 +109,18 @@ fragment float4 im_sky_fs(ImSkyOut in [[stage_in]], constant ImFrame &f [[buffer
 			}
 		}
 	}
-	return float4(pow(imPresent(sky, f), 1.0 / 2.2), 1.0);
+	float3 col = pow(imPresent(sky, f), 1.0 / 2.2);
+	// the sun's glare (Reimagined's sun: white-hot, the bloom throwing a wide halo in its light's colour): a core past white under
+	// Minecraft's sun square (drawn over this), so the bloom picks it up; gone in rain and once it has set
+	if (f.flags.x == 0 && f.lightDir.w > 0.5) {
+		float vs = saturate(dot(d, f.sunDir.xyz));
+		float core = smoothstep(0.9965, 0.9992, vs);
+		float halo = pow(vs, 600.0) * 0.6;
+		float k = (core * 2.5 + halo) * (1.0 - f.dayUp.w) * smoothstep(-0.02, 0.06, f.sunDir.y);
+		float3 lc = f.lightColor.rgb / max(max(max(f.lightColor.r, f.lightColor.g), f.lightColor.b), 1e-3);
+		col += mix(lc, float3(1.0), core * 0.6) * k;
+	}
+	return float4(col, 1.0);
 }
 
 // ---- clouds (Complementary Reimagined's blocky clouds, lib/atmospherics/clouds/reimaginedClouds.glsl) and the aurora ----

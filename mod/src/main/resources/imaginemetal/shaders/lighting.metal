@@ -257,7 +257,9 @@ static float imEmission(uint cls, float3 tex) {
 	float hi = max(max(tex.r, tex.g), tex.b), lo = min(min(tex.r, tex.g), tex.b);
 	float sat = hi - lo;
 	switch (cls) {
-		case IM_MAT_EMITTER: case IM_MAT_GLOW_GEM: return 2.6 * l * l + 0.25;
+		// (hot cores: the brightest texels far past white, so the bloom haloes them, the darker ones lower so the texture reads)
+		case IM_MAT_EMITTER: return 3.4 * l * l * l + 0.4 * l;
+		case IM_MAT_GLOW_GEM: return 0.0;  // (crying obsidian: its veins only, imShade)
 		case IM_MAT_LAVA: return 1.6 + 3.2 * l * l;  // (Reimagined's: brighter where the texture is, its hot spots near white)
 		case IM_MAT_FLAME: return 4.0 * smoothstep(0.62, 0.92, hi) * smoothstep(0.15, 0.4, sat);
 		// ores: every pixel with clear colour against the grey stone around it (the whole speck, its coloured edge too; iron's pale
@@ -308,7 +310,7 @@ static float4 imBlockLight(float3 p, float3 n, constant ImFrame &f, texture3d<fl
 	if (m < 1e-4) return float4(warm, 0.0);
 	float3 hue = c.rgb / m;
 	float hl = imLuma(hue);
-	hue = max(hl + (hue - hl) * 1.6, 0.0);
+	hue = max(hl + (hue - hl) * 1.3, 0.0);  // (1.6 washed a sea lantern's whole tunnel cyan)
 	// (as bright as the torch colour, times how bright the sources here are: 1 for most, about half near lava)
 	hue *= max(max(warm.r, warm.g), warm.b) / max(max(max(hue.r, hue.g), hue.b), 1e-4) * min(m, 1.0);
 	float w = inside * smoothstep(0.0, 0.04, c.a);
@@ -387,11 +389,16 @@ static ImSurf imSurface(uint cls, float3 col, float3 tex) {
 			}
 			break;
 		}
-		case IM_MAT_SAND:  // Photon: only the brightest grains glint
-			s.g = 0.8 * imLinStep(0.72, 0.95, L);
-			s.d = s.g * 0.5;
+		case IM_MAT_SAND: {  // Reimagined's sand: its brightest grains glossy, they glint and catch reflections (a lantern in them)
+			float g16 = col.g * col.g;
+			g16 *= g16;
+			g16 *= g16;
+			g16 *= g16;
+			s.g = min(g16 * 2.0, 1.0);
+			s.d = s.g;
 			s.hl = 2.0;
 			break;
+		}
 		case IM_MAT_WOOD:  // Photon's planks
 			s.g = 0.5 * imLinStep(0.3, 0.8, L);
 			s.d = s.g * 0.5;
@@ -674,6 +681,16 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	uint oreT = (cls == IM_MAT_ORE || cls == IM_MAT_NETHER_ORE) ? (mat >> 4) & 15u : 0u;
 	float3 oreCm = float3(1.0);
 	float oreE = oreT != 0u ? imOre(oreT, tex, oreCm) : 0.0;
+	if (cls == IM_MAT_GLOW_GEM) {
+		// Reimagined's crying obsidian: only its purple veins (blue far over green) glow, the brightest far past white; its red
+		// pushed up a little so they read violet
+		float f0 = max(tex.b - tex.g * 6.0, 0.0);
+		f0 = imSqrt2(f0);
+		float f1 = tex.b * tex.b;
+		float f14 = f1 * f1;
+		oreE = (1.35 + f14 * f14 * 7.5) * f0;
+		oreCm = float3(1.15, 1.0, 1.0);
+	}
 	if (oreE > 0.0) albedo *= oreCm;
 	float3 base = pow(max(albedo, 0.0), 2.2);
 	bool pbr = f.shadow.w > 0.5 && f.flags.y == 0;
@@ -761,7 +778,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		if (hl > 0.0) {
 			float3 hh = f.held.rgb;
 			float hlum = imLuma(hh);
-			hh = max(hlum + (hh - hlum) * 1.6, 0.0);
+			hh = max(hlum + (hh - hlum) * 1.3, 0.0);
 			float3 hc = hh * (max(max(f.blockColor.r, f.blockColor.g), f.blockColor.b) / max(max(max(hh.r, hh.g), hh.b), 1e-3));
 			float facing = 0.6 + 0.4 * saturate(dot(N, -normalize(p)));
 			torch = max(torch, hc * imBlockCurve(hl) * facing * (1.0 - 0.45 * f.blockColor.w * smoothstep(0.5, 1.0, sky)));
