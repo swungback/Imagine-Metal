@@ -29,7 +29,31 @@ struct ImBloomParams {
 	float4x4 clipInv;
 	float4x4 prevClip; // the last frame's clip, from this frame's camera-relative world (the shafts' history)
 	float4 taa;        // TAA: xy this frame's jitter in uv, z 1 = the history is usable
+	float4 taaPrev;    // TAA: xy the last frame's jitter in uv
 };
+
+// The history sampled with a Catmull-Rom filter (9 taps folded into 5 bilinear ones): plain bilinear blurs it a little every
+// frame, and over many frames that adds up to the soft, smeared look.
+static float3 imbCatmull(texture2d<float> t, sampler s, float2 uv) {
+	float2 size = float2(t.get_width(), t.get_height());
+	float2 sp = uv * size;
+	float2 tp = floor(sp - 0.5) + 0.5;
+	float2 f = sp - tp;
+	float2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+	float2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+	float2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+	float2 w3 = f * f * (-0.5 + 0.5 * f);
+	float2 w12 = w1 + w2;
+	float2 tc12 = (tp + w2 / w12) / size;
+	float2 tc0 = (tp - 1.0) / size, tc3 = (tp + 2.0) / size;
+	float3 r = t.sample(s, float2(tc12.x, tc0.y)).rgb * (w12.x * w0.y)
+		+ t.sample(s, float2(tc0.x, tc12.y)).rgb * (w0.x * w12.y)
+		+ t.sample(s, tc12).rgb * (w12.x * w12.y)
+		+ t.sample(s, float2(tc3.x, tc12.y)).rgb * (w3.x * w12.y)
+		+ t.sample(s, float2(tc12.x, tc3.y)).rgb * (w12.x * w3.y);
+	float wsum = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
+	return max(r / wsum, 0.0);
+}
 
 
 struct ImBloomOut {
@@ -175,7 +199,7 @@ static float4 imbShaftsNow(ImBloomOut in, depth2d<float> depth, depth2d_array<fl
 	float3 P = w.xyz / w.w;
 	float len = length(P);
 	float3 dir = P / max(len, 1e-4);
-	bool water = p.shaft.x > 0.5;
+	bool water = p.shaft.x < -0.5;
 	float intense = water ? 1.0 : p.shaft.y;
 	float rain = f.dayUp.w, sunVis = f.nightMiddle.w, noon = f.dayDown.w, invNoon = f.sunsetDown.w;
 
@@ -207,7 +231,7 @@ static float4 imbShaftsNow(ImBloomOut in, depth2d<float> depth, depth2d_array<fl
 	float active = mix(reach, min(100.0, reach), intense);
 	float rayEnd = sky ? maxD : min(len, maxD);
 	float j = fract(52.9829189 * fract(dot(in.pos.xy, float2(0.06711056, 0.00583715))) + 0.61803399 * float(f.flags.w & 1023));
-	float eyeBright = 1.0 - f.env.x;  // (beyond the shadow maps: as lit as it is where the player stands)
+	float eyeBright = saturate(p.shaft.x);  // (beyond the shadow maps: as lit as where the player stands, by the sky light there)
 	float vl = 0.0, last = 0.0;
 	for (int i = 0; i <= nearN + 1; i++) {
 		float next, dens;
@@ -442,7 +466,7 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 	float3 o = pow(saturate(c), 1.0 / 2.2);
 	// Reimagined's vignette (final.glsl VIGNETTE_R, on by default): the corners a little darker, less where it's bright
 	float2 vc = in.uv - 0.5;
-	o *= 1.0 - dot(vc, vc) * (1.0 - dot(o, float3(0.2126, 0.7152, 0.0722)));
+	o *= 1.0 - 0.6 * dot(vc, vc) * (1.0 - dot(o, float3(0.2126, 0.7152, 0.0722)));
 	return float4(o, h.a);
 }
 
@@ -495,12 +519,15 @@ fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur 
 	if (pc.w > 0.05) {
 		float2 puv = pc.xy / pc.w * 0.5 + 0.5;
 		if (all(puv > 0.0) && all(puv < 1.0)) {
-			float3 h = hist.sample(s, puv).rgb;
+			// (the history was drawn with the last frame's offset: it is read where that put this point)
+			float3 h = imbCatmull(hist, s, puv + p.taaPrev.xy);
 			h = clamp(h, mn, mx);
 			// (less history where the picture moved a lot on screen: sharper in motion)
 			float moved = length((puv - in.uv) * float2(size));
-			float k = mix(0.9, 0.75, saturate(moved / 16.0));
+			float k = mix(0.88, 0.7, saturate(moved / 12.0));
 			res = mix(c, h, k);
+			// (a light sharpen against what's left of the softness: the pixel against its neighbours' mean)
+			res = max(res + (res - m1) * 0.18, 0.0);
 		}
 	}
 	o.screen = float4(res, 1.0);

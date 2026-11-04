@@ -44,7 +44,10 @@ public final class Bloom {
 		float[] r = new float[6];
 		boolean water = ImagineFrame.underwater;
 		if (!Settings.shafts || !Reflections.valid || !(ImagineFrame.shaftOn || water) || !Shadows.valid()) return r;
-		r[0] = water ? 1f : 0f;
+		// (x: -1 eyes in water, else the sky light at the eyes, squared; sealed underground there's no air the sun lights)
+		float eye = ImagineFrame.eyeSkyLight();
+		if (!water && eye < 0.07f) return r;
+		r[0] = water ? -1f : eye * eye;
 		r[1] = ImagineFrame.shaftCover;
 		r[2] = Settings.shaftStrength * 1.4f;
 		float rain = ImagineFrame.shaftRain, noon = ImagineFrame.shaftNoon, invNoon = 1f - noon, sunVis = ImagineFrame.shaftSunVis;
@@ -152,7 +155,7 @@ public final class Bloom {
 				ImNative.bloomAo(state, Settings.ssao && Reflections.valid ? Settings.ssaoStrength : 0f, clips);
 				float s = Settings.debug == 3 ? -Math.max(strength, 0.5f) : strength;
 				if (ImNative.bloomRender(MetalBridge.enc(encoder), state, MetalBridge.textureHandle(src), MetalBridge.textureHandle(dst), s,
-					hdr ? HDR_THRESHOLD : LDR_THRESHOLD, hdr ? HDR_KNEE : LDR_KNEE, hdr ? HDR_HAZE : LDR_HAZE, toe(), err, 1024) != 0)
+					hdr ? HDR_THRESHOLD : LDR_THRESHOLD, hdr ? HDR_KNEE : LDR_KNEE, (hdr ? HDR_HAZE : LDR_HAZE) * (1f - 0.75f * Math.max(ImagineFrame.cave, ImagineFrame.night * 0.6f)), toe(), err, 1024) != 0)
 					throw new IllegalStateException(MemoryUtil.memUTF8(err));
 			}
 		} catch (Throwable t) {

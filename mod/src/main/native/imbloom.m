@@ -19,6 +19,7 @@ typedef struct {
 	float clipInv[16];
 	float prevClip[16];   // the last frame's transform, from this frame's camera-relative world (the shafts' history)
 	float taa[4];         // TAA: xy the jitter in uv, z 1 = the history is usable
+	float taaPrev[4];     // TAA: xy the last frame's jitter in uv
 } ImBloomParams;
 
 id<MTLTexture> mc_im_ssr_depth(void);  // mcown.m: this frame's depth copy (Reflections), nil before the first
@@ -37,6 +38,7 @@ typedef struct {
 	int shaftIdx, shaftValid;
 	float shaft[8];           // im_bloom_shafts: sun uv, strength, colour
 	float taaJitter[3];       // im_bloom_taa: jitter (uv), 1 = on
+	float taaPrevJ[2];        // the last frame's
 	id<MTLRenderPipelineState> taa;
 	MTLPixelFormat taaFormat;
 	id<MTLTexture> taaCur, taaHist[2];
@@ -418,6 +420,10 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 				p.taa[0] = b->taaJitter[0];
 				p.taa[1] = b->taaJitter[1];
 				p.taa[2] = b->taaValid ? 1.0f : 0.0f;
+				p.taaPrev[0] = b->taaPrevJ[0];
+				p.taaPrev[1] = b->taaPrevJ[1];
+				b->taaPrevJ[0] = b->taaJitter[0];
+				b->taaPrevJ[1] = b->taaJitter[1];
 				MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
 				rp.colorAttachments[0].texture = dst;
 				rp.colorAttachments[0].loadAction = MTLLoadActionDontCare;

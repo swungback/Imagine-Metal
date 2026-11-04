@@ -28,6 +28,11 @@ public final class ImagineFrame {
 	private static int frame;
 	/** The sky light where the player's eyes are (0..1), eased over about a second, and the cave and night factors from it. */
 	private static float eyeSky = 1f;
+
+	/** the sky light at the player's eyes (0..1, eased) */
+	static float eyeSkyLight() {
+		return eyeSky;
+	}
 	private static long lastNs;
 	static float cave, night;
 	/** the light shafts (Bloom): the light's direction and colour, this frame's sky ours (overworld, eyes in air), rain */
@@ -393,14 +398,14 @@ public final class ImagineFrame {
 		put(WaterSprites.PORTAL[0], WaterSprites.PORTAL[1], WaterSprites.PORTAL[2], WaterSprites.PORTAL[3]);
 		// (wet: with the rain, quickly; drying slowly after; none where it doesn't rain or snows)
 		float wetTarget = Settings.wet && dim == 0 ? rain * (1f - Haze.dry) * (1f - Haze.cold) : 0f;
-		wet += (wetTarget - wet) * (1f - (float) Math.exp(-dt / (wetTarget > wet ? 8f : 40f)));
+		wet += (wetTarget - wet) * (1f - (float) Math.exp(-dt / (wetTarget > wet ? 8f : 15f)));
 		// (after rain: builds while it rains, fades over a minute and a half once it stops; the rainbow shows as the rain clears,
 		// with the sun up but not too high)
 		float rainHere = dim == 0 ? rain * (1f - Haze.dry) * (1f - Haze.cold) : 0f;
 		afterRain = rainHere > 0.5f ? Math.min(1f, afterRain + dt / 20f) : Math.max(0f, afterRain - dt / 90f);
 		float rbTime = Math.clamp((sunDir[1] - 0.1f) / 0.15f, 0f, 1f);
 		rbTime = Math.clamp(rbTime - (float) Math.pow(noonF, 8) * 8f, 0f, 0.85f);
-		rainbow = rbTime * (float) Math.sqrt(Math.max(0f, afterRain - 0.333f) * 1.5f) * (1f - rain) * (1f - cave) * (camera.fogType == net.minecraft.world.level.material.FogType.NONE ? 1f : 0f);
+		rainbow = dim != 0 ? 0f : rbTime * (float) Math.sqrt(Math.max(0f, afterRain - 0.333f) * 1.5f) * (1f - rain) * (1f - cave) * (camera.fogType == net.minecraft.world.level.material.FogType.NONE ? 1f : 0f);
 		put(Settings.waterStyle, Settings.glassReflections ? 1f : 0f, camera.fogType == net.minecraft.world.level.material.FogType.WATER ? 1f : 0f, wet);
 		// TAA: a Halton (2, 3) sub-pixel offset, a different one each frame of eight (within half a pixel each way)
 		boolean taaOn = Settings.taa && Hdr.active();

@@ -20,13 +20,21 @@ public final class Sky {
 	private static boolean failed;
 	/** This frame's sky is ours (Minecraft's disc and fan are skipped). */
 	public static boolean active;
+	private static boolean end;
 
 	private Sky() {
 	}
 
 	public static void draw(SkyRenderState sky) {
 		active = false;
+		end = false;
 		if (!Settings.sky || failed || !Engine.TERRAIN || sky.skybox != DimensionType.Skybox.OVERWORLD && sky.skybox != DimensionType.Skybox.END) return;
+		if (sky.skybox == DimensionType.Skybox.END) {
+			// (the End's sky is drawn at the end of Minecraft's sky pass instead, drawAfter: drawn here it was cleared over)
+			end = true;
+			active = state != 0 || !failed;
+			if (state != 0) return;
+		}
 		try {
 			Object encoder = MetalBridge.encoder(((FrontendCommandEncoder) RenderSystem.getDevice().createCommandEncoder()).backend());
 			if (encoder == null) return;
@@ -89,8 +97,33 @@ public final class Sky {
 	}
 
 
+	private static void drawEnd() {
+		try {
+			Object encoder = MetalBridge.encoder(((FrontendCommandEncoder) RenderSystem.getDevice().createCommandEncoder()).backend());
+			if (encoder == null) return;
+			var target = Minecraft.getInstance().gameRenderer.mainRenderTarget().getColorTexture();
+			if (target == null) return;
+			MetalBridge.dropPendingClear(encoder, target);
+			try (MemoryStack stack = MemoryStack.stackPush()) {
+				long err = stack.ncalloc(1, 1024, 1);
+				long m = stack.nmalloc(16, 64);
+				skyRot().getToAddress(m);
+				if (ImNative.skyDraw(MetalBridge.enc(encoder), state, MetalBridge.textureHandle(target), ImagineFrame.address(), ImagineFrame.SIZE, m, 0, err, 1024) != 0)
+					throw new IllegalStateException(MemoryUtil.memUTF8(err));
+			}
+		} catch (Throwable t) {
+			failed = true;
+			active = false;
+			System.out.println("[Imagine Metal] End sky off: " + t);
+		}
+	}
+
 	/** At the end of Minecraft's sky pass (after its sun, moon and stars): our clouds and the aurora over them. */
 	public static void drawAfter() {
+		if (end && active && state != 0) {
+			drawEnd();
+			return;
+		}
 		if (!active || cloudsFailed || state == 0) return;
 		boolean clouds = Clouds.wanted(), aurora = ImagineFrame.auroraVisible();
 		if (!clouds && !aurora) return;

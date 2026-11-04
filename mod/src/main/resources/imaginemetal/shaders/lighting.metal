@@ -262,9 +262,9 @@ static float imEmission(uint cls, float3 tex) {
 		// ores: every pixel with clear colour against the grey stone around it (the whole speck, its coloured edge too; iron's pale
 		// specks count; a speck's near-grey highlights and coal's black specks don't), at a faint glow that keeps the texture's own
 		// light and dark
-		case IM_MAT_ORE: return 2.6 * smoothstep(0.08, 0.2, sat) * (0.5 + 0.5 * hi);
+		case IM_MAT_ORE: return 1.1 * smoothstep(0.08, 0.2, sat) * (0.5 + 0.5 * hi);
 		// nether ores sit in red netherrack: their specks are told apart by brightness instead
-		case IM_MAT_NETHER_ORE: return 2.2 * smoothstep(0.5, 0.75, l);
+		case IM_MAT_NETHER_ORE: return 1.2 * smoothstep(0.5, 0.75, l);
 		// faint lights (sculk sensors and catalysts, magma, glow lichen): only their bright, coloured parts glow, as a flame's
 		case IM_MAT_DIM: return 1.6 * smoothstep(0.5, 0.85, hi) * smoothstep(0.12, 0.35, sat);
 		// sculk's specks: only their brightest pixels (small, calm dots), but far past white, so the bloom gives each a soft halo
@@ -621,7 +621,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// rain puddles (Reimagined's, RAIN_PUDDLES 1): on tops of blocks under the open sky, away from torches; their shape from three
 	// sizes of noise over the world (in the texture's pixels), so they lie in wide organic pools that grow as the rain goes on;
 	// a puddle is a flat mirror. The rest of the world only gets a little glossier.
-	if (pbr && f.water.w > 0.0 && kind == 0u && cls != IM_MAT_LAVA && cls != IM_MAT_EMITTER) {
+	if (pbr && f.water.w > 0.0 && kind == 0u && cls != IM_MAT_LAVA && cls != IM_MAT_EMITTER && cls != IM_MAT_FOLIAGE && cls != IM_MAT_SAND) {
 		float pmix = saturate(light.y * 32.0 - 31.0) * saturate((1.0 - 1.15 * light.x) * 10.0);
 		float up = max(n.y - 0.5, 0.0) * 2.0;
 		pmix *= up * up;
@@ -776,12 +776,27 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	if (cls == IM_MAT_SCULK && emit > 0.0) {
 		// sculk's specks pulse (after Euphoria Patches): each speck its own slow breathing, from its block and its place in the
 		// texture, so a field of sculk twinkles instead of glowing flat
-		float3 bp = floor(p + f.world.xyz - n * 0.01);
+		// alien: slow rings of light roll outward through the sculk from hidden hearts, a few blocks apart, like a heartbeat
+		// spreading through it; on top each speck flickers on its own
+		float3 wp3 = p + f.world.xyz - n * 0.01;
+		float3 bp = floor(wp3);
 		float2 tx = floor(uv * asz);
 		float h = imHash2(int2(bp.xz) * 31 + int2(bp.y) * 17 + int2(tx) * int2(7, 13));
 		float h2 = fract(h * 7.31 + 0.17);
-		float w = 0.5 + 0.5 * sin(f.world.w * (0.5 + 0.9 * h2) + h * 6.2832);
-		emit *= 0.15 + 0.85 * smoothstep(0.15, 1.0, w);
+		float2 cell = floor(wp3.xz / 11.0);
+		float ring = 0.0;
+		for (int cy = -1; cy <= 1; cy++)
+			for (int cx = -1; cx <= 1; cx++) {
+				float2 cc = cell + float2(cx, cy);
+				float2 heart = (cc + float2(imHash2(int2(cc) + int2(5, 9)), imHash2(int2(cc) + int2(13, 2)))) * 11.0;
+				float dd = length(wp3.xz - heart);
+				float period = 3.5 + 2.5 * imHash2(int2(cc) * 3 + int2(1, 7));
+				float ph = fract((f.world.w - dd * 0.35) / period + imHash2(int2(cc) + int2(21, 4)));
+				float r = exp(-ph * 9.0) * (1.0 - smoothstep(6.0, 11.0, dd));
+				ring = max(ring, r);
+			}
+		float flick = 0.5 + 0.5 * sin(f.world.w * (1.5 + 3.0 * h2) + h * 6.2832);
+		emit *= 0.08 + 0.35 * smoothstep(0.3, 1.0, flick) + 1.6 * ring;
 	}
 
 	float3 c = imGrade(imTonemap(radiance, f.tonemap), f);
@@ -850,7 +865,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		// (Reimagined's glowing ores: each speck's own colour made deeper (colour x colour^k: redstone's red pure, diamond's
 		// cyan, emerald's green), then glowing well past white so the bloom gives every speck a halo; the stone stays dark)
 		float em = max(max(ecol.r, ecol.g), ecol.b);
-		ecol = ecol * pow(ecol / max(em, 1e-3), 1.2);
+		ecol = ecol * pow(ecol / max(em, 1e-3), 0.35);
 	}
 	c = max(c, 0.0) + ecol * emit * airT;  // (the texture's colour: light given off isn't darkened by corner shading)
 	return pow(c, 1.0 / 2.2);
