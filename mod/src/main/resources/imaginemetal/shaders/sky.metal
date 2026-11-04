@@ -17,13 +17,86 @@ vertex ImSkyOut im_sky_vs(uint vid [[vertex_id]]) {
 	return o;
 }
 
+// ---- stars (Complementary Reimagined's, lib/atmospherics/stars.glsl: a field of pixel stars on a flattened dome, drifting
+// slowly) with a twinkle (after Euphoria Patches: each star its own slow flicker) and shooting stars ----
+static inline float imStarNoise(float2 p) {
+	return fract(sin(dot(p, float2(12.9898, 4.1414))) * 43758.54953);
+}
+
+static float3 imStars(float3 d, constant ImFrame &f) {
+	if (d.y <= 0.0) return float3(0.0);
+	float2 sc = d.xz / (d.y + length(d.xz) * 0.5);
+	sc.x += 0.006 * f.world.w;
+	sc *= 0.2;
+	float2 cell = floor(sc * 1024.0) / 1024.0;
+	float star = imStarNoise(cell) * imStarNoise(cell + 0.1) * imStarNoise(cell + 0.23);
+	star = max(star - 0.7, 0.0);
+	star *= star;
+	if (star <= 0.0) return float3(0.0);
+	float h = imStarNoise(cell + 0.37);
+	float tw = 0.55 + 0.45 * sin(f.world.w * (1.3 + 2.6 * h) + h * 40.0) * sin(f.world.w * (0.7 + 1.1 * h) + h * 17.0);
+	star *= tw;
+	float vdots = dot(d, f.sunDir.xyz);
+	star *= min(d.y * 3.0, 1.0) * max(1.0 - pow(abs(vdots) * 1.002, 100.0), 0.0);
+	float inv = f.sunsetDown.w * f.sunsetDown.w;
+	inv *= inv;
+	star *= (1.0 - f.dayUp.w) * inv * inv * (1.0 - 0.5 * f.nightMiddle.w);
+	// (a little colour each: most white-blue, some warmer)
+	float3 tint = mix(float3(0.38, 0.4, 0.5), float3(0.5, 0.42, 0.34), step(0.8, h));
+	return 40.0 * star * tint;
+}
+
+// One shooting star's slot (period seconds): most slots have one, at a random place high in the sky, crossing a short arc in
+// under a second, a bright head and a fading tail.
+static float imShootingStar(float3 d, float t, float period, float seed) {
+	float slot = floor(t / period);
+	float r0 = imStarNoise(float2(slot, seed)), r1 = imStarNoise(float2(slot + 0.31, seed)), r2 = imStarNoise(float2(slot + 0.67, seed));
+	float r3 = imStarNoise(float2(slot + 0.13, seed + 1.7));
+	if (r3 > 0.6) return 0.0;
+	float life = 0.9;
+	float age = (t - slot * period - r3 * (period - life)) / life;
+	if (age < 0.0 || age > 1.0) return 0.0;
+	float az = r0 * 6.2832, el = 0.45 + 0.6 * r1;
+	float3 s = float3(cos(az) * cos(el), sin(el), sin(az) * cos(el));
+	float3 e1 = normalize(cross(s, float3(0.0, 1.0, 0.0)));
+	float3 e2 = cross(e1, s);
+	float ang = r2 * 6.2832;
+	float3 v = normalize(e1 * cos(ang) + e2 * sin(ang) * 0.5 - s * 0.0);
+	v.y = -abs(v.y) - 0.15;  // (falling)
+	v = normalize(v - s * dot(v, s));
+	float travel = 0.35;
+	float3 head = normalize(s + v * (travel * age));
+	float3 tail = normalize(s + v * (travel * max(age - 0.25, 0.0)));
+	float3 ab = head - tail;
+	float k = saturate(dot(d - tail, ab) / max(dot(ab, ab), 1e-8));
+	float dist = length(d - (tail + ab * k));
+	float w = 0.0018;
+	float line = saturate(1.0 - dist / w);
+	float fade = sin(age * 3.14159);
+	return line * line * k * k * fade * step(0.0, dot(d, s));
+}
+
 // rot: clip -> view direction (the inverse of the camera's rotation and projection, no translation)
 fragment float4 im_sky_fs(ImSkyOut in [[stage_in]], constant ImFrame &f [[buffer(0)]], constant float4x4 &rot [[buffer(1)]]) {
 	// (the backend flips vertex y so its images keep GL's row order: this pixel is where clip y = -ndc.y lands)
 	float4 q = rot * float4(in.ndc.x, -in.ndc.y, 0.5, 1.0);
 	float3 d = normalize(q.xyz / q.w);
 	// (through the same exposure, tone curve and grade as the terrain, as Reimagined's sky goes through its tonemap with the rest)
-	return float4(pow(imPresent(imSkyColor(d, f, true), f), 1.0 / 2.2), 1.0);
+	float3 sky = imSkyColor(d, f, true);
+	uint st = uint(f.auroraLight.w + 0.5);
+	if (st != 0u && d.y > 0.0 && f.flags.x == 0) {
+		if ((st & 1u) != 0u) sky += imStars(d, f);
+		if ((st & 2u) != 0u) {
+			float inv = f.sunsetDown.w * f.sunsetDown.w;
+			float vis = (1.0 - f.dayUp.w) * inv * inv * (1.0 - f.nightMiddle.w);
+			if (vis > 0.0) {
+				float t = f.world.w;
+				float ss = imShootingStar(d, t, 9.0, 0.0) + imShootingStar(d, t + 4.0, 13.0, 3.0);
+				sky += float3(0.9, 0.95, 1.0) * (6.0 * ss * vis);
+			}
+		}
+	}
+	return float4(pow(imPresent(sky, f), 1.0 / 2.2), 1.0);
 }
 
 // ---- clouds (Complementary Reimagined's blocky clouds, lib/atmospherics/clouds/reimaginedClouds.glsl) and the aurora ----

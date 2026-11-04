@@ -349,7 +349,7 @@ public final class ImagineFrame {
 		// the light in the player's hands (the brighter of the two): its colour, its level / 15
 		float[] held = HeldLight.get();
 		put(held[0], held[1], held[2], held[3]);
-		put(auroraLight[0], auroraLight[1], auroraLight[2], 0f);
+		put(auroraLight[0], auroraLight[1], auroraLight[2], (Settings.stars == 1 ? 1 : 0) + (Settings.shootingStars ? 2 : 0));
 		// water and glass: the water and portal sprites, the water style, glass reflections, eyes in water
 		WaterSprites.update();
 		put(WaterSprites.STILL[0], WaterSprites.STILL[1], WaterSprites.STILL[2], WaterSprites.STILL[3]);

@@ -31,6 +31,8 @@ public final class Settings {
 	public static volatile boolean heldLight = Engine.flag("imaginemetal.heldLight", true);
 	public static volatile boolean waving = Engine.flag("imaginemetal.waving", true);
 	public static volatile int waterStyle = (int) Config.number("imaginemetal.waterStyle", 1, 0, 2);
+	public static volatile int stars = (int) Config.number("imaginemetal.stars", 1, 0, 1);
+	public static volatile boolean shootingStars = Engine.flag("imaginemetal.shootingStars", true);
 	public static volatile boolean shafts = Engine.flag("imaginemetal.shafts", true);
 	public static volatile float shaftStrength = Config.number("imaginemetal.shaftStrength", 1f, 0f, 3f);
 	public static volatile boolean glassReflections = Engine.flag("imaginemetal.glassReflections", true);
@@ -72,6 +74,8 @@ public final class Settings {
 		v.put("imaginemetal.waterStyle", String.valueOf(waterStyle));
 		v.put("imaginemetal.glassReflections", String.valueOf(glassReflections));
 		v.put("imaginemetal.shafts", String.valueOf(shafts));
+		v.put("imaginemetal.stars", String.valueOf(stars));
+		v.put("imaginemetal.shootingStars", String.valueOf(shootingStars));
 		v.put("imaginemetal.shaftStrength", String.format(java.util.Locale.ROOT, "%.2f", shaftStrength));
 		v.put("imaginemetal.nightBrightness", String.format(java.util.Locale.ROOT, "%.2f", nightBrightness));
 		v.put("imaginemetal.generatedNormals", String.format(java.util.Locale.ROOT, "%.2f", normals));

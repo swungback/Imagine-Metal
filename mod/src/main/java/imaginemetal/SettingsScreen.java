@@ -87,6 +87,9 @@ public final class SettingsScreen extends OptionsSubScreen {
 					"Beams of sunlight around leaves, mountains and cave mouths when you look toward the sun."),
 					slider("Shaft strength", 0, 3, 0.05f, Settings.shaftStrength, v -> Settings.shaftStrength = v, SettingsScreen::pct,
 						"How bright the light shafts are."));
+				this.list.addSmall(cycle("Stars", new String[] {"Minecraft's", "Reimagined, twinkling"}, Settings.stars, v -> Settings.stars = v,
+					"Reimagined's star field, each star twinkling on its own."),
+					toggle("Shooting stars", Settings.shootingStars, v -> Settings.shootingStars = v, "Now and then a shooting star on a clear night."));
 			}
 			case AURORA -> {
 				this.list.addSmall(toggle("Aurora", Settings.aurora, v -> Settings.aurora = v, "Northern lights at night."),

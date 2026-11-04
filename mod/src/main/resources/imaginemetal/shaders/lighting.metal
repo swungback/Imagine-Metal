@@ -52,7 +52,7 @@ struct ImFrame {
 	float4 auroraLow;    // the aurora's colour where its curtains end (low), w its style (0 smooth, 1 pixel)
 	float4 auroraHigh;   // its colour at their height, w its brightness
 	float4 held;         // the light in the player's hands: rgb its colour (brightest channel 1), w its level 0..1
-	float4 auroraLight;  // rgb the aurora's light on the world (linear, from above), w 0
+	float4 auroraLight;  // rgb the aurora's light on the world (linear, from above), w stars (bit 1 ours, twinkling; bit 2 shooting stars)
 	// water and glass (the translucent pass, which has no material bytes: water told by its sprites)
 	float4 waterStill;   // the still water sprite's rectangle in the block atlas (u0, v0, u1, v1)
 	float4 waterFlow;    // the flowing water's

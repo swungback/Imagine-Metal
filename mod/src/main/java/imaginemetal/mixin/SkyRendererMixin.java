@@ -31,6 +31,11 @@ abstract class SkyRendererMixin {
 		if (Sky.active) ci.cancel();
 	}
 
+	@Inject(method = "renderStars", at = @At("HEAD"), cancellable = true)
+	private void imaginemetal$noStars(CallbackInfo ci) {
+		if (Sky.active && imaginemetal.Settings.stars == 1) ci.cancel();  // (ours, twinkling, in the sky pass)
+	}
+
 	@Inject(method = "renderDarkDisc", at = @At("HEAD"), cancellable = true)
 	private void imaginemetal$noDarkDisc(CallbackInfo ci) {
 		if (Sky.active) ci.cancel();
