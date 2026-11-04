@@ -46,7 +46,9 @@ public final class LightColors {
 		{"light", new float[] {1.00f, 0.90f, 0.75f}},  // (the invisible light block, last: "light" is in many names)
 	};
 	/** A flame: torches, lanterns, campfires, fire, candles, furnaces, and the default for unknown lights. */
-	private static final float[] FLAME = {1.00f, 0.55f, 0.22f};
+	// (after the shader's saturation push, imBlockLight, this comes out as Reimagined's torch light, measured on matching
+	// screenshots: redder, and with some blue kept, where the old colour's blue was pushed to nothing and floors turned mustard)
+	private static final float[] FLAME = {1.00f, 0.52f, 0.38f};
 	private static final float[] SOUL = {0.20f, 0.75f, 1.00f}, RED = {1.00f, 0.08f, 0.04f}, COPPER = {0.55f, 1.00f, 0.50f};
 	private static final ConcurrentHashMap<BlockState, float[]> CACHE = new ConcurrentHashMap<>();
 

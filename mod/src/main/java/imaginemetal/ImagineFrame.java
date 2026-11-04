@@ -54,7 +54,7 @@ public final class ImagineFrame {
 	// night (toward Reimagined's: a lavender-blue moonlight, its red above its green, a deep blue sky light; a little darker)
 	private static final float[] MOON = {0.12f, 0.11f, 0.20f};
 	private static final float[] NIGHT_SKY = {0.036f, 0.039f, 0.085f};
-	private static final float[] TORCH = {1.30f, 0.70f, 0.33f};
+	private static final float[] TORCH = {1.45f, 0.55f, 0.29f};  // (Reimagined's hue, a little brighter: its torch rooms are lit further)
 	private static final float[] CAVE = {0.0055f, 0.0060f, 0.0085f};
 	private static final float[] END_LIGHT = {0.40f, 0.30f, 0.62f};
 	private static final float[] END_SKY = {0.10f, 0.07f, 0.15f};
