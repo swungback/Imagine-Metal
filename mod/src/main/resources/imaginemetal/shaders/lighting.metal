@@ -57,7 +57,8 @@ struct ImFrame {
 	float4 waterStill;   // the still water sprite's rectangle in the block atlas (u0, v0, u1, v1)
 	float4 waterFlow;    // the flowing water's
 	float4 portalRect;   // the nether portal's (not glass: it doesn't reflect)
-	float4 water;        // x water style (0 vanilla, 1 Reimagined, 2 Reimagined with waves), y 1 = glass reflections, z 1 = eyes in water
+	float4 water;        // x water style (0 vanilla, 1 Reimagined, 2 Reimagined with waves), y 1 = glass reflections, z 1 = eyes in water,
+	                     // w how wet the world is (rain, eased; 0 in dry biomes or with the setting off)
 };
 
 static inline float imSqrt2(float x) { x = 1.0 - x; x *= x; x *= x; return 1.0 - x; }
@@ -589,6 +590,26 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	ImSurf surf = pbr ? imSurface(cls, albedo, tex) : ImSurf{0.0, 0.0, 0.0, 0.04, 0.0};
 	float3 V = -normalize(p);
 	if (kind == 1u && f.water.x > 1.5 && n.y > 0.5) N = imWaterNormal(p, n, f);
+	// wet in the rain (after Reimagined's): what's under the open sky turns darker and glossy, puddles lie flat and mirror-like on
+	// the tops of blocks, in patches from a world-space noise; sides only a little
+	if (pbr && f.water.w > 0.0 && kind == 0u && cls != IM_MAT_LAVA && cls != IM_MAT_EMITTER) {
+		float wet = f.water.w * smoothstep(0.8, 0.97, light.y);
+		if (wet > 0.0) {
+			float2 wq = (p.xz + f.world.xz) * 0.3;
+			float2 wi = floor(wq), wf = fract(wq);
+			wf = wf * wf * (3.0 - 2.0 * wf);
+			float h00 = fract(sin(dot(wi, float2(127.1, 311.7))) * 43758.5453), h10 = fract(sin(dot(wi + float2(1, 0), float2(127.1, 311.7))) * 43758.5453);
+			float h01 = fract(sin(dot(wi + float2(0, 1), float2(127.1, 311.7))) * 43758.5453), h11 = fract(sin(dot(wi + float2(1, 1), float2(127.1, 311.7))) * 43758.5453);
+			float pn = mix(mix(h00, h10, wf.x), mix(h01, h11, wf.x), wf.y);
+			float puddle = smoothstep(0.5, 0.62, pn) * step(0.5, n.y) * smoothstep(0.6, 1.0, wet);
+			float wf2 = wet * max(puddle, n.y > 0.5 ? 0.45 : 0.2);
+			base *= 1.0 - 0.3 * wf2 * (1.0 - puddle * 0.3);
+			surf.d = max(surf.d, wf2 * 0.95);
+			surf.g = max(surf.g, wf2 * 0.9);
+			surf.hl = max(surf.hl, wf2);
+			if (puddle > 0.5) N = n;  // (standing water is flat)
+		}
+	}
 	float block = light.x, sky = light.y;
 	float skyF = imSkyCurve(sky);
 

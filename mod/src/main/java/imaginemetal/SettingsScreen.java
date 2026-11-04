@@ -114,6 +114,8 @@ public final class SettingsScreen extends OptionsSubScreen {
 					v -> Settings.waterStyle = v, "Reimagined's water: its colour, clearer up close, reflections of the sky and the world. Waves add moving ripples."),
 					toggle("Glass reflections", Settings.glassReflections, v -> Settings.glassReflections = v,
 						"Stained glass, ice and other see-through blocks reflect the sky and the world."));
+				this.list.addBig(toggle("Wet in the rain", Settings.wet, v -> Settings.wet = v,
+					"In the rain everything under the sky gets darker and glossy, with puddles on top of blocks. Needs PBR."));
 				this.list.addSmall(toggle("Ambient occlusion", Settings.ssao, v -> Settings.ssao = v,
 					"Corners, the ground under ledges and the gaps between blocks a little darker, so shapes read better."),
 					slider("AO strength", 0, 1, 0.05f, Settings.ssaoStrength, v -> Settings.ssaoStrength = v, SettingsScreen::pct,

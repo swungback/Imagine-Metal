@@ -34,6 +34,7 @@ public final class ImagineFrame {
 	static final float[] shaftDir = new float[3], shaftColor = new float[3];
 	static boolean shaftOn;
 	static float shaftRain, shaftNoon;
+	private static float wet;
 	private static boolean failed;
 
 	// Tone curve (Lottes 2016): mid-grey 0.25 stays 0.25, white at 8 (highlights roll off), contrast 1.05.
@@ -356,7 +357,10 @@ public final class ImagineFrame {
 		put(WaterSprites.STILL[0], WaterSprites.STILL[1], WaterSprites.STILL[2], WaterSprites.STILL[3]);
 		put(WaterSprites.FLOW[0], WaterSprites.FLOW[1], WaterSprites.FLOW[2], WaterSprites.FLOW[3]);
 		put(WaterSprites.PORTAL[0], WaterSprites.PORTAL[1], WaterSprites.PORTAL[2], WaterSprites.PORTAL[3]);
-		put(Settings.waterStyle, Settings.glassReflections ? 1f : 0f, camera.fogType == net.minecraft.world.level.material.FogType.WATER ? 1f : 0f, 0f);
+		// (wet: with the rain, quickly; drying slowly after; none where it doesn't rain or snows)
+		float wetTarget = Settings.wet && dim == 0 ? rain * (1f - Haze.dry) * (1f - Haze.cold) : 0f;
+		wet += (wetTarget - wet) * (1f - (float) Math.exp(-dt / (wetTarget > wet ? 8f : 40f)));
+		put(Settings.waterStyle, Settings.glassReflections ? 1f : 0f, camera.fogType == net.minecraft.world.level.material.FogType.WATER ? 1f : 0f, wet);
 		if (BUF.position() != SIZE) throw new IllegalStateException("ImFrame is " + BUF.position() + " bytes, not " + SIZE);
 	}
 
