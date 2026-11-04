@@ -78,6 +78,8 @@ public final class Config {
 		imaginemetal.ssaoStrength=0.7
 		# Stars: 0 Minecraft's, 1 Reimagined's, twinkling. Shooting stars now and then on clear nights.
 		imaginemetal.stars=1
+		# The End's sky: 0 Reimagined's violet sky with its beams, 1 a black hole low over the islands, lighting them white.
+		imaginemetal.endStyle=0
 		imaginemetal.shootingStars=true
 		imaginemetal.shaftStrength=1
 		imaginemetal.nightBrightness=1

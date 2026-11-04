@@ -2406,7 +2406,7 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 		bf *= bf;
 		bf *= bf;
 		imFog = 1.0 - exp(-3.0 * bf);
-		imFogColor = pow(imPresent(float3(0.095, 0.07, 0.15) * 1.65, imf), 1.0 / 2.2);
+		imFogColor = pow(imPresent(imf.nether.x > 0.5 ? float3(0.004, 0.0042, 0.005) : float3(0.095, 0.07, 0.15) * 1.65, imf), 1.0 / 2.2);
 	} else if (imf.water.z > 0.5 && imf.flags.x == 0 && imf.water.x > 0.5) {
 		// under water (Reimagined's): the biome's water fog colour, pushed toward its blue-green, thickening with the square of
 		// the distance (clear close by, a deep blue wall at about 60 blocks)

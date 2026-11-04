@@ -655,6 +655,9 @@ static inline float imDither(float2 pixel, constant ImFrame &f) {
 static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint mat, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp,
 	texture3d<float> lvol, sampler lsamp, float2 uv, float4 rect, texture2d<float> atlas, texture2d<float> hc, depth2d<float> hd, sampler hs) {
 	if (f.flags.z == 0) return albedo * (0.2 + 0.8 * max(light.x, light.y)); // the engine hasn't filled a frame yet
+	// (the End has no sky light in Minecraft: everything there counts as open to its sky, so its light (Reimagined's lavender,
+	// or the black hole's) reaches the islands, the shadow maps deciding where)
+	if (f.flags.x == 2) light.y = 1.0;
 	bool slanted;
 	float3 n = imFaceNormal(p, slanted);
 	// the texture's tangent frame from the screen derivatives (Schüler 2013), taken before any branch

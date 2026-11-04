@@ -95,6 +95,9 @@ public final class SettingsScreen extends OptionsSubScreen {
 				this.list.addSmall(cycle("Stars", new String[] {"Minecraft's", "Reimagined, twinkling"}, Settings.stars, v -> Settings.stars = v,
 					"Reimagined's star field, each star twinkling on its own."),
 					toggle("Shooting stars", Settings.shootingStars, v -> Settings.shootingStars = v, "Now and then a shooting star on a clear night."));
+				this.list.addSmall(cycle("End sky", new String[] {"Reimagined", "Black hole"}, Settings.endStyle, v -> Settings.endStyle = v,
+					"Reimagined: a violet sky with beams of light rising from the void. Black hole: a black sky full of stars and a blazing black hole low over the islands, lighting them white and throwing long shadows."),
+					null);
 				this.list.addSmall(toggle("Nether haze", Settings.netherFog, v -> Settings.netherFog = v,
 					"Reimagined's Nether: each biome its own glowing haze, orange in the wastes, teal in soul sand valleys, ash grey in the deltas, red in the crimson forest, violet in the warped one."),
 					toggle("Nether storm", Settings.netherStorm, v -> Settings.netherStorm = v,

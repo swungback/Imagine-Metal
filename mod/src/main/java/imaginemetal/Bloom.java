@@ -53,7 +53,7 @@ public final class Bloom {
 		if (ImagineFrame.dimNow == 2) {
 			// the End: Reimagined's ender beams, in the same pass: x -3, y the shadow maps' reach (0: none), z strength, rgb their
 			// violet (Reimagined's: its End ambient light cubed, normalized, x 2.5)
-			if (!Settings.shafts || !Reflections.valid || !Sky.active) return r;
+			if (!Settings.shafts || !Reflections.valid || !Sky.active || Settings.endStyle == 1) return r;
 			r[0] = -3f;
 			r[1] = Shadows.valid() ? Settings.shadowRange : 0f;
 			r[2] = Settings.shaftStrength;

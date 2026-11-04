@@ -77,11 +77,81 @@ static float imShootingStar(float3 d, float t, float period, float seed) {
 }
 
 // rot: clip -> view direction (the inverse of the camera's rotation and projection, no translation)
+// The End's black hole (Settings.endStyle 1, after Iteration's End): a black sky thick with white stars, and low over the
+// islands a black hole, its shadow ringed by a thin white photon ring, the accretion disk seen almost edge-on crossing in front of
+// it as a blazing band (brighter on the side turning toward us, orange on the other), the disk's far side bent up over the top and
+// under the bottom into a halo, a wide glow scattering over the sky around it, and a vast dark planet beside it, only its rim lit.
+// rgb: light (linear, through the tone curve as the terrain's); hdr: the cores past white, added after it (the bloom haloes them).
+static float3 imBlackHoleSky(float3 d, constant ImFrame &f, thread float3 &hdr) {
+	float3 B = normalize(f.lightDir.xyz);
+	float3 R = normalize(cross(B, float3(0.0, 1.0, 0.0)));
+	float3 U = cross(R, B);
+	float z = dot(d, B);
+	float x = dot(d, R), y = dot(d, U);
+	float r = z > 0.0 ? length(float2(x, y)) : 2.0;
+	const float rs = 0.032;  // the shadow's radius (radians, about two degrees)
+	float yb = y - 0.07 * x;   // (the disk a little tilted)
+	hdr = float3(0.0);
+
+	// the stars: tiny, white, everywhere (thinner in the glow)
+	float2 sc = (0.65 * d / (abs(d.y) + length(d.xz))).xz * 0.5;
+	if (d.y < 0.0) sc += 100.0;
+	float2 cell = floor(sc * 1400.0) / 1400.0;
+	float st = imStarNoise(cell) * imStarNoise(cell + 0.1) * imStarNoise(cell + 0.23);
+	st = max(st - 0.62, 0.0);
+	st *= st;
+	float3 col = float3(0.004, 0.0042, 0.005) + float3(0.9, 0.93, 1.0) * st * 9.0;
+
+	// the planet: far and huge, beside the black hole, its night side dark (hiding the stars), only the rim facing the light lit
+	float3 Pc = normalize(B * 0.82 - R * 0.52 - U * 0.24);
+	const float Rp = 0.50;
+	float cp = dot(d, Pc);
+	float phi = acos(clamp(cp, -1.0, 1.0));
+	float3 tb = normalize(B - Pc * dot(B, Pc));
+	float3 dd = d - Pc * cp;
+	float facing = dot(dd / max(length(dd), 1e-4), tb);
+	if (phi < Rp) col = float3(0.010, 0.010, 0.012) * (1.0 + 2.0 * smoothstep(Rp - 0.08, Rp, phi) * saturate(facing));
+	float rim = exp(-pow((phi - Rp) / 0.0022, 2.0)) * smoothstep(-0.2, 0.8, facing);
+	float atmo = phi > Rp ? exp(-(phi - Rp) / 0.012) * saturate(facing) : 0.0;
+	col += float3(0.85, 0.9, 1.0) * (rim * 1.4 + atmo * 0.08);
+	hdr += float3(0.9, 0.95, 1.0) * rim * 0.6;
+
+	// the glow scattered around it, and a thin flare across it along the disk
+	float glow = exp(-r / 0.10) * 0.55 + exp(-r / 0.45) * 0.10;
+	float flare = z > 0.0 ? exp(-pow(yb / 0.0035, 2.0)) * exp(-abs(x) / 0.30) : 0.0;
+	col += float3(1.0, 0.96, 0.9) * (glow + flare * 0.5);
+
+	// the disk, nearly edge-on: a band from just outside the shadow outward, in front of it (it crosses the shadow too)
+	float ax = abs(x);
+	float bw = rs * 0.11 + ax * 0.03;
+	float band = z > 0.0 ? exp(-pow(yb / bw, 2.0)) * smoothstep(rs * 1.05, rs * 1.6, ax) * exp(-(ax - rs) / (rs * 2.8)) : 0.0;
+	// (Doppler: the side turning toward us brighter and whiter, the other dimmer and orange)
+	float3 diskC = x < 0.0 ? float3(1.0, 0.97, 0.92) * 1.3 : float3(1.0, 0.62, 0.32) * 0.85;
+	// the photon ring, and the disk's far side lensed over the top and under the bottom
+	float ring = exp(-pow((r - rs * 1.07) / (rs * 0.06), 2.0));
+	float halo = exp(-pow((r - rs * 1.32) / (rs * 0.20), 2.0)) * (0.45 + 0.55 * smoothstep(0.0, rs * 1.2, abs(y)));
+	float3 light = float3(1.0, 0.97, 0.93) * (ring * 3.0 + halo * 1.6) + diskC * band * 3.2;
+	if (r < rs) {
+		// the shadow: black, but for the disk's band crossing in front of it
+		col = diskC * band * 3.2;
+		hdr = diskC * band * 2.0;
+		return col;
+	}
+	col += light;
+	hdr += float3(1.0, 0.97, 0.93) * (ring * 2.5 + halo * 0.8) + diskC * band * 2.0 + float3(1.0) * exp(-r / 0.05) * 0.25;
+	return col;
+}
+
 fragment float4 im_sky_fs(ImSkyOut in [[stage_in]], constant ImFrame &f [[buffer(0)]], constant float4x4 &rot [[buffer(1)]]) {
 	// (the backend flips vertex y so its images keep GL's row order: this pixel is where clip y = -ndc.y lands)
 	float4 q = rot * float4(in.ndc.x, -in.ndc.y, 0.5, 1.0);
 	float3 d = normalize(q.xyz / q.w);
 	// (through the same exposure, tone curve and grade as the terrain, as Reimagined's sky goes through its tonemap with the rest)
+	if (f.flags.x == 2 && f.nether.x > 0.5) {
+		float3 hdr;
+		float3 bh = imBlackHoleSky(d, f, hdr);
+		return float4(pow(imPresent(bh, f), 1.0 / 2.2) + hdr, 1.0);
+	}
 	if (f.flags.x == 2) {
 		// the End (Reimagined's): a deep violet sky full of tiny stars, thickest toward the horizon, both above and below
 		float3 endSky = float3(0.095, 0.07, 0.15) * 1.65;

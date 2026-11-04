@@ -86,6 +86,8 @@ public final class ImagineFrame {
 	private static final float[] CAVE = {0.0055f, 0.0060f, 0.0085f};
 	private static final float[] END_LIGHT = {0.40f, 0.30f, 0.62f};
 	private static final float[] END_SKY = {0.10f, 0.07f, 0.15f};
+	/** where the End's black hole hangs (Settings.endStyle 1): low in the sky, so the islands throw long shadows */
+	private static final float[] BLACK_HOLE = {0.70f, 0.17f, -0.69f};
 	/** The moon's light by phase (vanilla's index: 0 full ... 4 new). */
 	private static final float[] MOON_PHASE = {1f, 0.8f, 0.6f, 0.4f, 0.25f, 0.4f, 0.6f, 0.8f};
 
@@ -270,6 +272,18 @@ public final class ImagineFrame {
 				netherColor[i] = mix(fallback, Haze.netherPreset[i], Haze.netherKnown);
 				up[i] = (float) Math.pow((netherColor[i] + 0.5f * lava[i]) * (0.9f + 0.45f * vsB), 2.2);
 			}
+		} else if (Settings.endStyle == 1) {
+			// the End with its black hole: low over the islands, a bright white light from it (long shadows), the rest of the sky
+			// black, a little cold light from the stars
+			lightDir[0] = BLACK_HOLE[0];
+			lightDir[1] = BLACK_HOLE[1];
+			lightDir[2] = BLACK_HOLE[2];
+			normalize(lightDir);
+			float[] bl = {1.55f, 1.45f, 1.32f}, sk = {0.055f, 0.058f, 0.068f};
+			for (int i = 0; i < 3; i++) {
+				light[i] = bl[i];
+				up[i] = sk[i];
+			}
 		} else {
 			// the End: a lavender light from above, a violet sky
 			lightDir[0] = 0.3f;
@@ -450,7 +464,9 @@ public final class ImagineFrame {
 		netherFar = farM;
 		// (the End: w minus the render distance, for Reimagined's border fog there into its violet sky)
 		boolean endFog = dim == 2 && Settings.sky && camera.fogType == net.minecraft.world.level.material.FogType.NONE;
-		put(netherFog[0], netherFog[1], netherFog[2], netherHaze ? farM : endFog ? -Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f : 0f);
+		// (in the End, x the sky's style)
+		if (dim == 2) put(Settings.endStyle, 0f, 0f, endFog ? -Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f : 0f);
+		else put(netherFog[0], netherFog[1], netherFog[2], netherHaze ? farM : 0f);
 		if (BUF.position() != SIZE) throw new IllegalStateException("ImFrame is " + BUF.position() + " bytes, not " + SIZE);
 	}
 
