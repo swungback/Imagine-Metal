@@ -256,9 +256,9 @@ static float imEmission(uint cls, float3 tex) {
 		// ores: every pixel with clear colour against the grey stone around it (the whole speck, its coloured edge too; iron's pale
 		// specks count; a speck's near-grey highlights and coal's black specks don't), at a faint glow that keeps the texture's own
 		// light and dark
-		case IM_MAT_ORE: return 0.6 * smoothstep(0.08, 0.2, sat);
+		case IM_MAT_ORE: return 1.5 * smoothstep(0.08, 0.2, sat);
 		// nether ores sit in red netherrack: their specks are told apart by brightness instead
-		case IM_MAT_NETHER_ORE: return 0.6 * smoothstep(0.5, 0.75, l);
+		case IM_MAT_NETHER_ORE: return 1.4 * smoothstep(0.5, 0.75, l);
 		// faint lights (sculk sensors and catalysts, magma, glow lichen): only their bright, coloured parts glow, as a flame's
 		case IM_MAT_DIM: return 1.6 * smoothstep(0.5, 0.85, hi) * smoothstep(0.12, 0.35, sat);
 		// sculk's specks: only their brightest pixels (small, calm dots), but far past white, so the bloom gives each a soft halo
@@ -463,7 +463,9 @@ static float4 imReflect(float3 p, float3 n, float3 R, float lod, float dither, c
 		float d = hd.read(uint2(clamp(ndc * 0.5 + 0.5, 0.0, 0.9999) * size));
 		float4 sp = f.histClipInv * float4(ndc, d, 1.0);
 		float diff = length(r) - length(sp.xyz / sp.w);
-		if (diff > 0.0) {
+		// (a little past the surface before it counts: far away the depth's precision alone puts the ray "behind" whatever
+		// surface it started from, in bands)
+		if (diff > 0.02 + length(r) * 0.004) {
 			// (only just behind a surface counts as reaching it: far behind is passing behind something thin in front, a torch, a
 			// fence, whose back the screen doesn't show)
 			if (diff > 0.15 + stepLen * 0.6) return float4(0.0, 0.0, 0.0, -1.0);
@@ -595,14 +597,14 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	if (pbr && f.water.w > 0.0 && kind == 0u && cls != IM_MAT_LAVA && cls != IM_MAT_EMITTER) {
 		float wet = f.water.w * smoothstep(0.8, 0.97, light.y);
 		if (wet > 0.0) {
-			float2 wq = (p.xz + f.world.xz) * 0.3;
+			float2 wq = floor((p.xz + f.world.xz) * 16.0 + 0.001) * (0.3 / 16.0);  // (in the texture's pixels, like everything else)
 			float2 wi = floor(wq), wf = fract(wq);
 			wf = wf * wf * (3.0 - 2.0 * wf);
 			float h00 = fract(sin(dot(wi, float2(127.1, 311.7))) * 43758.5453), h10 = fract(sin(dot(wi + float2(1, 0), float2(127.1, 311.7))) * 43758.5453);
 			float h01 = fract(sin(dot(wi + float2(0, 1), float2(127.1, 311.7))) * 43758.5453), h11 = fract(sin(dot(wi + float2(1, 1), float2(127.1, 311.7))) * 43758.5453);
 			float pn = mix(mix(h00, h10, wf.x), mix(h01, h11, wf.x), wf.y);
-			float puddle = smoothstep(0.5, 0.62, pn) * step(0.5, n.y) * smoothstep(0.6, 1.0, wet);
-			float wf2 = wet * max(puddle, n.y > 0.5 ? 0.45 : 0.2);
+			float puddle = step(0.6, pn) * step(0.5, n.y) * smoothstep(0.6, 1.0, wet) * (cls == IM_MAT_FOLIAGE ? 0.0 : 1.0);
+			float wf2 = wet * max(puddle, cls == IM_MAT_FOLIAGE ? 0.15 : n.y > 0.5 ? 0.4 : 0.2);
 			base *= 1.0 - 0.3 * wf2 * (1.0 - puddle * 0.3);
 			surf.d = max(surf.d, wf2 * 0.95);
 			surf.g = max(surf.g, wf2 * 0.9);
@@ -754,14 +756,17 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			float3 R = reflect(-V, N);
 			if (dot(R, n) < 0.02) R = normalize(R - n * (dot(R, n) - 0.02));
 			float dither = fract(dot(pixel, float2(0.06711056, 0.00583715)) * 52.9829189);
-			float4 hit = f.histShift.w > 0.5 ? imReflect(p, n, R, kind == 1u ? 0.0 : 1.5, dither, f, hc, hd, hs) : float4(0.0);
+			// (traced only within 64 blocks: past that the reflection is the sky, cheaper and without the depth's banding)
+			float dist = length(p);
+			float4 hit = f.histShift.w > 0.5 && dist < 64.0 ? imReflect(p, n, R, kind == 1u ? 0.0 : 1.5, dither, f, hc, hd, hs) : float4(0.0);
+			hit.a = hit.a > 0.0 ? hit.a * (1.0 - smoothstep(40.0, 64.0, dist)) : hit.a;
 			float open = smoothstep(0.6, 1.0, sky);
 			float3 skyR = float3(0.0);
 			if (open * smoothstep(-0.1, 0.2, R.y) > 0.0)
 				skyR = (f.flags.x == 0 ? imPresent(imSkyColor(R, f, false), f) : imPresent(f.ambientUp.rgb * 2.0, f)) * (open * open)
 					* smoothstep(-0.1, 0.2, R.y);
-			// (blocked, or no sky to see: the surface's own colour darkened a little, Reimagined's fallback for covered water)
-			float3 refl = hit.a > 0.0 ? mix(skyR, hit.rgb, hit.a) : open > 0.0 && hit.a == 0.0 ? skyR : c * 0.6;
+			// (blocked, or no sky to see: the sky where it's open, else the surface's own colour a little darker)
+			float3 refl = hit.a > 0.0 ? mix(skyR, hit.rgb, hit.a) : open > 0.0 ? skyR : c * 0.85;
 			c = mix(c, refl, saturate(fm));
 		}
 	}

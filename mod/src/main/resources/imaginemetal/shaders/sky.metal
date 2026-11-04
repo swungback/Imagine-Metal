@@ -34,7 +34,7 @@ static float3 imStars(float3 d, constant ImFrame &f) {
 	star *= star;
 	if (star <= 0.0) return float3(0.0);
 	float h = imStarNoise(cell + 0.37);
-	float tw = 0.55 + 0.45 * sin(f.world.w * (1.3 + 2.6 * h) + h * 40.0) * sin(f.world.w * (0.7 + 1.1 * h) + h * 17.0);
+	float tw = 0.5 + 0.5 * sin(f.world.w * (1.3 + 2.6 * h) + h * 40.0) * sin(f.world.w * (0.7 + 1.1 * h) + h * 17.0);
 	star *= tw;
 	float vdots = dot(d, f.sunDir.xyz);
 	star *= min(d.y * 3.0, 1.0) * max(1.0 - pow(abs(vdots) * 1.002, 100.0), 0.0);
@@ -43,7 +43,7 @@ static float3 imStars(float3 d, constant ImFrame &f) {
 	star *= (1.0 - f.dayUp.w) * inv * inv * (1.0 - 0.5 * f.nightMiddle.w);
 	// (a little colour each: most white-blue, some warmer)
 	float3 tint = mix(float3(0.38, 0.4, 0.5), float3(0.5, 0.42, 0.34), step(0.8, h));
-	return 40.0 * star * tint;
+	return 70.0 * star * tint;
 }
 
 // One shooting star's slot (period seconds): most slots have one, at a random place high in the sky, crossing a short arc in
@@ -52,7 +52,7 @@ static float imShootingStar(float3 d, float t, float period, float seed) {
 	float slot = floor(t / period);
 	float r0 = imStarNoise(float2(slot, seed)), r1 = imStarNoise(float2(slot + 0.31, seed)), r2 = imStarNoise(float2(slot + 0.67, seed));
 	float r3 = imStarNoise(float2(slot + 0.13, seed + 1.7));
-	if (r3 > 0.6) return 0.0;
+	if (r3 > 0.75) return 0.0;
 	float life = 0.9;
 	float age = (t - slot * period - r3 * (period - life)) / life;
 	if (age < 0.0 || age > 1.0) return 0.0;
@@ -70,7 +70,7 @@ static float imShootingStar(float3 d, float t, float period, float seed) {
 	float3 ab = head - tail;
 	float k = saturate(dot(d - tail, ab) / max(dot(ab, ab), 1e-8));
 	float dist = length(d - (tail + ab * k));
-	float w = 0.0018;
+	float w = 0.003;
 	float line = saturate(1.0 - dist / w);
 	float fade = sin(age * 3.14159);
 	return line * line * k * k * fade * step(0.0, dot(d, s));
@@ -92,7 +92,7 @@ fragment float4 im_sky_fs(ImSkyOut in [[stage_in]], constant ImFrame &f [[buffer
 			if (vis > 0.0) {
 				float t = f.world.w;
 				float ss = imShootingStar(d, t, 9.0, 0.0) + imShootingStar(d, t + 4.0, 13.0, 3.0);
-				sky += float3(0.9, 0.95, 1.0) * (6.0 * ss * vis);
+				sky += float3(0.9, 0.95, 1.0) * (14.0 * ss * vis);
 			}
 		}
 	}

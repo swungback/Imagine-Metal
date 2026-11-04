@@ -20,6 +20,9 @@ typedef struct {
 } ImBloomParams;
 
 id<MTLTexture> mc_im_ssr_depth(void);  // mcown.m: this frame's depth copy (Reflections), nil before the first
+id<MTLTexture> mc_im_shadow_map(void);  // mcown.m: the sun's shadow maps (two cascades), nil before the first
+id<MTLSamplerState> mc_im_shadow_cmp(void);
+const void *mc_im_frame_bytes(int *length);  // mcown.m: this frame's ImFrame (lighting.metal)
 
 typedef struct {
 	id<MTLDevice> device;
@@ -212,10 +215,17 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 	@autoreleasepool {
 		ImBloomParams p = {{1.0f / (float) src.width, 1.0f / (float) src.height, threshold, knee}, {strength, (float) b->levels, haze, 0}, {toe, 0, 0, 0},
 			{b->shaft[0], b->shaft[1], 0, (float) src.height / (float) src.width}, {b->shaft[3], b->shaft[4], b->shaft[5], 0}};
-		// the light shafts (HDR path): toward the sun, how much of the sky shows, from the depth Reflections copied this frame
+		memcpy(p.clip, b->aoClip, sizeof p.clip);
+		memcpy(p.clipInv, b->aoClip + 16, sizeof p.clipInv);
+		// the light shafts (HDR path, volumetric): along each pixel's view ray, how much of the air the sun reaches (the shadow
+		// maps), from the depth Reflections copied this frame
 		id<MTLTexture> depth = mc_im_ssr_depth();
+		id<MTLTexture> smap = mc_im_shadow_map();
+		id<MTLSamplerState> scmp = mc_im_shadow_cmp();
+		int frameLen = 0;
+		const void *frame = mc_im_frame_bytes(&frameLen);
 		id<MTLTexture> shafts = nil;
-		if (!inPlace && b->shaft[2] > 0.0f && depth && depth.width == src.width && depth.height == src.height) {
+		if (!inPlace && b->shaft[2] > 0.0f && depth && smap && scmp && frame && depth.width == src.width && depth.height == src.height) {
 			if (!b->shafts) b->shafts = imbPipeline(b, @"im_bloom_shafts", MTLPixelFormatR16Float, NO, err, errCap);
 			NSUInteger sw = src.width / 4 > 1 ? src.width / 4 : 1, sh = src.height / 4 > 1 ? src.height / 4 : 1;
 			if (b->shafts && (!b->shaftTex || b->shaftTex.width != sw || b->shaftTex.height != sh)) {
@@ -228,7 +238,22 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 				b->shaftTex.label = @"Imagine Metal light shafts";
 			}
 			if (b->shafts && b->shaftTex) {
-				imbPass(cmd, b->shaftTex, MTLLoadActionDontCare, b->shafts, src, b->linear, &p, @"Imagine Metal light shafts", depth);
+				MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+				rp.colorAttachments[0].texture = b->shaftTex;
+				rp.colorAttachments[0].loadAction = MTLLoadActionDontCare;
+				rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+				id<MTLRenderCommandEncoder> r = [cmd renderCommandEncoderWithDescriptor:rp];
+				r.label = @"Imagine Metal light shafts";
+				[r setViewport:(MTLViewport) {0, 0, (double) b->shaftTex.width, (double) b->shaftTex.height, 0, 1}];
+				[r setRenderPipelineState:b->shafts];
+				[r setCullMode:MTLCullModeNone];
+				[r setFragmentTexture:depth atIndex:1];
+				[r setFragmentTexture:smap atIndex:4];
+				[r setFragmentSamplerState:scmp atIndex:1];
+				[r setFragmentBytes:&p length:sizeof p atIndex:0];
+				[r setFragmentBytes:frame length:(NSUInteger) frameLen atIndex:1];
+				[r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+				[r endEncoding];
 				shafts = b->shaftTex;
 				p.shaft[2] = b->shaft[2];
 			}
@@ -249,8 +274,6 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 				b->aoTex.label = @"Imagine Metal ambient occlusion";
 			}
 			if (b->ao && b->aoTex) {
-				memcpy(p.clip, b->aoClip, sizeof p.clip);
-				memcpy(p.clipInv, b->aoClip + 16, sizeof p.clipInv);
 				imbPass(cmd, b->aoTex, MTLLoadActionDontCare, b->ao, src, b->linear, &p, @"Imagine Metal ambient occlusion", depth);
 				aoT = b->aoTex;
 				p.shaftColor[3] = b->aoStrength;

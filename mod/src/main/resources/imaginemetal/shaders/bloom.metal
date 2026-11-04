@@ -21,7 +21,7 @@ struct ImBloomParams {
 	float4 texel;  // xy 1 / the source's size; z threshold (linear luma), w soft knee
 	float4 mix;    // x strength (negative: debug, the glow alone), y number of levels (the chain's sum is divided by it), z haze, w 0
 	float4 grade;  // x how much the dark parts are deepened (the resolve's toe: 0 none)
-	float4 shaft;  // light shafts: xy the sun on screen (uv), z strength (0 none), w height / width
+	float4 shaft;  // light shafts: z strength (0 none)
 	float4 shaftColor; // rgb the sun's (or moon's) light, linear; w ambient occlusion strength (0 none)
 	float4x4 clip;     // this frame's camera-relative world -> clip (y up: uv.y = ndc.y * 0.5 + 0.5), depth 0..1
 	float4x4 clipInv;
@@ -112,28 +112,55 @@ fragment float4 im_bloom_composite(ImBloomOut in [[stage_in]], float4 dst [[colo
 	return float4(pow(saturate(c), 1.0 / 2.2), dst.a);
 }
 
-// Light shafts (at a quarter of the size): from each pixel toward the sun, how much of the way the sky shows (the depth at the far
-// plane), the near part counting most. Where leaves, a mountain or a cave mouth hide the sun this drops, so the light falls in
-// beams around them. A fixed per-pixel jitter on the start, smoothed by the upscale.
-fragment float4 im_bloom_shafts(ImBloomOut in [[stage_in]], depth2d<float> depth [[texture(1)]], constant ImBloomParams &p [[buffer(0)]]) {
+// The start of lighting.metal's ImFrame (the frame's values, bound as they are): the light, and the sun's shadow maps.
+struct ImVlFrame {
+	float4 lightDir;     // xyz toward the light (sun by day, moon by night)
+	float4 lightColor;
+	float4 pad0[6];
+	int4 flags;
+	float4 env;
+	float4x4 shadowNear;
+	float4x4 shadowFar;
+	float4 shadow;       // y 1 = the maps are valid this frame
+};
+
+// Light shafts (volumetric, after Complementary Reimagined's; at a quarter of the size): along each pixel's view ray, out to the
+// surface or 96 blocks, twelve points checked against the sun's shadow maps; the share of the way the sun reaches is the light
+// the air scatters toward the eye, strongest looking toward the sun. Rays lit the whole way (open land in daylight) count less:
+// that's the even haze the air fog already draws; the beams are where light and shadow alternate (through leaves, a cave mouth,
+// an arch). A fixed per-pixel jitter, smoothed by the upscale.
+fragment float4 im_bloom_shafts(ImBloomOut in [[stage_in]], depth2d<float> depth [[texture(1)]], depth2d_array<float> smap [[texture(4)]],
+	sampler cmp [[sampler(1)]], constant ImBloomParams &p [[buffer(0)]], constant ImVlFrame &f [[buffer(1)]]) {
 	float2 size = float2(depth.get_width(), depth.get_height());
-	float2 d = p.shaft.xy - in.uv;
-	float len = length(d * float2(1.0, p.shaft.w));
-	d *= min(1.0, 0.75 / max(len, 1e-4));  // (no farther than three quarters of the screen)
-	const int n = 20;
-	float2 st = d / float(n);
+	float d = depth.read(uint2(clamp(in.uv, 0.0, 0.9999) * size));
+	float4 w = p.clipInv * float4(in.uv * 2.0 - 1.0, d >= 0.99999 ? 0.9999 : d, 1.0);
+	float3 P = w.xyz / w.w;
+	float len = length(P);
+	float3 dir = P / max(len, 1e-4);
+	float L = d >= 0.99999 ? 96.0 : min(len, 96.0);
+	const int n = 12;
 	float j = fract(52.9829189 * fract(dot(in.pos.xy, float2(0.06711056, 0.00583715))));
-	float2 q = in.uv + st * j;
-	float sum = 0.0, w = 1.0, ws = 0.0;
+	float lit = 0.0;
 	for (int i = 0; i < n; i++) {
-		float2 c = clamp(q, 0.0, 0.9999);
-		float sky = depth.read(uint2(c * size)) >= 0.99999 ? 1.0 : 0.0;
-		sum += sky * w;
-		ws += w;
-		w *= 0.93;
-		q += st;
+		float t = (float(i) + j) / float(n);
+		float3 q = dir * (L * t * t);  // (denser near the eye, where the beams are big on screen)
+		float4 c0 = f.shadowNear * float4(q, 1.0);
+		float s = 1.0;
+		if (max(abs(c0.x), abs(c0.y)) < 0.95 && c0.z > 0.0 && c0.z < 1.0) {
+			s = smap.sample_compare(cmp, float2(0.5 + 0.5 * c0.x, 0.5 - 0.5 * c0.y), 0, c0.z - 0.0001);
+		} else {
+			float4 c1 = f.shadowFar * float4(q, 1.0);
+			if (max(abs(c1.x), abs(c1.y)) < 0.98 && c1.z > 0.0 && c1.z < 1.0)
+				s = smap.sample_compare(cmp, float2(0.5 + 0.5 * c1.x, 0.5 - 0.5 * c1.y), 1, c1.z - 0.0002);
+		}
+		lit += s;
 	}
-	return float4(sum / ws, 0.0, 0.0, 1.0);
+	lit /= float(n);
+	float amount = lit * (1.0 - exp(-L * 0.02));
+	amount *= 1.0 - 0.8 * smoothstep(0.75, 1.0, lit);
+	float vl = dot(dir, f.lightDir.xyz);
+	float ph = 0.25 + 2.2 * pow(saturate(vl * 0.5 + 0.5), 6.0);
+	return float4(amount * ph, 0.0, 0.0, 1.0);
 }
 
 // Ambient occlusion (at half size): corners, the ground under ledges, between close blocks a little darker. Eight points in the
@@ -161,7 +188,7 @@ fragment float4 im_bloom_ao(ImBloomOut in [[stage_in]], depth2d<float> depth [[t
 	float3 Bt = cross(N, T);
 	float j = fract(52.9829189 * fract(dot(in.pos.xy, float2(0.06711056, 0.00583715))));
 	float dist = length(P);
-	float radius = 0.6;
+	float radius = 0.8;
 	float occ = 0.0;
 	const int n = 8;
 	for (int i = 0; i < n; i++) {
@@ -180,6 +207,7 @@ fragment float4 im_bloom_ao(ImBloomOut in [[stage_in]], depth2d<float> depth [[t
 		occ += smoothstep(0.02, 0.1, front) * (1.0 - smoothstep(radius, radius * 2.5, front));
 	}
 	float ao = 1.0 - occ / float(n);
+	ao *= ao;  // (deeper in the corners)
 	ao = mix(1.0, ao, 1.0 - smoothstep(64.0, 128.0, dist));
 	return float4(ao, 0.0, 0.0, 1.0);
 }
@@ -199,10 +227,11 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 		c *= mix(1.0, ao, saturate(p.shaftColor.w) * (1.0 - smoothstep(1.0, 2.0, l)));
 	}
 	if (p.shaft.z > 0.0) {
-		// the beams: brightest near the sun, fading over the screen (the air lit along the way, seen against the light)
-		float sh = shafts.sample(s, in.uv).r;
-		float r = length((in.uv - p.shaft.xy) * float2(1.0, p.shaft.w));
-		c += p.shaftColor.rgb * (sh * p.shaft.z * (0.04 + 0.3 * exp(-4.0 * r)));
+		// the beams (four taps a quarter-size texel apart: the jitter's grain smoothed)
+		float2 st = 1.0 / float2(shafts.get_width(), shafts.get_height());
+		float sh = 0.25 * (shafts.sample(s, in.uv + st * float2(-0.6, -0.6)).r + shafts.sample(s, in.uv + st * float2(0.6, -0.6)).r
+			+ shafts.sample(s, in.uv + st * float2(-0.6, 0.6)).r + shafts.sample(s, in.uv + st * float2(0.6, 0.6)).r);
+		c += p.shaftColor.rgb * (sh * p.shaft.z * 0.35);
 	}
 	if (p.mix.x != 0.0) {
 		float3 glow = imbTent(src, s, in.uv, p.texel.xy) / p.mix.y;

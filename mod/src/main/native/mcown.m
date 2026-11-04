@@ -30,6 +30,16 @@ void mc_im_ssr_bind(id<MTLTexture> color, id<MTLTexture> depth, id<MTLSamplerSta
 	imSsrDepth = depth;
 	imSsrSampler = sampler;
 }
+id<MTLTexture> mc_im_shadow_map(void) {
+	return imShadowTex;
+}
+id<MTLSamplerState> mc_im_shadow_cmp(void) {
+	return imShadowCmp;
+}
+const void *mc_im_frame_bytes(int *length) {
+	if (length) *length = (int) sizeof imFrame;
+	return imFrame;
+}
 id<MTLTexture> mc_im_ssr_depth(void) {
 	return imSsrDepth;
 }

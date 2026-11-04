@@ -34,25 +34,14 @@ public final class Bloom {
 	}
 
 	/**
-	 * The light shafts' sun: its place on screen (uv, the backend's: y from the bottom of the picture), strength (0 off: behind the
-	 * camera, underground, in water, no reflections history to read the depth from), the light's colour.
+	 * The light shafts: strength (0 off: no shadow maps or depth copy this frame, eyes in water, outside the overworld) and the
+	 * light's colour. Like Reimagined's: strongest at sunrise and sunset and in caves (beams through openings), weaker at noon and
+	 * in the rain.
 	 */
 	private static float[] shafts() {
 		float[] r = new float[6];
-		if (!Settings.shafts || !Reflections.valid || !ImagineFrame.shaftOn || ImagineFrame.camProj == null || ImagineFrame.camView == null)
-			return r;
-		float[] l = ImagineFrame.shaftDir;
-		org.joml.Vector4f c = new org.joml.Matrix4f(ImagineFrame.camProj).mul(ImagineFrame.camView).transform(new org.joml.Vector4f(l[0], l[1], l[2], 0f));
-		if (c.w <= 1e-4f) return r;
-		float x = c.x / c.w, y = c.y / c.w;
-		// facing it: full; the sun far off the screen's edge: fading out
-		float off = Math.max(Math.abs(x), Math.abs(y));
-		float k = off < 1.2f ? 1f : Math.max(0f, 1f - (off - 1.2f) / 1.3f);
-		// (Reimagined's are strongest at sunrise and sunset, weaker at noon)
-		k *= (1f - ImagineFrame.cave) * (1f - 0.7f * ImagineFrame.shaftRain) * (1f - 0.6f * ImagineFrame.shaftNoon);
-		if (k <= 0.001f) return r;
-		r[0] = x * 0.5f + 0.5f;
-		r[1] = y * 0.5f + 0.5f;
+		if (!Settings.shafts || !Reflections.valid || !ImagineFrame.shaftOn || !Shadows.valid()) return r;
+		float k = (0.35f + 0.65f * Math.max(1f - ImagineFrame.shaftNoon, ImagineFrame.cave)) * (1f - 0.7f * ImagineFrame.shaftRain);
 		r[2] = k * Settings.shaftStrength;
 		r[3] = ImagineFrame.shaftColor[0];
 		r[4] = ImagineFrame.shaftColor[1];
