@@ -41,7 +41,7 @@ typedef struct {
 	float shaft[8];           // im_bloom_shafts: sun uv, strength, colour
 	float taaJitter[3];       // im_bloom_taa: jitter (uv), 1 = on
 	float taaPrevJ[2];        // the last frame's
-	id<MTLRenderPipelineState> taa;
+	id<MTLRenderPipelineState> taa, resolve16;  // (resolve16: the resolve into TAA's 16-bit float frame)
 	MTLPixelFormat taaFormat;
 	id<MTLTexture> taaCur, taaHist[2];
 	int taaIdx, taaValid;
@@ -217,7 +217,9 @@ static id<MTLRenderPipelineState> imbTaaPipeline(ImBloom *b, MTLPixelFormat form
 		pd.vertexFunction = vs;
 		pd.fragmentFunction = fs;
 		pd.colorAttachments[0].pixelFormat = format;
-		pd.colorAttachments[1].pixelFormat = format;
+		// (the history in 16-bit float: in the screen's 8 bits, blending an eighth of each new frame in, changes smaller than a
+		// step never landed and the picture froze into blotchy steps over every gradient)
+		pd.colorAttachments[1].pixelFormat = MTLPixelFormatRGBA16Float;
 		NSError *e = nil;
 		id<MTLRenderPipelineState> ps = [b->device newRenderPipelineStateWithDescriptor:pd error:&e];
 		if (!ps) imbErr(e, "taa", err, cap);
@@ -443,17 +445,26 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 					}
 				}
 			}
-			if (taaOn && (!b->taaCur || b->taaCur.width != dst.width || b->taaCur.height != dst.height || b->taaCur.pixelFormat != dst.pixelFormat)) {
+			if (taaOn && !b->resolve16) {
+				b->resolve16 = imbPipeline(b, @"im_bloom_resolve", MTLPixelFormatRGBA16Float, NO, err, errCap);
+				if (!b->resolve16) {
+					err[0] = 0;
+					b->taaJitter[2] = 0.0f;
+					taaOn = NO;
+				}
+			}
+			if (taaOn && (!b->taaCur || b->taaCur.width != dst.width || b->taaCur.height != dst.height)) {
 				[b->taaCur release];
 				[b->taaHist[0] release];
 				[b->taaHist[1] release];
-				b->taaCur = imbTex(b, dst.pixelFormat, dst.width, dst.height, @"Imagine Metal TAA frame");
-				b->taaHist[0] = imbTex(b, dst.pixelFormat, dst.width, dst.height, @"Imagine Metal TAA history");
-				b->taaHist[1] = imbTex(b, dst.pixelFormat, dst.width, dst.height, @"Imagine Metal TAA history");
+				b->taaCur = imbTex(b, MTLPixelFormatRGBA16Float, dst.width, dst.height, @"Imagine Metal TAA frame");
+				b->taaHist[0] = imbTex(b, MTLPixelFormatRGBA16Float, dst.width, dst.height, @"Imagine Metal TAA history");
+				b->taaHist[1] = imbTex(b, MTLPixelFormatRGBA16Float, dst.width, dst.height, @"Imagine Metal TAA history");
 				b->taaValid = 0;
 			}
+			p.taa[3] = taaOn ? 1.0f : 0.0f;  // (the resolve dithers only when it writes the screen itself)
 			if (!taaOn) b->taaValid = 0;
-			imbPass3(cmd, taaOn ? b->taaCur : dst, MTLLoadActionDontCare, b->resolve, b->views[0], b->linear, &p, @"Imagine Metal HDR resolve", src,
+			imbPass3(cmd, taaOn ? b->taaCur : dst, MTLLoadActionDontCare, taaOn ? b->resolve16 : b->resolve, b->views[0], b->linear, &p, @"Imagine Metal HDR resolve", src,
 				shafts ? shafts : b->views[0], aoT ? aoT : b->views[0], fogOk ? hc : b->views[0], depthOk ? depth : nil, fogOk ? hs : nil,
 				frame, frameLen);
 			if (taaOn) {

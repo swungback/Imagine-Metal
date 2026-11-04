@@ -180,6 +180,12 @@ static inline float imbNoise(float2 q) {
 	return mix(mix(imbHash(i), imbHash(i + int2(1, 0)), u.x), mix(imbHash(i + int2(0, 1)), imbHash(i + int2(1, 1)), u.x), u.y);
 }
 
+static inline float imbDither8(float2 dp) {
+	float d1 = fract(52.9829189 * fract(dot(dp, float2(0.06711056, 0.00583715))));
+	float d2 = fract(52.9829189 * fract(dot(dp + 17.0, float2(0.06711056, 0.00583715))));
+	return (d1 + d2 - 1.0) / 255.0;
+}
+
 static inline float imbSmooth(float x) {
 	return x * x * (3.0 - 2.0 * x);
 }
@@ -635,11 +641,9 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 	// Reimagined's vignette (final.glsl VIGNETTE_R, on by default): the corners a little darker, less where it's bright
 	float2 vc = in.uv - 0.5;
 	o *= 1.0 - 0.4 * dot(vc, vc) * (1.0 - dot(o, float3(0.2126, 0.7152, 0.0722)));
-	// (a triangular dither of one 8-bit step: smooth gradients on walls and in the sky without bands)
-	float2 dp = in.pos.xy;
-	float d1 = fract(52.9829189 * fract(dot(dp, float2(0.06711056, 0.00583715))));
-	float d2 = fract(52.9829189 * fract(dot(dp + 17.0, float2(0.06711056, 0.00583715))));
-	o += (d1 + d2 - 1.0) / 255.0;
+	// (a triangular dither of one 8-bit step: smooth gradients on walls and in the sky without bands; with TAA it's done on its
+	// output, the screen)
+	if (p.taa.w < 0.5) o += imbDither8(in.pos.xy);
 	return float4(o, h.a);
 }
 
@@ -705,7 +709,7 @@ fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur 
 			shown = max(res + (res - m1) * 0.15, 0.0);
 		}
 	}
-	o.screen = float4(shown, 1.0);
+	o.screen = float4(shown + imbDither8(in.pos.xy), 1.0);
 	o.history = float4(res, 1.0);
 	return o;
 }

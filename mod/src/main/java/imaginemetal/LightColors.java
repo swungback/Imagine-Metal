@@ -16,7 +16,7 @@ public final class LightColors {
 		{"copper_torch", new float[] {0.55f, 1.00f, 0.50f}},
 		{"copper_lantern", new float[] {0.55f, 1.00f, 0.50f}},
 		{"copper_bulb", new float[] {1.00f, 0.70f, 0.40f}},
-		{"sea_lantern", new float[] {0.60f, 0.90f, 1.00f}},
+		{"sea_lantern", new float[] {0.55f, 0.75f, 1.00f}},
 		{"sea_pickle", new float[] {0.55f, 0.95f, 0.70f}},
 		{"conduit", new float[] {0.55f, 0.85f, 1.00f}},
 		{"beacon", new float[] {0.10f, 0.42f, 1.00f}},
@@ -48,7 +48,8 @@ public final class LightColors {
 	/** A flame: torches, lanterns, campfires, fire, candles, furnaces, and the default for unknown lights. */
 	// (after the shader's saturation push, imBlockLight, this comes out as Reimagined's torch light, measured on matching
 	// screenshots: redder, and with some blue kept, where the old colour's blue was pushed to nothing and floors turned mustard)
-	private static final float[] FLAME = {1.00f, 0.52f, 0.38f};
+	// (Reimagined's fire light, linear: a deep orange, so a torch room glows orange, not pinkish white)
+	private static final float[] FLAME = {1.00f, 0.42f, 0.18f};
 	private static final float[] SOUL = {0.20f, 0.75f, 1.00f}, RED = {1.00f, 0.08f, 0.04f}, COPPER = {0.55f, 1.00f, 0.50f};
 	private static final ConcurrentHashMap<BlockState, float[]> CACHE = new ConcurrentHashMap<>();
 

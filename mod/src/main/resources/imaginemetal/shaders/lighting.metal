@@ -146,7 +146,7 @@ static inline float imLuma(float3 c) {
 // (10) colours the wall it's on. The dark between lights comes from the grade (Bloom's resolve), not from cutting the reach.
 static inline float imBlockCurve(float b) {
 	float b2 = b * b, b4 = b2 * b2, b8 = b4 * b4;
-	return 2.2 * pow(b, 3.5) + 0.8 * b8;
+	return 2.2 * pow(b, 3.5) + 1.6 * b8;  // (brighter near the light, as Reimagined's)
 }
 
 // Sky light level 0..1 -> how much of the sky's light reaches the surface.
@@ -310,7 +310,7 @@ static float4 imBlockLight(float3 p, float3 n, constant ImFrame &f, texture3d<fl
 	if (m < 1e-4) return float4(warm, 0.0);
 	float3 hue = c.rgb / m;
 	float hl = imLuma(hue);
-	hue = max(hl + (hue - hl) * 1.3, 0.0);  // (1.6 washed a sea lantern's whole tunnel cyan)
+	hue = max(hl + (hue - hl) * 1.35, 0.0);
 	// (as bright as the torch colour, times how bright the sources here are: 1 for most, about half near lava)
 	hue *= max(max(warm.r, warm.g), warm.b) / max(max(max(hue.r, hue.g), hue.b), 1e-4) * min(m, 1.0);
 	float w = inside * smoothstep(0.0, 0.04, c.a);
@@ -778,7 +778,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		if (hl > 0.0) {
 			float3 hh = f.held.rgb;
 			float hlum = imLuma(hh);
-			hh = max(hlum + (hh - hlum) * 1.3, 0.0);
+			hh = max(hlum + (hh - hlum) * 1.35, 0.0);
 			float3 hc = hh * (max(max(f.blockColor.r, f.blockColor.g), f.blockColor.b) / max(max(max(hh.r, hh.g), hh.b), 1e-3));
 			float facing = 0.6 + 0.4 * saturate(dot(N, -normalize(p)));
 			torch = max(torch, hc * imBlockCurve(hl) * facing * (1.0 - 0.45 * f.blockColor.w * smoothstep(0.5, 1.0, sky)));
