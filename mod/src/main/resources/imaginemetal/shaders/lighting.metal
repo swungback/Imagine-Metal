@@ -663,6 +663,8 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// the texture's tangent frame from the screen derivatives (Schüler 2013), taken before any branch
 	float3 dp1 = dfdx(p), dp2 = dfdy(p);
 	float2 duv1 = dfdx(uv), duv2 = dfdy(uv);
+	// (and how the block light level changes across the face: where the torch light comes from, below)
+	float dl1 = dfdx(light.x), dl2 = dfdy(light.x);
 	float2 asz = float2(atlas.get_width(), atlas.get_height());
 	float2 tpp = (abs(duv1) + abs(duv2)) * asz;  // texels a pixel covers
 	uint cls = mat & 15u;
@@ -792,6 +794,23 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// north/south a little brighter than east/west, so every block reads as a solid shape even in flat light
 	float face = slanted ? 0.9 : (n.y >= 0.0 ? 1.0 : 1.0 + 0.4 * n.y) * (1.0 + 0.05 * abs(n.z) - 0.1 * abs(n.x));
 
+	// torch light with a direction: the block light level's slope across the face points toward the light (it rises toward it),
+	// so the light comes from the face's front, leaning that way. Bumps (the generated normals) take it by how they face it, and
+	// glossy surfaces catch its highlight (below): stone's specks, sand's grains, a polished floor glint near a lantern. Flat faces
+	// keep exactly their light.
+	float3 Lt = n;
+	float tconf = 0.0;
+	{
+		float3 dq2 = cross(dp2, n), dq1 = cross(n, dp1);
+		float det = dot(dp1, dq2);
+		float3 G = (dq2 * dl1 + dq1 * dl2) / (abs(det) > 1e-10 ? det : 1e-10);
+		G -= n * dot(G, n);
+		float gl = length(G);
+		tconf = smoothstep(0.012, 0.05, gl);
+		if (gl > 1e-5) Lt = normalize(n * 0.75 + (G / gl) * (0.7 * tconf));
+		float nt = dot(n, Lt);
+		torch *= clamp(saturate(dot(N, Lt)) / max(nt, 0.3), 0.55, 1.35);
+	}
 	float3 day = direct + ambient;
 	float3 lit = sqrt(day * day + torch * torch + f.minLight.rgb * f.minLight.rgb);
 	// Complementary Reimagined adds its lights up in gamma space (on the texture as it is, linearized only afterwards,
@@ -820,6 +839,14 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		float3 tint = mix(float3(1.0), base / max(max(max(base.r, base.g), base.b), 0.02), surf.metal);
 		hlt *= mix(0.3, 1.0, max(surf.metal, smoothstep(0.04, 0.2, surf.f0)));  // (a dielectric's: a glint, not a white wash)
 		radiance += f.lightColor.rgb * (hlt * sun) * tint * f.minLight.w;
+		// (the torch's: weaker than the sun's, by how bright the torch light is here)
+		float tl = imLuma(torch);
+		if (tl > 0.002) {
+			float nlt = saturate(dot(N, Lt));
+			float hl2 = imHighlight(N, V, Lt, nlt, surf.g) * surf.hl * mix(0.3, 1.0, max(surf.metal, smoothstep(0.04, 0.2, surf.f0)));
+			if (cls == IM_MAT_FOLIAGE) hl2 *= 0.3;
+			radiance += torch * (hl2 * 0.35) * tint * f.minLight.w;
+		}
 	}
 
 	// water's and glass's sun glint (Reimagined's: water a soft one by its texture's brightness, stronger at an angle; glass sharper)
