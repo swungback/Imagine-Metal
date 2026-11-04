@@ -63,6 +63,8 @@ public final class Config {
 		imaginemetal.shafts=true
 		# Ambient occlusion: corners and the ground under ledges a little darker, and how much (0 to 1).
 		imaginemetal.ssao=true
+		# Reimagined's bloom fog: distant things soften into a glow in rain, at night, in caves and under water.
+		imaginemetal.bloomFog=true
 		# In the rain the world turns wet and glossy, with puddles on top of blocks (needs PBR).
 		imaginemetal.wet=true
 		imaginemetal.ssaoStrength=0.7

@@ -121,6 +121,13 @@ public final class Bloom {
 				}
 				float[] sh = shafts();
 				ImNative.bloomShafts(state, sh[0], sh[1], sh[2], sh[3], sh[4], sh[5], Settings.shadowRange);
+				// Reimagined's bloom fog strengths (rain 8, night 3, cave 14, water 14; x its bloom strength 0.12 x 8.33), as a share
+				// here: how strongly distant things dissolve into glow
+				float fogK = 0f;
+				if (ImagineFrame.underwater) fogK = 1.4f;
+				else if (ImagineFrame.shaftOn || ImagineFrame.cave > 0f)
+					fogK = (ImagineFrame.shaftRain * ImagineFrame.shaftRain * 0.8f + ImagineFrame.night * 0.3f) * (1f - ImagineFrame.cave) + ImagineFrame.cave * 1.4f;
+				ImNative.bloomFog(state, Settings.bloomFog ? fogK : 0f, ImagineFrame.underwater ? 1f : 0f);
 				long clips = stack.nmalloc(4, 128);
 				Reflections.CLIP.get(MemoryUtil.memFloatBuffer(clips, 16));
 				Reflections.CLIP_INV.get(MemoryUtil.memFloatBuffer(clips + 64, 16));

@@ -256,7 +256,7 @@ static float imEmission(uint cls, float3 tex) {
 	float sat = hi - lo;
 	switch (cls) {
 		case IM_MAT_EMITTER: case IM_MAT_GLOW_GEM: return 2.6 * l * l + 0.25;
-		case IM_MAT_LAVA: return 1.9 + 1.4 * l;
+		case IM_MAT_LAVA: return 1.6 + 3.2 * l * l;  // (Reimagined's: brighter where the texture is, its hot spots near white)
 		case IM_MAT_FLAME: return 4.0 * smoothstep(0.62, 0.92, hi) * smoothstep(0.15, 0.4, sat);
 		// ores: every pixel with clear colour against the grey stone around it (the whole speck, its coloured edge too; iron's pale
 		// specks count; a speck's near-grey highlights and coal's black specks don't), at a faint glow that keeps the texture's own
@@ -647,12 +647,25 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// direct light: wrapped N.L; until there are shadow maps, the sky light stands in for them (no sun under a roof)
 	float nl = dot(N, f.lightDir.xyz);
 	float wrap = slanted ? 0.35 + 0.5 * abs(nl) : max(nl + 0.4, 0.0) * (1.0 / 1.4);
+	// leaves and plants let light through (Reimagined's subsurface modes): plants lit as if facing up, leaves a third of the way
+	// there whichever way they face (green parts only: dirt and the grass block's sides share the class)
+	bool leafy = cls == IM_MAT_FOLIAGE && tex.g > tex.r * 1.05 && tex.g > tex.b;
+	if (leafy) wrap = slanted ? max(wrap, saturate(f.lightDir.y) * 0.9 + 0.1) : mix(wrap, 1.0, 0.35);
 	// sunlight: the shadow map where it reaches; the sky light stands in beyond it. Underground (no sky light at all) the sun is
 	// off regardless, so a cave never catches sunlight through an imprecision of the map.
 	float2 sm = imShadow(p, n, pixel, f, smap, cmp);
 	float open = smoothstep(0.45, 0.9, sky);
 	float sun = mix(open, sm.x, sm.y) * (f.water.z > 0.5 && f.flags.x == 0 ? 0.3 + 0.7 * smoothstep(0.0, 0.6, sky) : smoothstep(0.0, 0.07, sky));
 	float3 direct = f.lightColor.rgb * (wrap * sun);
+	// (and glow when the light is behind them: Reimagined's subsurface highlight, looking toward the sun through grass and leaves,
+	// their backlit edges lit up gold; added on top of the surface, as its highlight is)
+	float3 sssGlow = float3(0.0);
+	if (leafy && f.flags.x == 0) {
+		float vl = saturate(dot(-V, f.lightDir.xyz));
+		float lf = pow(vl, 10.0) * (slanted ? 0.8 : 0.6) * sun;
+		float3 hc = normalize(pow(max(f.lightColor.rgb, 1e-4), 0.37)) * (0.3 + 1.5 * f.nightMiddle.w * f.nightMiddle.w) * (1.0 - 0.85 * f.dayUp.w);
+		sssGlow = hc * lf * (0.6 + 0.4 * base / max(max(max(base.r, base.g), base.b), 0.02));
+	}
 
 	// sky light: blue from above, warmer and dimmer from below
 	float3 ambient = mix(f.ambientDown.rgb, f.ambientUp.rgb, N.y * 0.5 + 0.5) * skyF;
@@ -697,7 +710,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		float3 litG = pow(sqrt(dayG * dayG + tG * tG + mG * mG), 2.2);
 		lit = mix(lit, litG, f.nightMiddle.w);
 	}
-	float3 radiance = base * lit * face * f.minLight.w;
+	float3 radiance = base * lit * face * f.minLight.w + sssGlow * f.minLight.w;
 
 	// the sun's highlight (on top of the light, before the tone curve: a bright one blooms); a metal's in its own colour
 	if (pbr && surf.g > 0.0) {

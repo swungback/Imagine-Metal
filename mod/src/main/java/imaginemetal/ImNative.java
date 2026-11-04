@@ -23,6 +23,7 @@ final class ImNative {
 		JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT, JAVA_LONG, JAVA_INT), false);
 	private static final MethodHandle BLOOM_SHAFTS = fn("im_bloom_shafts", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT,
 		JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT), false);
+	private static final MethodHandle BLOOM_FOG = fn("im_bloom_fog", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_FLOAT, JAVA_FLOAT), false);
 	private static final MethodHandle BLOOM_AO = fn("im_bloom_ao", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_FLOAT, JAVA_LONG), false);
 	private static final MethodHandle LIGHT_NEW = fn("im_light_new", FunctionDescriptor.of(JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_INT,
 		JAVA_LONG, JAVA_INT), false);
@@ -92,6 +93,14 @@ final class ImNative {
 	static void bloomShafts(long state, float sx, float sy, float strength, float r, float g, float b, float reach) {
 		try {
 			BLOOM_SHAFTS.invokeExact(state, sx, sy, strength, r, g, b, reach);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
+	static void bloomFog(long state, float strength, float water) {
+		try {
+			BLOOM_FOG.invokeExact(state, strength, water);
 		} catch (Throwable t) {
 			throw new IllegalStateException(t);
 		}

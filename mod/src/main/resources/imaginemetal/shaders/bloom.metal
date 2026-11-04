@@ -20,7 +20,7 @@ using namespace metal;
 struct ImBloomParams {
 	float4 texel;  // xy 1 / the source's size; z threshold (linear luma), w soft knee
 	float4 mix;    // x strength (negative: debug, the glow alone), y number of levels (the chain's sum is divided by it), z haze, w 0
-	float4 grade;  // x how much the dark parts are deepened (the resolve's toe: 0 none)
+	float4 grade;  // x how much the dark parts are deepened (the resolve's toe: 0 none), y bloom fog strength (0 none), z 1 = under water
 	float4 shaft;  // light shafts: z strength (0 none)
 	float4 shaftColor; // rgb the sun's (or moon's) light, linear; w ambient occlusion strength (0 none)
 	float4x4 clip;     // this frame's camera-relative world -> clip (y up: uv.y = ndc.y * 0.5 + 0.5), depth 0..1
@@ -297,9 +297,26 @@ fragment float4 im_bloom_ao(ImBloomOut in [[stage_in]], depth2d<float> depth [[t
 
 fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> src [[texture(0)]], sampler s [[sampler(0)]],
 	texture2d<float> hdr [[texture(1)]], texture2d<float> shafts [[texture(2)]], texture2d<float> aoT [[texture(3)]],
+	texture2d<float> pic [[texture(4)]], depth2d<float> depth [[texture(5)]], sampler ms [[sampler(1)]],
 	constant ImBloomParams &p [[buffer(0)]]) {
 	float4 h = hdr.read(uint2(in.pos.xy));
 	float3 c = imbLinear(h.rgb);
+	if (p.grade.y > 0.0) {
+		// Reimagined's bloom fog (lib/atmospherics/fog/bloomFog.glsl): in rain, at night, in caves and under water, the farther
+		// something is the more it dissolves into a soft glow of what's around it, the soft, hazy depth of its rainy and underwater
+		// shots. Its strength comes from Bloom (rain, night, cave, water); the glow is the picture's own blurred copy.
+		float d = depth.read(uint2(clamp(in.uv, 0.0, 0.9999) * float2(depth.get_width(), depth.get_height())));
+		if (d < 0.99999) {
+			float4 w = p.clipInv * float4(in.uv * 2.0 - 1.0, d, 1.0);
+			float dist = length(w.xyz / w.w);
+			float bf = 1.0 - exp(-dist * (p.grade.z > 0.5 ? 0.06 : 0.02));
+			bf *= bf;
+			bf *= bf;
+			float k = bf * p.grade.y;
+			float3 blur = imbLinear(pic.sample(ms, in.uv, level(4.0)).rgb) * 0.5 + imbLinear(pic.sample(ms, in.uv, level(5.5)).rgb) * 0.5;
+			c = mix(c, blur, k / (1.0 + k));
+		}
+	}
 	if (p.shaftColor.w > 0.0) {
 		// (four taps a half-size texel apart: the pattern's grain smoothed)
 		float2 at = 1.0 / float2(aoT.get_width(), aoT.get_height());
@@ -330,8 +347,17 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 	// everything brighter stay as they are. Strong in caves and at night (lights stand out of the dark), off in daylight.
 	float lum = dot(c, float3(0.2126, 0.7152, 0.0722));
 	if (p.grade.x > 0.0 && lum < 0.18) c *= pow(max(lum, 1e-6) / 0.18, p.grade.x);
+	// (Reimagined's tone curve's "path to white": the very brightest light, lava's hot spots, a flame's core, the sun's glare,
+	// turns toward white, so lava reads yellow-hot instead of a flat orange)
+	float lum2 = dot(c, float3(0.2126, 0.7152, 0.0722));
 	float m = max(max(c.r, c.g), c.b);
+	c = mix(c, float3(m), smoothstep(0.8, 3.0, lum2) * 0.55);
+	m = max(max(c.r, c.g), c.b);
 	const float t = 0.85;
 	if (m > t) c *= (t + (1.0 - t) * (m - t) / ((m - t) + (1.0 - t))) / m;
-	return float4(pow(saturate(c), 1.0 / 2.2), h.a);
+	float3 o = pow(saturate(c), 1.0 / 2.2);
+	// Reimagined's vignette (final.glsl VIGNETTE_R, on by default): the corners a little darker, less where it's bright
+	float2 vc = in.uv - 0.5;
+	o *= 1.0 - dot(vc, vc) * (1.0 - dot(o, float3(0.2126, 0.7152, 0.0722)));
+	return float4(o, h.a);
 }

@@ -40,6 +40,12 @@ const void *mc_im_frame_bytes(int *length) {
 	if (length) *length = (int) sizeof imFrame;
 	return imFrame;
 }
+id<MTLTexture> mc_im_ssr_color(void) {
+	return imSsrColor;
+}
+id<MTLSamplerState> mc_im_ssr_sampler(void) {
+	return imSsrSampler;
+}
 id<MTLTexture> mc_im_ssr_depth(void) {
 	return imSsrDepth;
 }

@@ -20,6 +20,8 @@ typedef struct {
 } ImBloomParams;
 
 id<MTLTexture> mc_im_ssr_depth(void);  // mcown.m: this frame's depth copy (Reflections), nil before the first
+id<MTLTexture> mc_im_ssr_color(void);    // mcown.m: this frame's picture with its blurred mips (Reimagined's bloom fog reads it)
+id<MTLSamplerState> mc_im_ssr_sampler(void);
 id<MTLTexture> mc_im_shadow_map(void);  // mcown.m: the sun's shadow maps (two cascades), nil before the first
 id<MTLSamplerState> mc_im_shadow_cmp(void);
 const void *mc_im_frame_bytes(int *length);  // mcown.m: this frame's ImFrame (lighting.metal)
@@ -30,6 +32,7 @@ typedef struct {
 	id<MTLRenderPipelineState> prefilter, down, up, composite, resolve, shafts;
 	id<MTLTexture> shaftTex;  // the light shafts at a quarter of the size
 	float shaft[8];           // im_bloom_shafts: sun uv, strength, colour
+	float fog[2];             // im_bloom_fog: Reimagined's bloom fog strength, 1 = eyes under water
 	id<MTLRenderPipelineState> ao;
 	id<MTLTexture> aoTex;     // the ambient occlusion at half size
 	float aoStrength, aoClip[32];
@@ -147,6 +150,13 @@ void im_bloom_shafts(ImBloom *b, float sx, float sy, float strength, float r, fl
 	b->shaft[5] = bl;
 }
 
+// This frame's bloom fog (imaginemetal.Bloom): how much distant things dissolve into a soft glow (rain, night, caves, water).
+void im_bloom_fog(ImBloom *b, float strength, float water) {
+	if (!b) return;
+	b->fog[0] = strength;
+	b->fog[1] = water;
+}
+
 // This frame's ambient occlusion (imaginemetal.Bloom): strength (0 off) and the terrain's transform and its inverse (32 floats).
 void im_bloom_ao(ImBloom *b, float strength, const float *clips) {
 	if (!b) return;
@@ -156,7 +166,7 @@ void im_bloom_ao(ImBloom *b, float strength, const float *clips) {
 
 static void imbPass3(id<MTLCommandBuffer> cmd, id<MTLTexture> target, MTLLoadAction load, id<MTLRenderPipelineState> ps,
 	id<MTLTexture> src, id<MTLSamplerState> s, const ImBloomParams *p, NSString *label, id<MTLTexture> second, id<MTLTexture> third,
-	id<MTLTexture> fourth) {
+	id<MTLTexture> fourth, id<MTLTexture> fifth, id<MTLTexture> sixth, id<MTLSamplerState> s2) {
 	MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
 	rp.colorAttachments[0].texture = target;
 	rp.colorAttachments[0].loadAction = load;
@@ -170,6 +180,9 @@ static void imbPass3(id<MTLCommandBuffer> cmd, id<MTLTexture> target, MTLLoadAct
 	if (second) [r setFragmentTexture:second atIndex:1];
 	if (third) [r setFragmentTexture:third atIndex:2];
 	if (fourth) [r setFragmentTexture:fourth atIndex:3];
+	if (fifth) [r setFragmentTexture:fifth atIndex:4];
+	if (sixth) [r setFragmentTexture:sixth atIndex:5];
+	[r setFragmentSamplerState:(s2 ? s2 : s) atIndex:1];
 	[r setFragmentSamplerState:s atIndex:0];
 	[r setFragmentBytes:p length:sizeof *p atIndex:0];
 	[r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
@@ -178,7 +191,7 @@ static void imbPass3(id<MTLCommandBuffer> cmd, id<MTLTexture> target, MTLLoadAct
 
 static void imbPass(id<MTLCommandBuffer> cmd, id<MTLTexture> target, MTLLoadAction load, id<MTLRenderPipelineState> ps,
 	id<MTLTexture> src, id<MTLSamplerState> s, const ImBloomParams *p, NSString *label, id<MTLTexture> second) {
-	imbPass3(cmd, target, load, ps, src, s, p, label, second, nil, nil);
+	imbPass3(cmd, target, load, ps, src, s, p, label, second, nil, nil, nil, nil, nil);
 }
 
 static int imbCheck(id<MTLTexture> t, const char *what, char *err, int errCap) {
@@ -299,8 +312,17 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 		p.texel[0] = 1.0f / (float) b->views[0].width;
 		p.texel[1] = 1.0f / (float) b->views[0].height;
 		if (inPlace) imbPass(cmd, dst, MTLLoadActionLoad, b->composite, b->views[0], b->linear, &p, @"Imagine Metal bloom composite", nil);
-		else imbPass3(cmd, dst, MTLLoadActionDontCare, b->resolve, b->views[0], b->linear, &p, @"Imagine Metal HDR resolve", src,
-			shafts ? shafts : b->views[0], aoT ? aoT : b->views[0]);
+		else {
+			// (the bloom fog: the picture's blurred copy and the depth, when Reflections copied them this frame at this size)
+			id<MTLTexture> hc = mc_im_ssr_color();
+			id<MTLSamplerState> hs = mc_im_ssr_sampler();
+			BOOL fogOk = b->fog[0] > 0.0f && hc && hs && depth && hc.width == src.width && hc.height == src.height && hc.mipmapLevelCount > 4
+				&& depth.width == src.width && depth.height == src.height;
+			p.grade[1] = fogOk ? b->fog[0] : 0.0f;
+			p.grade[2] = b->fog[1];
+			imbPass3(cmd, dst, MTLLoadActionDontCare, b->resolve, b->views[0], b->linear, &p, @"Imagine Metal HDR resolve", src,
+				shafts ? shafts : b->views[0], aoT ? aoT : b->views[0], fogOk ? hc : b->views[0], fogOk ? depth : nil, fogOk ? hs : nil);
+		}
 	}
 	return 0;
 }
