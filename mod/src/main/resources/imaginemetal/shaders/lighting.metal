@@ -23,7 +23,7 @@ struct ImFrame {
 	float4 blockColor;   // rgb torch light at level 15 (linear), w how much daylight there is 0..1 (torches give way to it)
 	float4 minLight;     // rgb the least light anything gets (caves), w exposure
 	float4 tonemap;      // Lottes 2016: y = x^a / (x^(a d) b + c); x a, y d, z b, w c
-	float4 grade;        // x saturation, y vibrance, zw 0
+	float4 grade;        // x saturation, y vibrance, z colour style (1: Reimagined's, lighting the texture as it is), w 0
 	int4 flags;          // x dimension (0 overworld, 1 Nether, 2 End), y debug view, z 1 = the engine filled this frame, w frame index
 	float4 env;          // x how far underground the player is (0..1, eased), y how much it's night (0..1)
 	float4x4 shadowNear; // camera-relative world -> the near cascade's light clip (orthographic)
@@ -569,12 +569,19 @@ static float3 imWaterNormal(float3 p, float3 n, constant ImFrame &f) {
 }
 
 // Smooth value noise (one a unit), for shapes in the world.
+static inline float imHash2(int2 q) {
+	uint h = uint(q.x) * 1597334677u ^ uint(q.y) * 3812015801u;
+	h = (h ^ (h >> 16)) * 2246822519u;
+	h ^= h >> 13;
+	return float(h & 0xffffffu) / 16777216.0;
+}
+
+// (an integer hash: sin-based ones lose their precision a few thousand blocks out and come out in straight stripes)
 static inline float imValueNoise(float2 q) {
-	float2 i = floor(q), u = fract(q);
+	float2 fi = floor(q), u = q - fi;
+	int2 i = int2(fi);
 	u = u * u * (3.0 - 2.0 * u);
-	float a = fract(sin(dot(i, float2(127.1, 311.7))) * 43758.5453), b = fract(sin(dot(i + float2(1, 0), float2(127.1, 311.7))) * 43758.5453);
-	float c = fract(sin(dot(i + float2(0, 1), float2(127.1, 311.7))) * 43758.5453), d = fract(sin(dot(i + float2(1, 1), float2(127.1, 311.7))) * 43758.5453);
-	return mix(mix(a, b, u.x), mix(c, d, u.y), u.y);
+	return mix(mix(imHash2(i), imHash2(i + int2(1, 0)), u.x), mix(imHash2(i + int2(0, 1)), imHash2(i + int2(1, 1)), u.x), u.y);
 }
 
 static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint mat, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp,
@@ -600,7 +607,9 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			N = normalize(T * (tn.x * im) + B * (tn.y * im) + n * tn.z);
 		}
 	}
-	float3 base = pow(max(albedo, 0.0), 2.2);
+	// (Reimagined lights the texture's colours as they are and encodes only at the end; that lifts the mid tones and keeps the
+	// shadows open: its bright, lively look. Linearizing them first, as physically based packs do, gives a darker, moodier picture.)
+	float3 base = f.grade.z > 0.5 ? max(albedo, 0.0) : pow(max(albedo, 0.0), 2.2);
 	bool pbr = f.shadow.w > 0.5 && f.flags.y == 0;
 	ImSurf surf = pbr ? imSurface(cls, albedo, tex) : ImSurf{0.0, 0.0, 0.0, 0.04, 0.0};
 	float3 V = -normalize(p);
@@ -628,6 +637,9 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	}
 	float block = light.x, sky = light.y;
 	float skyF = imSkyCurve(sky);
+	// under water (the eyes in it): the sky light drops a level a block down, which left the sea floor nearly black; Reimagined's
+	// stays a lit blue-green, so the sky's light keeps at least about half
+	if (f.water.z > 0.5 && f.flags.x == 0) skyF = max(skyF, 0.45 * smoothstep(0.0, 0.2, sky));
 
 	// direct light: wrapped N.L; until there are shadow maps, the sky light stands in for them (no sun under a roof)
 	float nl = dot(N, f.lightDir.xyz);
@@ -721,7 +733,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		// texture, so a field of sculk twinkles instead of glowing flat
 		float3 bp = floor(p + f.world.xyz - n * 0.01);
 		float2 tx = floor(uv * asz);
-		float h = fract(sin(dot(bp, float3(12.9898, 78.233, 37.719)) + dot(tx, float2(4.898, 7.23))) * 43758.5453);
+		float h = imHash2(int2(bp.xz) * 31 + int2(bp.y) * 17 + int2(tx) * int2(7, 13));
 		float h2 = fract(h * 7.31 + 0.17);
 		float w = 0.5 + 0.5 * sin(f.world.w * (0.5 + 0.9 * h2) + h * 6.2832);
 		emit *= 0.15 + 0.85 * smoothstep(0.15, 1.0, w);

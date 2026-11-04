@@ -33,7 +33,7 @@ public final class ImagineFrame {
 	/** the light shafts (Bloom): the light's direction and colour, this frame's sky ours (overworld, eyes in air), rain */
 	static final float[] shaftDir = new float[3], shaftColor = new float[3];
 	static boolean shaftOn, underwater;
-	static float shaftRain, shaftNoon;
+	static float shaftRain, shaftNoon, shaftSunVis, shaftCover;
 	private static float wet;
 	private static boolean failed;
 
@@ -146,8 +146,13 @@ public final class ImagineFrame {
 				for (int i = 0; i < 3; i++) light[i] = MOON[i] * phase * Settings.nightBrightness;
 			}
 			normalize(lightDir);
-			float direct = switchFade * (1f - 0.85f * rain);
-			for (int i = 0; i < 3; i++) light[i] *= direct;
+			// rain: Reimagined's rain light (lib/colors/lightAndAmbientColors.glsl dayRainLightColor, its shadows faded 40 %, x 2.5):
+			// a dim warm grey by day, a faint blue by night, not the clear light turned down
+			float[] rainLight = {0.268f, 0.204f + 0.03f * day, 0.166f + 0.09f * day};
+			for (int i = 0; i < 3; i++) {
+				float rl = mix(new float[] {0.026f, 0.031f, 0.044f}[i], rainLight[i], day);
+				light[i] = mix(light[i], rl, rain) * switchFade;
+			}
 
 			// the sky's light: the biome's sky colour, blue in the shadows; warmer at sunset; grey under rain
 			float[] skyc = {0.47f, 0.65f, 1.0f};
@@ -159,11 +164,16 @@ public final class ImagineFrame {
 			}
 			float[] sunsetTint = {1.21f, 0.92f, 0.76f};
 			for (int i = 0; i < 3; i++) {
-				float dayAmb = (float) Math.pow(Math.max(skyc[i], 0f), 1.65) * 0.52f * mix(1f, sunsetTint[i], golden);
+				float dayAmb = Settings.colorStyle == 1
+					// (Reimagined's own, for its colours: lighting the texture as it is, not linearized; noonClearAmbientColor)
+					? (float) Math.pow(Math.max(skyc[i], 0f), 0.75) * 0.85f * mix(1f, sunsetTint[i], golden) * 0.95f
+					: (float) Math.pow(Math.max(skyc[i], 0f), 1.65) * 0.52f * mix(1f, sunsetTint[i], golden);
 				up[i] = mix(NIGHT_SKY[i] * Settings.nightBrightness, dayAmb, day);
 			}
-			float grey = luma(up) * 0.85f;
-			for (int i = 0; i < 3; i++) up[i] = mix(up[i], grey, 0.7f * rain);
+			// (rain: Reimagined's rain ambient, a light blue-grey, brighter than the clear sky's shadows: an overcast day is evenly lit;
+			// converted like the clear one for the linear colours)
+			float[] rainAmb = Settings.colorStyle == 1 ? new float[] {0.574f, 0.574f, 0.718f} : new float[] {0.22f, 0.22f, 0.36f};
+			for (int i = 0; i < 3; i++) up[i] = mix(up[i], mix(NIGHT_SKY[i] * 1.2f * Settings.nightBrightness, rainAmb[i], day), rain);
 
 			// the sky itself: Complementary Reimagined's sky colours (lib/colors/skyColors.glsl), from Minecraft's sky colour for this
 			// biome and time (so every biome's sky keeps its own hue): a deep colour overhead, a bright band at the horizon, a
@@ -282,6 +292,7 @@ public final class ImagineFrame {
 		}
 		shaftRain = rain;
 		shaftNoon = dim == 0 ? noonF : 0f;
+		shaftSunVis = sunVis;
 		BUF.clear();
 		put(lightDir[0], lightDir[1], lightDir[2], sunFlag);
 		put(light[0], light[1], light[2], rain);
@@ -290,7 +301,7 @@ public final class ImagineFrame {
 		put(TORCH[0], TORCH[1], TORCH[2], dim == 0 ? day * (1f - 0.5f * rain) : 0f);
 		put(floor[0], floor[1], floor[2], 0.9f); // w: exposure
 		put(TM_A, TM_D, TM_B, TM_C);
-		put(1.08f, 0.12f, 0f, 0f); // saturation, vibrance (the blue sky light greys the greens a little)
+		put(1.08f, 0.12f, Settings.colorStyle, 0f); // saturation, vibrance (the blue sky light greys the greens a little), colour style
 		BUF.putInt(dim).putInt(Settings.debug).putInt(1).putInt(frame++);
 		// how far underground the player is (by the sky light at their eyes, eased so walking into a cave fades) and how much it's
 		// night: the picture's grade (Bloom's resolve) darkens the dark parts more in both
@@ -304,6 +315,9 @@ public final class ImagineFrame {
 		}
 		eyeSky += (eyeNow - eyeSky) * (1f - (float) Math.exp(-dt / 1.2f));
 		cave = dim == 0 ? 1f - smoothstep(0.25f, 0.75f, eyeSky) : 0f;
+		// something overhead (leaves, a cave roof, an arch: the sky light where the player stands below full): Reimagined's
+		// scene-aware light shafts, eased in and out over a couple of seconds
+		shaftCover += ((eyeNow < 0.97f ? 1f : 0f) - shaftCover) * (1f - (float) Math.exp(-dt / 2f));
 		night = dim == 0 ? 1f - day : 0f;
 		put(cave, night, 0f, 0f);
 		for (int c = 0; c < 2; c++) for (int i = 0; i < 16; i++) BUF.putFloat(Shadows.MATRIX[c][i]);

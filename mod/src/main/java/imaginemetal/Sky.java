@@ -68,7 +68,13 @@ public final class Sky {
 
 	public static void noteBob(org.joml.Matrix4fc pose) {
 		if (pose == null || !pose.isFinite()) BOB.identity();
-		else BOB.set(pose);
+		else {
+			// its turn only: the bob's sideways and up/down shift is a few centimetres, nothing at the sky's distance, but the sky's
+			// directions come from a point just past the near plane, a tenth of a block out, where that shift tilts them by tens
+			// of degrees (the sky jumping with every step)
+			BOB.set(pose);
+			BOB.m30(0f).m31(0f).m32(0f);
+		}
 	}
 
 	/**

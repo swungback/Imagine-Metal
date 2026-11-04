@@ -34,21 +34,45 @@ public final class Bloom {
 	}
 
 	/**
-	 * The light shafts: strength (0 off: no shadow maps or depth copy this frame, eyes in water, outside the overworld) and the
-	 * light's colour. Like Reimagined's: strongest at sunrise and sunset and in caves (beams through openings), weaker at noon and
-	 * in the rain.
+	 * The light shafts (Reimagined's volumetric light): x 1 = eyes under water, y how much there's something overhead (a forest, a
+	 * cave: Reimagined's "scene-aware" shafts, stronger there at any time of day), z strength (0 off: no shadow maps or depth copy
+	 * this frame, outside the overworld), rgb the light's colour as Reimagined colours it (desaturated at noon, richer at sunrise and
+	 * sunset, dim and moon-blue at night).
 	 */
 	private static float[] shafts() {
 		float[] r = new float[6];
 		boolean water = ImagineFrame.underwater;
 		if (!Settings.shafts || !Reflections.valid || !(ImagineFrame.shaftOn || water) || !Shadows.valid()) return r;
-		float k = water ? 0.8f * (1f - 0.6f * ImagineFrame.shaftRain)
-			: (0.35f + 0.65f * Math.max(1f - ImagineFrame.shaftNoon, ImagineFrame.cave)) * (1f - 0.7f * ImagineFrame.shaftRain);
 		r[0] = water ? 1f : 0f;
-		r[2] = k * Settings.shaftStrength;
-		r[3] = ImagineFrame.shaftColor[0] * (water ? 0.35f : 1f);
-		r[4] = ImagineFrame.shaftColor[1] * (water ? 0.75f : 1f);
-		r[5] = ImagineFrame.shaftColor[2];
+		r[1] = ImagineFrame.shaftCover;
+		r[2] = Settings.shaftStrength * 0.6f;
+		float rain = ImagineFrame.shaftRain, noon = ImagineFrame.shaftNoon, invNoon = 1f - noon, sunVis = ImagineFrame.shaftSunVis;
+		// (Reimagined's light shaft colours, COMPOSITE1 in lib/colors/lightAndAmbientColors.glsl: a sky blue at noon, deep orange at
+		// sunrise and sunset, a dark blue at night; in rain its rain light)
+		float[] l = new float[3];
+		float sv2 = sunVis * sunVis;
+		float[] noonC = {0.4f, 0.75f, 1.3f}, ssBase = {0.62f, 0.39f, 0.24f}, nightC = {0.08f, 0.12f, 0.23f};
+		float[] rainDay = {0.21f * 0.85f * 0.6f, 0.16f * 0.85f * 0.6f, 0.13f * 0.85f * 0.6f}, rainNight = {0.0225f, 0.02625f, 0.0375f};
+		for (int i = 0; i < 3; i++) {
+			float sunset = (float) Math.pow(ssBase[i], 1.5f + invNoon) * 6.8f;
+			float dayC = sunset + (noonC[i] - sunset) * noon * noon;
+			float clear = nightC[i] + (dayC - nightC[i]) * sv2;
+			float rainC = (rainNight[i] + (rainDay[i] - rainNight[i]) * sv2) * 2.5f;
+			l[i] = clear + (rainC - clear) * rain;
+		}
+		float e = 0.5f + (0.5f + 0.25f * sunVis) * invNoon * (1f - rain) + 0.3f * rain;
+		float k = 1f - (0.3f + 0.3f * noon) * rain - 0.5f * (1f - sunVis) * rain + sunVis * invNoon * invNoon * (1f - rain);
+		for (int i = 0; i < 3; i++) r[3 + i] = (float) Math.pow(Math.max(l[i], 1e-4f), e) * k;
+		if (sunVis < 0.5f) {
+			float m = Math.max(r[3], Math.max(r[4], r[5]));
+			for (int i = 0; i < 3; i++) r[3 + i] = r[3 + i] / Math.max(m, 1e-4f) * 0.12f;
+		}
+		if (water) {
+			r[3] *= 0.8f * 0.55f * 0.8f * 0.55f;
+			r[4] *= 0.87f * 0.55f * 0.87f * 0.55f;
+			r[5] *= 0.97f * 0.55f * 0.97f * 0.55f;
+			r[2] *= 3f;
+		}
 		return r;
 	}
 
@@ -96,7 +120,7 @@ public final class Bloom {
 					System.out.println("[Imagine Metal] bloom on");
 				}
 				float[] sh = shafts();
-				ImNative.bloomShafts(state, sh[0], sh[1], sh[2], sh[3], sh[4], sh[5]);
+				ImNative.bloomShafts(state, sh[0], sh[1], sh[2], sh[3], sh[4], sh[5], Settings.shadowRange);
 				long clips = stack.nmalloc(4, 128);
 				Reflections.CLIP.get(MemoryUtil.memFloatBuffer(clips, 16));
 				Reflections.CLIP_INV.get(MemoryUtil.memFloatBuffer(clips + 64, 16));

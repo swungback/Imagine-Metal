@@ -136,8 +136,9 @@ static void imbChain(ImBloom *b, int width, int height) {
 }
 
 // This frame's light shafts (imaginemetal.Bloom): the sun's place on screen (uv; may be off it), strength (0 off), its light's colour.
-void im_bloom_shafts(ImBloom *b, float sx, float sy, float strength, float r, float g, float bl) {
+void im_bloom_shafts(ImBloom *b, float sx, float sy, float strength, float r, float g, float bl, float reach) {
 	if (!b) return;
+	b->shaft[6] = reach;
 	b->shaft[0] = sx;
 	b->shaft[1] = sy;
 	b->shaft[2] = strength;
@@ -214,7 +215,7 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 	id<MTLCommandBuffer> cmd = mc_frame_cmd(enc);
 	@autoreleasepool {
 		ImBloomParams p = {{1.0f / (float) src.width, 1.0f / (float) src.height, threshold, knee}, {strength, (float) b->levels, haze, 0}, {toe, 0, 0, 0},
-			{b->shaft[0], b->shaft[1], 0, (float) src.height / (float) src.width}, {b->shaft[3], b->shaft[4], b->shaft[5], 0}};
+			{b->shaft[0], b->shaft[1], 0, b->shaft[6]}, {b->shaft[3], b->shaft[4], b->shaft[5], 0}};
 		memcpy(p.clip, b->aoClip, sizeof p.clip);
 		memcpy(p.clipInv, b->aoClip + 16, sizeof p.clipInv);
 		// the light shafts (HDR path, volumetric): along each pixel's view ray, how much of the air the sun reaches (the shadow
@@ -227,7 +228,7 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 		id<MTLTexture> shafts = nil;
 		if (!inPlace && b->shaft[2] > 0.0f && depth && smap && scmp && frame && depth.width == src.width && depth.height == src.height) {
 			if (!b->shafts) b->shafts = imbPipeline(b, @"im_bloom_shafts", MTLPixelFormatR16Float, NO, err, errCap);
-			NSUInteger sw = src.width / 4 > 1 ? src.width / 4 : 1, sh = src.height / 4 > 1 ? src.height / 4 : 1;
+			NSUInteger sw = src.width / 2 > 1 ? src.width / 2 : 1, sh = src.height / 2 > 1 ? src.height / 2 : 1;
 			if (b->shafts && (!b->shaftTex || b->shaftTex.width != sw || b->shaftTex.height != sh)) {
 				[b->shaftTex release];
 				MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR16Float width:sw height:sh
