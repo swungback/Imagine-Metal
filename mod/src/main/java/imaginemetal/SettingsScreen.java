@@ -59,6 +59,8 @@ public final class SettingsScreen extends OptionsSubScreen {
 				this.list.addBig(open(Page.ADVANCED));
 			}
 			case LIGHT -> {
+				this.list.addBig(toggle("Intense deep dark", Settings.intenseDeepDark, v -> Settings.intenseDeepDark = v,
+					"Euphoria Patches' deep dark: pitch black where nothing glows, so sculk and torches are all you see."));
 				this.list.addHeader(Component.literal("Shadows"));
 				this.list.addSmall(toggle("Shadows", Settings.shadows, v -> Settings.shadows = v, "Sun and moon shadows."),
 					slider("Shadow distance", 64, 256, 16, Settings.shadowRange, v -> Settings.shadowRange = v, v -> Math.round(v) + " blocks",

@@ -20,6 +20,9 @@ public final class Haze {
 	/** how much the camera is in a dry biome (desert, badlands, savanna: no rain falls), eased */
 	static float dry;
 	private static float targetDry;
+	/** how much the camera is in the deep dark (eased): Euphoria Patches' intense deep dark */
+	static float deepDark;
+	private static float targetDeepDark;
 	private static final float[] target = new float[3];
 	private static float targetHumid, targetCold;
 	private static int counter;
@@ -67,6 +70,7 @@ public final class Haze {
 			targetHumid = b == JUNGLE || b == SWAMP ? 8f * 0.0001f : 0f;
 			targetCold = b == SNOWY ? 1f : 0f;
 			targetDry = b == ARID ? 1f : 0f;
+			targetDeepDark = name.contains("deep_dark") ? 1f : 0f;
 		}
 		float k = started ? 1f - (float) Math.exp(-dt / 2.5f) : 1f;
 		started = true;
@@ -74,6 +78,7 @@ public final class Haze {
 		humidMie += (targetHumid - humidMie) * k;
 		cold += (targetCold - cold) * k;
 		dry += (targetDry - dry) * k;
+		deepDark += (targetDeepDark - deepDark) * k;
 	}
 
 	/** Photon's Mie density for this time of day (sunY, sunX: the sun's direction) and rain. */

@@ -300,6 +300,9 @@ public final class ImagineFrame {
 		float[] floor = new float[3];
 		float[] floorTint = {0.45f, 0.475f, 0.6f};
 		for (int i = 0; i < 3; i++) floor[i] = CAVE[i] + 0.03f * brightness * floorTint[i] + nightVision * (i == 2 ? 0.3f : 0.25f);
+		// (the deep dark: Euphoria Patches' intense deep dark, no light at all where nothing glows, so the sculk's specks and a
+		// torch are all there is)
+		if (Settings.intenseDeepDark && Haze.deepDark > 0f) for (int i = 0; i < 3; i++) floor[i] *= 1f - 0.9f * Haze.deepDark;
 
 		for (int i = 0; i < 3; i++) {
 			shaftDir[i] = lightDir[i];
