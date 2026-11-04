@@ -83,6 +83,10 @@ public final class SettingsScreen extends OptionsSubScreen {
 				this.list.addSmall(toggle("Clouds", Settings.clouds, v -> Settings.clouds = v,
 					"Our clouds: Minecraft's cloud shapes as soft, rounded blocks, lit by the sun, coloured by the sky. Off: Minecraft's. (Minecraft's Clouds video setting must be on.)"),
 					open(Page.AURORA));
+				this.list.addSmall(toggle("Light shafts", Settings.shafts, v -> Settings.shafts = v,
+					"Beams of sunlight around leaves, mountains and cave mouths when you look toward the sun."),
+					slider("Shaft strength", 0, 3, 0.05f, Settings.shaftStrength, v -> Settings.shaftStrength = v, SettingsScreen::pct,
+						"How bright the light shafts are."));
 			}
 			case AURORA -> {
 				this.list.addSmall(toggle("Aurora", Settings.aurora, v -> Settings.aurora = v, "Northern lights at night."),

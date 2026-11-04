@@ -59,6 +59,9 @@ public final class Config {
 		imaginemetal.waterStyle=1
 		# Stained glass, ice and other see-through blocks reflect.
 		imaginemetal.glassReflections=true
+		# Light shafts: beams of sunlight around leaves, mountains and cave mouths, and their strength.
+		imaginemetal.shafts=true
+		imaginemetal.shaftStrength=1
 		imaginemetal.nightBrightness=1
 		imaginemetal.generatedNormals=0
 		#

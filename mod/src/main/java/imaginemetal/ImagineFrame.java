@@ -30,6 +30,10 @@ public final class ImagineFrame {
 	private static float eyeSky = 1f;
 	private static long lastNs;
 	static float cave, night;
+	/** the light shafts (Bloom): the light's direction and colour, this frame's sky ours (overworld, eyes in air), rain */
+	static final float[] shaftDir = new float[3], shaftColor = new float[3];
+	static boolean shaftOn;
+	static float shaftRain;
 	private static boolean failed;
 
 	// Tone curve (Lottes 2016): mid-grey 0.25 stays 0.25, white at 8 (highlights roll off), contrast 1.05.
@@ -271,6 +275,11 @@ public final class ImagineFrame {
 		float[] floorTint = {0.45f, 0.475f, 0.6f};
 		for (int i = 0; i < 3; i++) floor[i] = CAVE[i] + 0.03f * brightness * floorTint[i] + nightVision * (i == 2 ? 0.3f : 0.25f);
 
+		for (int i = 0; i < 3; i++) {
+			shaftDir[i] = lightDir[i];
+			shaftColor[i] = light[i];
+		}
+		shaftRain = rain;
 		BUF.clear();
 		put(lightDir[0], lightDir[1], lightDir[2], sunFlag);
 		put(light[0], light[1], light[2], rain);
@@ -305,6 +314,7 @@ public final class ImagineFrame {
 		put(LightVolume.SX, LightVolume.SY, LightVolume.SZ, Settings.normals);
 		// the sky and the haze (ours only in the overworld with the eyes in air: in water, lava or snow Minecraft's fog stays)
 		boolean ourFog = dim == 0 && Settings.sky && camera.fogType == net.minecraft.world.level.material.FogType.NONE;
+		shaftOn = ourFog;
 		Haze.update(level, cam, dt);
 		put(dayUp[0], dayUp[1], dayUp[2], rain);
 		put(dayMid[0], dayMid[1], dayMid[2], sunFactor);

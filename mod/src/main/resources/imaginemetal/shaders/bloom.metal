@@ -21,6 +21,8 @@ struct ImBloomParams {
 	float4 texel;  // xy 1 / the source's size; z threshold (linear luma), w soft knee
 	float4 mix;    // x strength (negative: debug, the glow alone), y number of levels (the chain's sum is divided by it), z haze, w 0
 	float4 grade;  // x how much the dark parts are deepened (the resolve's toe: 0 none)
+	float4 shaft;  // light shafts: xy the sun on screen (uv), z strength (0 none), w height / width
+	float4 shaftColor; // rgb the sun's (or moon's) light, linear
 };
 
 struct ImBloomOut {
@@ -108,10 +110,40 @@ fragment float4 im_bloom_composite(ImBloomOut in [[stage_in]], float4 dst [[colo
 	return float4(pow(saturate(c), 1.0 / 2.2), dst.a);
 }
 
+// Light shafts (at a quarter of the size): from each pixel toward the sun, how much of the way the sky shows (the depth at the far
+// plane), the near part counting most. Where leaves, a mountain or a cave mouth hide the sun this drops, so the light falls in
+// beams around them. A fixed per-pixel jitter on the start, smoothed by the upscale.
+fragment float4 im_bloom_shafts(ImBloomOut in [[stage_in]], depth2d<float> depth [[texture(1)]], constant ImBloomParams &p [[buffer(0)]]) {
+	float2 size = float2(depth.get_width(), depth.get_height());
+	float2 d = p.shaft.xy - in.uv;
+	float len = length(d * float2(1.0, p.shaft.w));
+	d *= min(1.0, 0.75 / max(len, 1e-4));  // (no farther than three quarters of the screen)
+	const int n = 20;
+	float2 st = d / float(n);
+	float j = fract(52.9829189 * fract(dot(in.pos.xy, float2(0.06711056, 0.00583715))));
+	float2 q = in.uv + st * j;
+	float sum = 0.0, w = 1.0, ws = 0.0;
+	for (int i = 0; i < n; i++) {
+		float2 c = clamp(q, 0.0, 0.9999);
+		float sky = depth.read(uint2(c * size)) >= 0.99999 ? 1.0 : 0.0;
+		sum += sky * w;
+		ws += w;
+		w *= 0.93;
+		q += st;
+	}
+	return float4(sum / ws, 0.0, 0.0, 1.0);
+}
+
 fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> src [[texture(0)]], sampler s [[sampler(0)]],
-	texture2d<float> hdr [[texture(1)]], constant ImBloomParams &p [[buffer(0)]]) {
+	texture2d<float> hdr [[texture(1)]], texture2d<float> shafts [[texture(2)]], constant ImBloomParams &p [[buffer(0)]]) {
 	float4 h = hdr.read(uint2(in.pos.xy));
 	float3 c = imbLinear(h.rgb);
+	if (p.shaft.z > 0.0) {
+		// the beams: brightest near the sun, fading over the screen (the air lit along the way, seen against the light)
+		float sh = shafts.sample(s, in.uv).r;
+		float r = length((in.uv - p.shaft.xy) * float2(1.0, p.shaft.w));
+		c += p.shaftColor.rgb * (sh * p.shaft.z * (0.06 + 0.5 * exp(-4.0 * r)));
+	}
 	if (p.mix.x != 0.0) {
 		float3 glow = imbTent(src, s, in.uv, p.texel.xy) / p.mix.y;
 		if (p.mix.x < 0.0) return float4(pow(saturate(glow * -p.mix.x * 4.0), 1.0 / 2.2), 1.0);

@@ -30,6 +30,9 @@ void mc_im_ssr_bind(id<MTLTexture> color, id<MTLTexture> depth, id<MTLSamplerSta
 	imSsrDepth = depth;
 	imSsrSampler = sampler;
 }
+id<MTLTexture> mc_im_ssr_depth(void) {
+	return imSsrDepth;
+}
 void mc_im_frame(const void *bytes, int length) {
 	if (length > (int) sizeof imFrame) length = (int) sizeof imFrame;
 	if (length > 0) memcpy(imFrame, bytes, (size_t) length);
