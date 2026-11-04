@@ -101,7 +101,7 @@ public final class SettingsScreen extends OptionsSubScreen {
 				this.list.addBig(toggle("Waving plants", Settings.waving, v -> {
 					Settings.waving = v;
 					Materials.clearCache();
-					Minecraft.getInstance().levelRenderer.allChanged();
+					rebuildChunks();
 				}, "Grass, flowers, crops and leaves sway in the wind."));
 				this.list.addSmall(toggle("PBR", Settings.pbr, v -> Settings.pbr = v,
 					"Sun highlights on every block by its texture, and reflections traced on screen: metal, gems and polished stone clearly, rough blocks at low angles."),
@@ -187,6 +187,17 @@ public final class SettingsScreen extends OptionsSubScreen {
 		@Override
 		protected void applyValue() {
 			this.set.accept(this.current());
+		}
+	}
+
+	/** Rebuilds every chunk (as F3+A does): for settings that change what's in the chunk meshes. */
+	static void rebuildChunks() {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.level == null) return;
+		try {
+			mc.levelRenderer.invalidateCompiledGeometry(mc.level, mc.options, mc.gameRenderer.mainCamera(), mc.getBlockColors());
+		} catch (Throwable t) {
+			System.out.println("imaginemetal: couldn't rebuild the chunks (" + t + "); press F3+A");
 		}
 	}
 }
