@@ -82,6 +82,19 @@ fragment float4 im_sky_fs(ImSkyOut in [[stage_in]], constant ImFrame &f [[buffer
 	float4 q = rot * float4(in.ndc.x, -in.ndc.y, 0.5, 1.0);
 	float3 d = normalize(q.xyz / q.w);
 	// (through the same exposure, tone curve and grade as the terrain, as Reimagined's sky goes through its tonemap with the rest)
+	if (f.flags.x == 2) {
+		// the End (Reimagined's): a deep violet sky full of tiny stars, thickest toward the horizon, both above and below
+		float3 endSky = float3(0.095, 0.07, 0.15) * 1.65;
+		float2 sc = (0.65 * d / (abs(d.y) + length(d.xz))).xz * 0.5;
+		if (d.y < 0.0) sc += 100.0;
+		float2 cell = floor(sc * 1024.0) / 1024.0;
+		float st = imStarNoise(cell) * imStarNoise(cell + 0.1) * imStarNoise(cell + 0.23);
+		st = max(st - 0.7, 0.0);
+		st *= st;
+		float au = abs(d.y), vu2 = (1.0 - au) * (1.0 - au);
+		float3 stars = st * endSky * 3000.0 * (min(vu2 + 0.015, 0.05) + 0.015) * smoothstep(0.0, 0.25, au);
+		return float4(pow(imPresent(endSky + stars, f), 1.0 / 2.2), 1.0);
+	}
 	float3 sky = imSkyColor(d, f, true);
 	uint st = uint(f.auroraLight.w + 0.5);
 	if (st != 0u && d.y > 0.0 && f.flags.x == 0) {

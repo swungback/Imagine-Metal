@@ -31,6 +31,11 @@ abstract class SkyRendererMixin {
 		if (Sky.active) ci.cancel();
 	}
 
+	@Inject(method = "renderEndSky", at = @At("HEAD"), cancellable = true)
+	private void imaginemetal$noEndSky(CallbackInfo ci) {
+		if (Sky.active) ci.cancel();  // (ours: Reimagined's End sky and ender stars)
+	}
+
 	@Inject(method = "renderStars", at = @At("HEAD"), cancellable = true)
 	private void imaginemetal$noStars(CallbackInfo ci) {
 		if (Sky.active && imaginemetal.Settings.stars == 1) ci.cancel();  // (ours, twinkling, in the sky pass)

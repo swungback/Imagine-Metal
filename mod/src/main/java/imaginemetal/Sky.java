@@ -26,7 +26,7 @@ public final class Sky {
 
 	public static void draw(SkyRenderState sky) {
 		active = false;
-		if (!Settings.sky || failed || !Engine.TERRAIN || sky.skybox != DimensionType.Skybox.OVERWORLD) return;
+		if (!Settings.sky || failed || !Engine.TERRAIN || sky.skybox != DimensionType.Skybox.OVERWORLD && sky.skybox != DimensionType.Skybox.END) return;
 		try {
 			Object encoder = MetalBridge.encoder(((FrontendCommandEncoder) RenderSystem.getDevice().createCommandEncoder()).backend());
 			if (encoder == null) return;
