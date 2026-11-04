@@ -2390,7 +2390,8 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 		// the distance (clear close by, a deep blue wall at about 60 blocks)
 		float dist = length(in.imPos) / 48.0;
 		imFog = 1.0 - exp(-dist * dist);
-		float3 wfc = pow(max(fog.FogColor.rgb, 1e-3), float3(0.33, 0.21, 0.26)) * 0.2;
+		// (bluer and a little brighter than the plain colour: Reimagined's water reads blue, ours came out teal-grey)
+		float3 wfc = pow(max(fog.FogColor.rgb, 1e-3), float3(0.33, 0.21, 0.26)) * 0.24 * float3(0.8, 1.0, 1.3);
 		imFogColor = pow(imPresent(wfc, imf), 1.0 / 2.2);
 	}
 	imFog = 1.0 - (1.0 - imFog) * (1.0 - imFade);

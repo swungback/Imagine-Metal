@@ -120,6 +120,9 @@ static float3 imSkyColor(float3 d, constant ImFrame &f, bool ground) {
 		glareColor = mix(glareColor, float3(dot(glareColor, float3(0.2126, 0.7152, 0.0722))), 0.5 * rain);
 		c += glareColor * glare * shadowTime;
 	}
+	// (by day a fifth less saturated: measured against Reimagined's frames, our day sky came out a deeper, purer blue)
+	float cl = dot(c, float3(0.2126, 0.7152, 0.0722));
+	c = mix(c, float3(cl), 0.2 * sunVis);
 	return max(c, 0.0);
 }
 
