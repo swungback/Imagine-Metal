@@ -14,7 +14,7 @@ import org.joml.Vector4f;
 import org.lwjgl.system.MemoryUtil;
 
 /**
- * The lighting's per-frame values (lighting.metal ImFrame, 752 bytes): where the sun or moon is, the colours of its light, of
+ * The lighting's per-frame values (lighting.metal ImFrame, 816 bytes): where the sun or moon is, the colours of its light, of
  * the sky's light and of torches for this time of day and weather, the cave floor, the tone curve. Made once per frame at
  * LevelRenderer.render's start (LevelRendererMixin) and handed to the backend, which binds it on every terrain draw.
  *
@@ -22,7 +22,7 @@ import org.lwjgl.system.MemoryUtil;
  * a deep orange golden hour, blue-violet nights), tuned for our pipeline.
  */
 public final class ImagineFrame {
-	static final int SIZE = 752;
+	static final int SIZE = 816;
 	private static final ByteBuffer BUF = MemoryUtil.memAlloc(SIZE).order(ByteOrder.LITTLE_ENDIAN);
 	private static final long ADDRESS = MemoryUtil.memAddress(BUF);
 	private static int frame;
@@ -320,7 +320,7 @@ public final class ImagineFrame {
 		// the reflections' history (Reflections): its transform and inverse, and how far the camera has moved since (w 1 = valid)
 		for (int c = 0; c < 4; c++) for (int r = 0; r < 4; r++) BUF.putFloat(Reflections.CLIP.get(c, r));
 		for (int c = 0; c < 4; c++) for (int r = 0; r < 4; r++) BUF.putFloat(Reflections.CLIP_INV.get(c, r));
-		boolean ssr = Reflections.valid && Settings.pbr;
+		boolean ssr = Reflections.valid;
 		put((float) (cam.x - Reflections.camX), (float) (cam.y - Reflections.camY), (float) (cam.z - Reflections.camZ), ssr ? 1f : 0f);
 		// our clouds: the camera's place on the cloud map, their height, on; the aurora: visibility, drift, the camera on its plane
 		boolean cloudsOn = Clouds.wanted() && dim == 0 && ourFog;
@@ -340,6 +340,12 @@ public final class ImagineFrame {
 		float[] held = HeldLight.get();
 		put(held[0], held[1], held[2], held[3]);
 		put(auroraLight[0], auroraLight[1], auroraLight[2], 0f);
+		// water and glass: the water and portal sprites, the water style, glass reflections, eyes in water
+		WaterSprites.update();
+		put(WaterSprites.STILL[0], WaterSprites.STILL[1], WaterSprites.STILL[2], WaterSprites.STILL[3]);
+		put(WaterSprites.FLOW[0], WaterSprites.FLOW[1], WaterSprites.FLOW[2], WaterSprites.FLOW[3]);
+		put(WaterSprites.PORTAL[0], WaterSprites.PORTAL[1], WaterSprites.PORTAL[2], WaterSprites.PORTAL[3]);
+		put(Settings.waterStyle, Settings.glassReflections ? 1f : 0f, camera.fogType == net.minecraft.world.level.material.FogType.WATER ? 1f : 0f, 0f);
 		if (BUF.position() != SIZE) throw new IllegalStateException("ImFrame is " + BUF.position() + " bytes, not " + SIZE);
 	}
 

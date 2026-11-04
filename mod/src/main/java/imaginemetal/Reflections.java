@@ -40,7 +40,7 @@ public final class Reflections {
 
 	/** After the level's passes, before the bloom: the picture and depth become the next frame's history. */
 	public static void capture() {
-		if (!nowSet || !Settings.pbr || failed || !Engine.TERRAIN) {
+		if (!nowSet || !(Settings.pbr || Settings.waterStyle > 0 || Settings.glassReflections) || failed || !Engine.TERRAIN) {
 			valid = false;
 			nowSet = false;
 			return;

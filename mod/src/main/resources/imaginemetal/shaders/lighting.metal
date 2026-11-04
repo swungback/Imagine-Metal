@@ -13,7 +13,7 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// Per-frame values, written by imaginemetal.ImagineFrame (same layout, 416 bytes) and bound at fragment buffer 30 (and at buffer 0
+// Per-frame values, written by imaginemetal.ImagineFrame (same layout, 816 bytes) and bound at fragment buffer 30 (and at buffer 0
 // of the sky pass, sky.metal).
 struct ImFrame {
 	float4 lightDir;     // xyz unit direction toward the light that casts this frame's light (sun by day, moon by night), w 1 = sun
@@ -53,6 +53,11 @@ struct ImFrame {
 	float4 auroraHigh;   // its colour at their height, w its brightness
 	float4 held;         // the light in the player's hands: rgb its colour (brightest channel 1), w its level 0..1
 	float4 auroraLight;  // rgb the aurora's light on the world (linear, from above), w 0
+	// water and glass (the translucent pass, which has no material bytes: water told by its sprites)
+	float4 waterStill;   // the still water sprite's rectangle in the block atlas (u0, v0, u1, v1)
+	float4 waterFlow;    // the flowing water's
+	float4 portalRect;   // the nether portal's (not glass: it doesn't reflect)
+	float4 water;        // x water style (0 vanilla, 1 Reimagined, 2 Reimagined with waves), y 1 = glass reflections, z 1 = eyes in water
 };
 
 static inline float imSqrt2(float x) { x = 1.0 - x; x *= x; x *= x; return 1.0 - x; }
@@ -539,6 +544,23 @@ static float3 imAirFog(float3 p, float skyLight, constant ImFrame &f, thread flo
 	return max(sc, 0.0);
 }
 
+// Waves on water's top faces (the "Reimagined with waves" style): a few travelling waves summed by their slopes, in world space
+// so they stay put as the camera moves; flattening with distance (they'd only shimmer there).
+static float3 imWaterNormal(float3 p, float3 n, constant ImFrame &f) {
+	float2 q = p.xz + f.world.xz;
+	float t = f.world.w;
+	float2 g = float2(0.0);
+	const float4 w[5] = {float4(0.8, 0.6, 0.55, 1.1), float4(-0.45, 0.89, 0.9, 1.5), float4(0.31, -0.95, 1.6, 2.1),
+		float4(-0.9, -0.43, 2.7, 2.8), float4(0.6, -0.8, 4.3, 3.6)};
+	for (int i = 0; i < 5; i++) {
+		float2 k = w[i].xy * w[i].z;
+		float a = 0.05 / w[i].z;  // (shorter waves lower)
+		g += k * (a * cos(dot(k, q) + t * w[i].w));
+	}
+	g *= 1.0 / (1.0 + length(p) * 0.04);
+	return normalize(float3(-g.x, 1.0, -g.y));
+}
+
 static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint mat, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp,
 	texture3d<float> lvol, sampler lsamp, float2 uv, float4 rect, texture2d<float> atlas, texture2d<float> hc, depth2d<float> hd, sampler hs) {
 	if (f.flags.z == 0) return albedo * (0.2 + 0.8 * max(light.x, light.y)); // the engine hasn't filled a frame yet
@@ -550,8 +572,9 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	float2 asz = float2(atlas.get_width(), atlas.get_height());
 	float2 tpp = (abs(duv1) + abs(duv2)) * asz;  // texels a pixel covers
 	uint cls = mat & 15u;
+	uint kind = mat >> 8;  // (the translucent pass: 1 water, 2 glass and other see-through blocks)
 	float3 N = n;
-	if (f.lightSize.w > 0.0 && cls != IM_MAT_LAVA && !slanted) {
+	if (f.lightSize.w > 0.0 && cls != IM_MAT_LAVA && !slanted && kind == 0u) {
 		float3 tn = imGenNormal(atlas, uv, rect, f.lightSize.w, tpp, tex);
 		if (tn.z < 0.9999) {
 			float3 dp2perp = cross(dp2, n), dp1perp = cross(n, dp1);
@@ -565,6 +588,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	bool pbr = f.shadow.w > 0.5 && f.flags.y == 0;
 	ImSurf surf = pbr ? imSurface(cls, albedo, tex) : ImSurf{0.0, 0.0, 0.0, 0.04, 0.0};
 	float3 V = -normalize(p);
+	if (kind == 1u && f.water.x > 1.5 && n.y > 0.5) N = imWaterNormal(p, n, f);
 	float block = light.x, sky = light.y;
 	float skyF = imSkyCurve(sky);
 
@@ -620,6 +644,22 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		float3 tint = mix(float3(1.0), base / max(max(max(base.r, base.g), base.b), 0.02), surf.metal);
 		hlt *= mix(0.3, 1.0, max(surf.metal, smoothstep(0.04, 0.2, surf.f0)));  // (a dielectric's: a glint, not a white wash)
 		radiance += f.lightColor.rgb * (hlt * sun) * tint * f.minLight.w;
+	}
+
+	// water's and glass's sun glint (Reimagined's: water a soft one by its texture's brightness, stronger at an angle; glass sharper)
+	if (kind != 0u && f.flags.y == 0) {
+		float nlh = saturate(dot(N, f.lightDir.xyz)) * step(0.0, dot(n, f.lightDir.xyz));
+		float fr = 1.0 - saturate(dot(N, V));
+		float hm;
+		if (kind == 1u) {
+			float tt = dot(tex, tex) * 0.4;
+			tt *= tt;
+			hm = min(tt * tt, 0.5) * (16.0 - 15.0 * fr * fr) * (f.nightMiddle.w > 0.5 ? 0.85 : 0.425);
+			if (f.water.x > 1.5) hm = max(hm, 0.6);
+		} else {
+			hm = 1.5;
+		}
+		radiance += f.lightColor.rgb * (imHighlight(N, V, f.lightDir.xyz, nlh, kind == 1u && f.water.x > 1.5 ? 0.9 : 0.5) * hm * sun) * f.minLight.w;
 	}
 
 	// the air between the eye and the surface (Photon's air fog)
@@ -680,6 +720,27 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			refl = mix(refl, max(c, refl), 0.7);
 			if (surf.metal < 0.5) fm *= 0.75;  // (a dark gem or obsidian stays dark: its reflection a sheen over it)
 			refl *= mix(float3(1.0), base / max(max(max(base.r, base.g), base.b), 0.02), surf.metal);
+			c = mix(c, refl, saturate(fm));
+		}
+	}
+	// water and glass (Reimagined's: a share by the angle, 15 % head-on; water less on its sides and from below; glass none right
+	// up close): what the last frame's picture shows along the reflected ray, the sky where nothing is in the way
+	if (kind != 0u && f.flags.y == 0 && (kind == 2u ? f.water.y > 0.5 : f.water.x > 0.5)) {
+		float fresnel = 1.0 - saturate(dot(N, V));
+		float rm = kind == 1u ? (0.5 + 0.5 * saturate(n.y)) * (f.water.z > 0.5 ? 0.5 : 1.0) : 1.0 - smoothstep(1.8, 0.3, length(p));
+		float fm = (fresnel * fresnel * fresnel * 0.85 + 0.15) * rm;
+		if (fm > 0.01) {
+			float3 R = reflect(-V, N);
+			if (dot(R, n) < 0.02) R = normalize(R - n * (dot(R, n) - 0.02));
+			float dither = fract(dot(pixel, float2(0.06711056, 0.00583715)) * 52.9829189);
+			float4 hit = f.histShift.w > 0.5 ? imReflect(p, n, R, kind == 1u ? 0.0 : 1.5, dither, f, hc, hd, hs) : float4(0.0);
+			float open = smoothstep(0.6, 1.0, sky);
+			float3 skyR = float3(0.0);
+			if (open * smoothstep(-0.1, 0.2, R.y) > 0.0)
+				skyR = (f.flags.x == 0 ? imPresent(imSkyColor(R, f, false), f) : imPresent(f.ambientUp.rgb * 2.0, f)) * (open * open)
+					* smoothstep(-0.1, 0.2, R.y);
+			// (blocked, or no sky to see: the surface's own colour darkened a little, Reimagined's fallback for covered water)
+			float3 refl = hit.a > 0.0 ? mix(skyR, hit.rgb, hit.a) : open > 0.0 && hit.a == 0.0 ? skyR : c * 0.6;
 			c = mix(c, refl, saturate(fm));
 		}
 	}

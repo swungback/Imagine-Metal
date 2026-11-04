@@ -2316,7 +2316,35 @@ fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]],
 		if (F_RICH && !F_FV) fogValue = max(fogValue, linear_fog_value(in.cylindricalVertexDistance, fog.FogRenderDistanceStart, fog.FogRenderDistanceEnd));
 	}
 #ifdef IM_SHADE
-	color.rgb = imShade(color.rgb, texel.rgb, in.imPos, in.imLight, in.imMat, in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler,
+	// (the translucent pass: water by its sprites, Reimagined's colour and see-through; the rest, stained glass, ice, slime..., glass)
+	uint imKind = 0u;
+	if (CUTOUT && CUTOUT_LIMIT < 0.2) {
+		float2 u = in.texCoord0;
+		bool still = all(u >= imf.waterStill.xy) && all(u <= imf.waterStill.zw);
+		bool flow = all(u >= imf.waterFlow.xy) && all(u <= imf.waterFlow.zw);
+		bool portal = all(u >= imf.portalRect.xy) && all(u <= imf.portalRect.zw);
+		imKind = still || flow ? (imf.water.x > 0.5 ? 1u : 0u) : portal || imf.water.y < 0.5 ? 0u : 2u;
+		bool sl;
+		float3 fnT = imFaceNormal(in.imPos, sl);
+		if (imKind == 1u) {
+			// Reimagined (water.glsl, its own style): the texture squared, tinted by the biome's water colour (its green kept up),
+			// a little warmer; nearly opaque where deep, clear up close, opaque at a grazing angle
+			float3 wc = getColor(in).rgb;
+			wc.g = max(wc.g, 0.39);
+			wc = sqrt(wc) * float3(1.0, 0.85, 0.8);
+			color.rgb = texel.rgb * texel.rgb * wc;
+			float a = 1.0 - (1.0 - color.a) * (1.0 - color.a);
+			color.a = a * (0.45 + 0.4 * smoothstep(2.0, 24.0, length(in.imPos)));
+			float fr = 1.0 - saturate(dot(fnT, -normalize(in.imPos)));
+			fr *= fr;
+			color.a = mix(color.a, 1.0, fr * fr);
+		} else if (imKind == 2u) {
+			// Reimagined's translucent tweaks: a little clearer up close
+			float d = length(in.imPos);
+			color.a = mix(color.a, color.a * color.a, smoothstep(4.0, 0.5, d) * 0.5);
+		}
+	}
+	color.rgb = imShade(color.rgb, texel.rgb, in.imPos, in.imLight, in.imMat | (imKind << 8), in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler,
 		in.texCoord0, in.imRect, atlas, imHistColor, imHistDepth, imHistSampler); // (Imagine Metal)
 	float3 imFogColor = fog.FogColor.rgb;
 	float imFog = fogValue * fog.FogColor.a;

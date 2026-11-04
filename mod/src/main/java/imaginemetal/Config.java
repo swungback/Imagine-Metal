@@ -55,6 +55,10 @@ public final class Config {
 		imaginemetal.heldLight=true
 		# Plants and leaves sway in the wind.
 		imaginemetal.waving=true
+		# Water: 0 vanilla, 1 Reimagined (its colour, see-through, reflections), 2 Reimagined with waves.
+		imaginemetal.waterStyle=1
+		# Stained glass, ice and other see-through blocks reflect.
+		imaginemetal.glassReflections=true
 		imaginemetal.nightBrightness=1
 		imaginemetal.generatedNormals=0
 		#

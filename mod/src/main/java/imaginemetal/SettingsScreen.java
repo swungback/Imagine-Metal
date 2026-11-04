@@ -103,6 +103,10 @@ public final class SettingsScreen extends OptionsSubScreen {
 					Materials.clearCache();
 					rebuildChunks();
 				}, "Grass, flowers, crops and leaves sway in the wind."));
+				this.list.addSmall(cycle("Water", new String[] {"Vanilla", "Reimagined", "Reimagined + waves"}, Settings.waterStyle,
+					v -> Settings.waterStyle = v, "Reimagined's water: its colour, clearer up close, reflections of the sky and the world. Waves add moving ripples."),
+					toggle("Glass reflections", Settings.glassReflections, v -> Settings.glassReflections = v,
+						"Stained glass, ice and other see-through blocks reflect the sky and the world."));
 				this.list.addSmall(toggle("PBR", Settings.pbr, v -> Settings.pbr = v,
 					"Sun highlights on every block by its texture, and reflections traced on screen: metal, gems and polished stone clearly, rough blocks at low angles."),
 					slider("Generated normals", 0, 4, 0.25f, Settings.normals, v -> Settings.normals = v, v -> v == 0 ? "Off" : pct(v),

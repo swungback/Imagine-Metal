@@ -27,7 +27,7 @@ public final class Materials {
 		"iron_door", "iron_trapdoor", "iron_chain", ":chain}", "anvil", ":bell}", "cauldron", "hopper", "heavy_core", "lightning_rod",
 		"exposed_copper", "weathered_copper", "oxidized_copper", "copper_bars", "weighted_pressure_plate"};
 	private static final String[] GEM_NAMES = {"obsidian", "amethyst_block", "budding_amethyst", "amethyst_cluster", "diamond_block",
-		"emerald_block", "lapis_block", "redstone_block", "packed_ice", "blue_ice"};
+		"emerald_block", "lapis_block", "redstone_block", "packed_ice", "blue_ice", "glass"};
 	private static final String[] POLISHED_NAMES = {"polished_", "glazed_terracotta", "quartz", "prismarine", "purpur", "smooth_basalt",
 		"concrete", "calcite", "dripstone_block"};
 	private static final String[] DIRT_NAMES = {":dirt}", "coarse_dirt", "rooted_dirt", "podzol", "mycelium", "farmland", "dirt_path", ":mud}",
