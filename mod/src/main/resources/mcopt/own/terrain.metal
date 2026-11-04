@@ -1685,6 +1685,9 @@ vertex VOut own_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant Dr
 #ifdef OWN_VCOUNT
 	, device atomic_uint *vcount [[buffer(28)]]
 #endif
+#ifdef IM_SHADE
+	, constant float4 &imJit [[buffer(30)]]
+#endif
 	) {
 	VOut o;
 	uint quadStart, meta, base;
@@ -1867,6 +1870,10 @@ vertex VOut own_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant Dr
 		ov.fogIn = a || b || c ? 1 : 0;
 		ov.fogF = max(linearFogV(ov.sphericalVertexDistance, es, ee), linearFogV(ov.cylindricalVertexDistance, rs, re));
 	}
+#ifdef IM_SHADE
+	// (Imagine Metal) TAA: this frame's sub-pixel offset (y flipped as the backend's rows are)
+	if (imJit.z > 0.5) ov.pos.xy += float2(imJit.x, -imJit.y) * ov.pos.w;
+#endif
 	return ov;
 }
 

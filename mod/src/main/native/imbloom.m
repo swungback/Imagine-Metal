@@ -18,6 +18,7 @@ typedef struct {
 	float clip[16];       // this frame's camera-relative world -> clip (the ambient occlusion)
 	float clipInv[16];
 	float prevClip[16];   // the last frame's transform, from this frame's camera-relative world (the shafts' history)
+	float taa[4];         // TAA: xy the jitter in uv, z 1 = the history is usable
 } ImBloomParams;
 
 id<MTLTexture> mc_im_ssr_depth(void);  // mcown.m: this frame's depth copy (Reflections), nil before the first
@@ -35,6 +36,11 @@ typedef struct {
 	id<MTLTexture> shaftHist[2];  // their history, ping-ponged: this frame's result blended over the last
 	int shaftIdx, shaftValid;
 	float shaft[8];           // im_bloom_shafts: sun uv, strength, colour
+	float taaJitter[3];       // im_bloom_taa: jitter (uv), 1 = on
+	id<MTLRenderPipelineState> taa;
+	MTLPixelFormat taaFormat;
+	id<MTLTexture> taaCur, taaHist[2];
+	int taaIdx, taaValid;
 	float fog[3];             // im_bloom_fog: Reimagined's bloom fog strength, 1 = eyes under water, the rainbow's strength
 	id<MTLRenderPipelineState> ao;
 	id<MTLTexture> aoTex;     // the ambient occlusion at half size
@@ -151,6 +157,44 @@ void im_bloom_shafts(ImBloom *b, float sx, float sy, float strength, float r, fl
 	b->shaft[3] = r;
 	b->shaft[4] = g;
 	b->shaft[5] = bl;
+}
+
+// This frame's TAA (imaginemetal.Bloom): the terrain's jitter as a uv offset, and whether it's on.
+void im_bloom_taa(ImBloom *b, float jx, float jy, float on) {
+	if (!b) return;
+	b->taaJitter[0] = jx;
+	b->taaJitter[1] = jy;
+	b->taaJitter[2] = on;
+}
+
+static id<MTLRenderPipelineState> imbTaaPipeline(ImBloom *b, MTLPixelFormat format, char *err, int cap) {
+	@autoreleasepool {
+		id<MTLFunction> vs = [[b->lib newFunctionWithName:@"im_bloom_vs"] autorelease];
+		id<MTLFunction> fs = [[b->lib newFunctionWithName:@"im_bloom_taa"] autorelease];
+		if (!vs || !fs) {
+			snprintf(err, (size_t) cap, "taa: missing");
+			return nil;
+		}
+		MTLRenderPipelineDescriptor *pd = [[MTLRenderPipelineDescriptor new] autorelease];
+		pd.label = @"Imagine Metal TAA";
+		pd.vertexFunction = vs;
+		pd.fragmentFunction = fs;
+		pd.colorAttachments[0].pixelFormat = format;
+		pd.colorAttachments[1].pixelFormat = format;
+		NSError *e = nil;
+		id<MTLRenderPipelineState> ps = [b->device newRenderPipelineStateWithDescriptor:pd error:&e];
+		if (!ps) imbErr(e, "taa", err, cap);
+		return ps;
+	}
+}
+
+static id<MTLTexture> imbTex(ImBloom *b, MTLPixelFormat format, NSUInteger w, NSUInteger h, NSString *label) {
+	MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format width:w height:h mipmapped:NO];
+	td.storageMode = MTLStorageModePrivate;
+	td.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+	id<MTLTexture> t = [b->device newTextureWithDescriptor:td];
+	t.label = label;
+	return t;
 }
 
 // This frame's bloom fog (imaginemetal.Bloom): how much distant things dissolve into a soft glow (rain, night, caves, water).
@@ -341,9 +385,61 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 			p.grade[2] = b->fog[1];
 			p.grade[3] = depthOk && frame ? b->fog[2] : 0.0f;
 			p.texel[2] = depthOk ? 1.0f : 0.0f;  // (the resolve doesn't use the threshold: here, whether the depth is bound)
-			imbPass3(cmd, dst, MTLLoadActionDontCare, b->resolve, b->views[0], b->linear, &p, @"Imagine Metal HDR resolve", src,
+			// TAA: the resolve into a frame of its own, then blended with the history into the screen
+			BOOL taaOn = b->taaJitter[2] > 0.5f && depthOk;
+			if (taaOn) {
+				if (!b->taa || b->taaFormat != dst.pixelFormat) {
+					[b->taa release];
+					b->taa = imbTaaPipeline(b, dst.pixelFormat, err, errCap);
+					b->taaFormat = dst.pixelFormat;
+					b->taaValid = 0;
+					if (!b->taa) {
+						b->taaJitter[2] = 0.0f;
+						err[0] = 0;
+						taaOn = NO;
+					}
+				}
+			}
+			if (taaOn && (!b->taaCur || b->taaCur.width != dst.width || b->taaCur.height != dst.height || b->taaCur.pixelFormat != dst.pixelFormat)) {
+				[b->taaCur release];
+				[b->taaHist[0] release];
+				[b->taaHist[1] release];
+				b->taaCur = imbTex(b, dst.pixelFormat, dst.width, dst.height, @"Imagine Metal TAA frame");
+				b->taaHist[0] = imbTex(b, dst.pixelFormat, dst.width, dst.height, @"Imagine Metal TAA history");
+				b->taaHist[1] = imbTex(b, dst.pixelFormat, dst.width, dst.height, @"Imagine Metal TAA history");
+				b->taaValid = 0;
+			}
+			if (!taaOn) b->taaValid = 0;
+			imbPass3(cmd, taaOn ? b->taaCur : dst, MTLLoadActionDontCare, b->resolve, b->views[0], b->linear, &p, @"Imagine Metal HDR resolve", src,
 				shafts ? shafts : b->views[0], aoT ? aoT : b->views[0], fogOk ? hc : b->views[0], depthOk ? depth : nil, fogOk ? hs : nil,
 				frame, frameLen);
+			if (taaOn) {
+				id<MTLTexture> prev = b->taaHist[b->taaIdx], next = b->taaHist[b->taaIdx ^ 1];
+				p.taa[0] = b->taaJitter[0];
+				p.taa[1] = b->taaJitter[1];
+				p.taa[2] = b->taaValid ? 1.0f : 0.0f;
+				MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+				rp.colorAttachments[0].texture = dst;
+				rp.colorAttachments[0].loadAction = MTLLoadActionDontCare;
+				rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+				rp.colorAttachments[1].texture = next;
+				rp.colorAttachments[1].loadAction = MTLLoadActionDontCare;
+				rp.colorAttachments[1].storeAction = MTLStoreActionStore;
+				id<MTLRenderCommandEncoder> r = [cmd renderCommandEncoderWithDescriptor:rp];
+				r.label = @"Imagine Metal TAA";
+				[r setViewport:(MTLViewport) {0, 0, (double) dst.width, (double) dst.height, 0, 1}];
+				[r setRenderPipelineState:b->taa];
+				[r setCullMode:MTLCullModeNone];
+				[r setFragmentTexture:b->taaCur atIndex:0];
+				[r setFragmentTexture:prev atIndex:1];
+				[r setFragmentTexture:depth atIndex:2];
+				[r setFragmentSamplerState:b->linear atIndex:0];
+				[r setFragmentBytes:&p length:sizeof p atIndex:0];
+				[r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+				[r endEncoding];
+				b->taaIdx ^= 1;
+				b->taaValid = 1;
+			}
 		}
 	}
 	return 0;

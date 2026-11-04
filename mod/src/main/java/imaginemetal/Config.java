@@ -67,6 +67,8 @@ public final class Config {
 		imaginemetal.bloomFog=true
 		# A rainbow opposite the sun as the rain clears.
 		imaginemetal.rainbows=true
+		# TAA: smooth edges and less grain (the terrain sampled at a new sub-pixel spot each frame, averaged over frames).
+		imaginemetal.taa=true
 		# In the rain the world turns wet and glossy, with puddles on top of blocks (needs PBR).
 		imaginemetal.wet=true
 		imaginemetal.ssaoStrength=0.7

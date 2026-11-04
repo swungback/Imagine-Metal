@@ -14,7 +14,7 @@ import org.joml.Vector4f;
 import org.lwjgl.system.MemoryUtil;
 
 /**
- * The lighting's per-frame values (lighting.metal ImFrame, 816 bytes): where the sun or moon is, the colours of its light, of
+ * The lighting's per-frame values (lighting.metal ImFrame, 832 bytes): where the sun or moon is, the colours of its light, of
  * the sky's light and of torches for this time of day and weather, the cave floor, the tone curve. Made once per frame at
  * LevelRenderer.render's start (LevelRendererMixin) and handed to the backend, which binds it on every terrain draw.
  *
@@ -22,7 +22,7 @@ import org.lwjgl.system.MemoryUtil;
  * a deep orange golden hour, blue-violet nights), tuned for our pipeline.
  */
 public final class ImagineFrame {
-	static final int SIZE = 816;
+	static final int SIZE = 832;
 	private static final ByteBuffer BUF = MemoryUtil.memAlloc(SIZE).order(ByteOrder.LITTLE_ENDIAN);
 	private static final long ADDRESS = MemoryUtil.memAddress(BUF);
 	private static int frame;
@@ -35,6 +35,18 @@ public final class ImagineFrame {
 	static boolean shaftOn, underwater;
 	static float shaftRain, shaftNoon, shaftSunVis, shaftCover;
 	private static float wet;
+	/** this frame's TAA jitter (Minecraft's clip units, y up; Bloom un-jitters the history lookup with it) */
+	static float jitterX, jitterY;
+
+	private static float halton(int i, int b) {
+		float f = 1f, r = 0f;
+		while (i > 0) {
+			f /= b;
+			r += f * (i % b);
+			i /= b;
+		}
+		return r;
+	}
 	/** the rainbow (Bloom; Reimagined's, after rain): how strong now, by the sun's height and how recently it rained here */
 	static float rainbow;
 	private static float afterRain;
@@ -384,6 +396,18 @@ public final class ImagineFrame {
 		rbTime = Math.clamp(rbTime - (float) Math.pow(noonF, 8) * 8f, 0f, 0.85f);
 		rainbow = rbTime * (float) Math.sqrt(Math.max(0f, afterRain - 0.333f) * 1.5f) * (1f - rain) * (1f - cave) * (camera.fogType == net.minecraft.world.level.material.FogType.NONE ? 1f : 0f);
 		put(Settings.waterStyle, Settings.glassReflections ? 1f : 0f, camera.fogType == net.minecraft.world.level.material.FogType.WATER ? 1f : 0f, wet);
+		// TAA: a Halton (2, 3) sub-pixel offset, a different one each frame of eight (within half a pixel each way)
+		boolean taaOn = Settings.taa && Hdr.active();
+		int tw = 1, th = 1;
+		var rt = Minecraft.getInstance().gameRenderer.mainRenderTarget();
+		if (rt != null) {
+			tw = Math.max(rt.width, 1);
+			th = Math.max(rt.height, 1);
+		}
+		int hi = (frame & 7) + 1;
+		jitterX = taaOn ? (halton(hi, 2) - 0.5f) * 2f / tw : 0f;
+		jitterY = taaOn ? (halton(hi, 3) - 0.5f) * 2f / th : 0f;
+		put(jitterX, jitterY, taaOn ? 1f : 0f, 0f);
 		if (BUF.position() != SIZE) throw new IllegalStateException("ImFrame is " + BUF.position() + " bytes, not " + SIZE);
 	}
 

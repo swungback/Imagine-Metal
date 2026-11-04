@@ -119,6 +119,8 @@ public final class SettingsScreen extends OptionsSubScreen {
 						"Stained glass, ice and other see-through blocks reflect the sky and the world."));
 				this.list.addBig(toggle("Wet in the rain", Settings.wet, v -> Settings.wet = v,
 					"In the rain everything under the sky gets darker and glossy, with puddles on top of blocks. Needs PBR."));
+				this.list.addBig(toggle("TAA (anti-aliasing)", Settings.taa, v -> Settings.taa = v,
+					"Smooth block edges and less grain in the light shafts, shadows and reflections, averaged over a few frames."));
 				this.list.addSmall(toggle("Ambient occlusion", Settings.ssao, v -> Settings.ssao = v,
 					"Corners, the ground under ledges and the gaps between blocks a little darker, so shapes read better."),
 					slider("AO strength", 0, 1, 0.05f, Settings.ssaoStrength, v -> Settings.ssaoStrength = v, SettingsScreen::pct,
