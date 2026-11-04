@@ -31,67 +31,6 @@ struct ImBloomParams {
 	float4 taa;        // TAA: xy this frame's jitter in uv, z 1 = the history is usable
 };
 
-struct ImTaaOut {
-	float4 screen [[color(0)]];
-	float4 history [[color(1)]];
-};
-
-// TAA (the resolve's result, display-encoded): this frame's pixel blended with the last frames' at the same place in the world
-// (found through the depth and the last frame's transform), the history first held within the colours of this pixel's 3x3
-// neighbourhood (moving mobs and waving plants don't smear; what newly shows takes over at once). The terrain is drawn half a pixel
-// off in a new direction each frame, so over eight frames every edge is sampled across its pixel: smooth edges, and the grain of
-// the shafts, the AO and the reflections averaged away. Written to the screen and to the next frame's history.
-fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur [[texture(0)]], texture2d<float> hist [[texture(1)]],
-	depth2d<float> depth [[texture(2)]], sampler s [[sampler(0)]], constant ImBloomParams &p [[buffer(0)]]) {
-	uint2 px = uint2(in.pos.xy);
-	uint2 size = uint2(cur.get_width(), cur.get_height());
-	float3 c = cur.read(px).rgb;
-	ImTaaOut o;
-	if (p.taa.z < 0.5) {
-		o.screen = float4(c, 1.0);
-		o.history = o.screen;
-		return o;
-	}
-	// the neighbourhood's colour box, and the nearest depth in it (its edges follow the nearer object)
-	float3 mn = c, mx = c, m1 = c, m2 = c * c;
-	float dmin = depth.read(min(px, size - 1));
-	for (int y = -1; y <= 1; y++)
-		for (int x = -1; x <= 1; x++) {
-			if (x == 0 && y == 0) continue;
-			uint2 q = uint2(clamp(int2(px) + int2(x, y), int2(0), int2(size) - 1));
-			float3 v = cur.read(q).rgb;
-			mn = min(mn, v);
-			mx = max(mx, v);
-			m1 += v;
-			m2 += v * v;
-			dmin = min(dmin, depth.read(q));
-		}
-	// (variance clipping, tighter than the min/max box: less ghosting)
-	m1 /= 9.0;
-	m2 /= 9.0;
-	float3 sd = sqrt(max(m2 - m1 * m1, 0.0));
-	mn = max(mn, m1 - 1.25 * sd);
-	mx = min(mx, m1 + 1.25 * sd);
-	float2 uv = in.uv - p.taa.xy;  // (this pixel without the jitter)
-	float4 w = p.clipInv * float4(uv * 2.0 - 1.0, dmin >= 0.99999 ? 0.9999 : dmin, 1.0);
-	float3 P = w.xyz / w.w;
-	float4 pc = p.prevClip * float4(P, 1.0);
-	float3 res = c;
-	if (pc.w > 0.05) {
-		float2 puv = pc.xy / pc.w * 0.5 + 0.5;
-		if (all(puv > 0.0) && all(puv < 1.0)) {
-			float3 h = hist.sample(s, puv).rgb;
-			h = clamp(h, mn, mx);
-			// (less history where the picture moved a lot on screen: sharper in motion)
-			float moved = length((puv - in.uv) * float2(size));
-			float k = mix(0.9, 0.75, saturate(moved / 16.0));
-			res = mix(c, h, k);
-		}
-	}
-	o.screen = float4(res, 1.0);
-	o.history = o.screen;
-	return o;
-}
 
 struct ImBloomOut {
 	float4 pos [[position]];
@@ -497,4 +436,66 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 	float2 vc = in.uv - 0.5;
 	o *= 1.0 - dot(vc, vc) * (1.0 - dot(o, float3(0.2126, 0.7152, 0.0722)));
 	return float4(o, h.a);
+}
+
+struct ImTaaOut {
+	float4 screen [[color(0)]];
+	float4 history [[color(1)]];
+};
+
+// TAA (the resolve's result, display-encoded): this frame's pixel blended with the last frames' at the same place in the world
+// (found through the depth and the last frame's transform), the history first held within the colours of this pixel's 3x3
+// neighbourhood (moving mobs and waving plants don't smear; what newly shows takes over at once). The terrain is drawn half a pixel
+// off in a new direction each frame, so over eight frames every edge is sampled across its pixel: smooth edges, and the grain of
+// the shafts, the AO and the reflections averaged away. Written to the screen and to the next frame's history.
+fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur [[texture(0)]], texture2d<float> hist [[texture(1)]],
+	depth2d<float> depth [[texture(2)]], sampler s [[sampler(0)]], constant ImBloomParams &p [[buffer(0)]]) {
+	uint2 px = uint2(in.pos.xy);
+	uint2 size = uint2(cur.get_width(), cur.get_height());
+	float3 c = cur.read(px).rgb;
+	ImTaaOut o;
+	if (p.taa.z < 0.5) {
+		o.screen = float4(c, 1.0);
+		o.history = o.screen;
+		return o;
+	}
+	// the neighbourhood's colour box, and the nearest depth in it (its edges follow the nearer object)
+	float3 mn = c, mx = c, m1 = c, m2 = c * c;
+	float dmin = depth.read(min(px, size - 1));
+	for (int y = -1; y <= 1; y++)
+		for (int x = -1; x <= 1; x++) {
+			if (x == 0 && y == 0) continue;
+			uint2 q = uint2(clamp(int2(px) + int2(x, y), int2(0), int2(size) - 1));
+			float3 v = cur.read(q).rgb;
+			mn = min(mn, v);
+			mx = max(mx, v);
+			m1 += v;
+			m2 += v * v;
+			dmin = min(dmin, depth.read(q));
+		}
+	// (variance clipping, tighter than the min/max box: less ghosting)
+	m1 /= 9.0;
+	m2 /= 9.0;
+	float3 sd = sqrt(max(m2 - m1 * m1, 0.0));
+	mn = max(mn, m1 - 1.25 * sd);
+	mx = min(mx, m1 + 1.25 * sd);
+	float2 uv = in.uv - p.taa.xy;  // (this pixel without the jitter)
+	float4 w = p.clipInv * float4(uv * 2.0 - 1.0, dmin >= 0.99999 ? 0.9999 : dmin, 1.0);
+	float3 P = w.xyz / w.w;
+	float4 pc = p.prevClip * float4(P, 1.0);
+	float3 res = c;
+	if (pc.w > 0.05) {
+		float2 puv = pc.xy / pc.w * 0.5 + 0.5;
+		if (all(puv > 0.0) && all(puv < 1.0)) {
+			float3 h = hist.sample(s, puv).rgb;
+			h = clamp(h, mn, mx);
+			// (less history where the picture moved a lot on screen: sharper in motion)
+			float moved = length((puv - in.uv) * float2(size));
+			float k = mix(0.9, 0.75, saturate(moved / 16.0));
+			res = mix(c, h, k);
+		}
+	}
+	o.screen = float4(res, 1.0);
+	o.history = o.screen;
+	return o;
 }
