@@ -116,9 +116,9 @@ final class MetalPipeline implements BackendRenderPipeline {
 				f = new Translated("// " + UNCACHED_NONCE + "\n" + f.msl, f.entry);
 			}
 			t1 = System.nanoTime();
-			vlib = Native.libraryNew(ctx, MemoryUtil.memAddress(stack.UTF8(v.msl)), err, 4096);
+			vlib = libraryFromSource(ctx, v.msl, err);
 			if (vlib != 0 && ent != null) {
-				flib = Native.libraryNew(ctx, MemoryUtil.memAddress(stack.UTF8(f.msl)), err, 4096);
+				flib = libraryFromSource(ctx, f.msl, err);
 				if (flib == 0) {
 					// (Imagine Metal: our patch didn't compile: Minecraft's own shaders instead, and a line in the log)
 					System.out.println("[Imagine Metal] entity light: " + info.name() + " didn't compile, Minecraft's light: " + MemoryUtil.memUTF8(err));
@@ -132,11 +132,11 @@ final class MetalPipeline implements BackendRenderPipeline {
 				ent = null;
 				v = vPlain;
 				f = fPlain;
-				vlib = Native.libraryNew(ctx, MemoryUtil.memAddress(stack.UTF8(v.msl)), err, 4096);
+				vlib = libraryFromSource(ctx, v.msl, err);
 				flib = 0;
 			}
 			if (vlib == 0) throw new IllegalStateException(info.name() + " vertex: " + MemoryUtil.memUTF8(err) + "\n" + v.msl);
-			if (flib == 0) flib = Native.libraryNew(ctx, MemoryUtil.memAddress(stack.UTF8(f.msl)), err, 4096);
+			if (flib == 0) flib = libraryFromSource(ctx, f.msl, err);
 			if (flib == 0) throw new IllegalStateException(info.name() + " fragment: " + MemoryUtil.memUTF8(err) + "\n" + f.msl);
 			t2 = System.nanoTime();
 			long vname = MemoryUtil.memAddress(stack.UTF8(v.entry)), fname = MemoryUtil.memAddress(stack.UTF8(f.entry));
@@ -172,6 +172,19 @@ final class MetalPipeline implements BackendRenderPipeline {
 				libraryNs += t2 - t1;
 				stateNs += t3 - t2;
 			}
+		}
+	}
+
+	/**
+	 * A Metal library from source, the source on the heap: the thread's MemoryStack is 64 KB and a source with Imagine Metal's
+	 * lighting prepended (imaginemetal.EntityShade) is larger than that.
+	 */
+	private static long libraryFromSource(long ctx, String msl, long err) {
+		java.nio.ByteBuffer src = MemoryUtil.memUTF8(msl);
+		try {
+			return Native.libraryNew(ctx, MemoryUtil.memAddress(src), err, 4096);
+		} finally {
+			MemoryUtil.memFree(src);
 		}
 	}
 

@@ -31,6 +31,13 @@ public final class EntityShade {
 	/** The patched {vertex, fragment} sources, or null to keep both as they are. */
 	public static String[] patch(String name, String vs, String fs) {
 		if (!Settings.entityLight || !Engine.TERRAIN) return null;
+		// (only Minecraft's entity, item and particle pipelines: not the terrain's (ours draws it), text, rain, leads, beams, the
+		// wireframe, nor the order-independent transparency's own passes, whose blending and outputs are their own)
+		String n = name.toLowerCase(java.util.Locale.ROOT);
+		for (String skip : SKIP) if (n.contains(skip)) return null;
+		boolean wanted = false;
+		for (String want : WANT) if (n.contains(want)) wanted = true;
+		if (!wanted) return null;
 		try {
 			boolean lm = vs.contains("out.lightMapColor");
 			boolean particle = !lm && vs.contains("sample_lightmap(") && vs.contains("out.vertexColor");
@@ -49,6 +56,10 @@ public final class EntityShade {
 			return null;
 		}
 	}
+
+	private static final String[] WANT = {"pipeline/entity", "pipeline/armor", "pipeline/item", "particle", "banner_pattern", "pipeline/solid_block",
+		"pipeline/cutout_block", "pipeline/translucent_block"};
+	private static final String[] SKIP = {"oit_", "terrain", "text", "wireframe", "weather", "leash", "beam", "breeze", "lines", "gui"};
 
 	private static final Pattern VS_MAIN = Pattern.compile("vertex\\s+main0_out\\s+main0\\s*\\(\\s*main0_in\\s+in\\s*\\[\\[stage_in\\]\\]");
 	private static final Pattern FS_MAIN = Pattern.compile("fragment\\s+main0_out\\s+main0\\s*\\(\\s*main0_in\\s+in\\s*\\[\\[stage_in\\]\\]");
