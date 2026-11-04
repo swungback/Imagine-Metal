@@ -78,7 +78,7 @@ public final class ImagineFrame {
 
 	// the palette (linear)
 	private static final float[] SUN_NOON = {1.22f, 1.05f, 0.74f};
-	private static final float[] SUN_GOLDEN = {1.65f, 0.78f, 0.36f};
+	private static final float[] SUN_GOLDEN = {1.75f, 0.72f, 0.28f};  // (a deeper gold: the land at sunset glows orange, not yellow)
 	// night (toward Reimagined's: a lavender-blue moonlight, its red above its green, a deep blue sky light; a little darker)
 	private static final float[] MOON = {0.12f, 0.11f, 0.20f};
 	private static final float[] NIGHT_SKY = {0.036f, 0.039f, 0.085f};
