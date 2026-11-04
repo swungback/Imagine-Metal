@@ -745,7 +745,10 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			float lod = (1.0 - surf.d) * 5.0;
 			// (a fixed dither: without TAA a per-frame one would only shimmer)
 			float dither = fract(dot(pixel, float2(0.06711056, 0.00583715)) * 52.9829189);
-			float4 hit = f.histShift.w > 0.5 ? imReflect(p, n, R, lod, dither, f, hc, hd, hs, true) : float4(0.0);
+			// (traced within 96 blocks, fading out from 64: farther, a reflection is a few pixels and the sky stands in)
+			float rd = length(p);
+			float4 hit = f.histShift.w > 0.5 && rd < 96.0 ? imReflect(p, n, R, lod, dither, f, hc, hd, hs, true) : float4(0.0);
+			if (hit.a > 0.0) hit.a *= 1.0 - smoothstep(64.0, 96.0, rd);
 			float open = smoothstep(0.6, 1.0, sky);
 			float3 skyR = float3(0.0);
 			if (open * smoothstep(-0.1, 0.2, R.y) > 0.0)

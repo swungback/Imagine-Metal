@@ -202,7 +202,7 @@ fragment float4 im_bloom_ao(ImBloomOut in [[stage_in]], depth2d<float> depth [[t
 	float2 uv = in.uv, t = 2.0 / size;
 	float d;
 	float3 P = imbPos(depth, uv, size, p, d);
-	if (d >= 0.99999) return float4(1.0);
+	if (d >= 0.99999 || length(P) > 128.0) return float4(1.0);  // (the sky; and past 128 blocks the occlusion has faded out)
 	float dd;
 	float3 px = imbPos(depth, uv + float2(t.x, 0.0), size, p, dd) - P, nx = P - imbPos(depth, uv - float2(t.x, 0.0), size, p, dd);
 	float3 py = imbPos(depth, uv + float2(0.0, t.y), size, p, dd) - P, ny = P - imbPos(depth, uv - float2(0.0, t.y), size, p, dd);
