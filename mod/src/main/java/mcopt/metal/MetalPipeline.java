@@ -49,6 +49,8 @@ final class MetalPipeline implements BackendRenderPipeline {
 	 * imaginemetal.Hdr's RGBA16_FLOAT image, and Metal bakes the attachment formats into the pipeline. 0 where it declares none.
 	 */
 	long withDepthHdr, withoutDepthHdr;
+	/** (Imagine Metal) its shaders were patched with our entity lighting (imaginemetal.EntityShade): bind its resources when set */
+	boolean imEntity;
 	final long depthState;
 	final List<BindGroupLayout.UniformDescription> uniforms;
 	final boolean cull;
@@ -97,6 +99,13 @@ final class MetalPipeline implements BackendRenderPipeline {
 			long err = stack.nmalloc(1, 4096);
 			Translated v = translate(vertex.module(), info.uniforms().size());
 			Translated f = translate(fragment.module(), info.uniforms().size());
+			// (Imagine Metal) entities, items, particles: lit as the terrain is
+			String[] ent = imaginemetal.EntityShade.patch(info.name(), v.msl, f.msl);
+			Translated vPlain = v, fPlain = f;
+			if (ent != null) {
+				v = new Translated(ent[0], v.entry);
+				f = new Translated(ent[1], f.entry);
+			}
 			if (DUMP_DIR != null) dump(info.name(), v, f);
 			if (OVERRIDE_DIR != null) {
 				v = override(info.name() + ".vs.metal", v);
@@ -108,8 +117,26 @@ final class MetalPipeline implements BackendRenderPipeline {
 			}
 			t1 = System.nanoTime();
 			vlib = Native.libraryNew(ctx, MemoryUtil.memAddress(stack.UTF8(v.msl)), err, 4096);
+			if (vlib != 0 && ent != null) {
+				flib = Native.libraryNew(ctx, MemoryUtil.memAddress(stack.UTF8(f.msl)), err, 4096);
+				if (flib == 0) {
+					// (Imagine Metal: our patch didn't compile: Minecraft's own shaders instead, and a line in the log)
+					System.out.println("[Imagine Metal] entity light: " + info.name() + " didn't compile, Minecraft's light: " + MemoryUtil.memUTF8(err));
+					Native.release(vlib);
+					vlib = 0;
+				}
+			} else if (vlib == 0 && ent != null) {
+				System.out.println("[Imagine Metal] entity light: " + info.name() + " (vertex) didn't compile, Minecraft's light: " + MemoryUtil.memUTF8(err));
+			}
+			if (ent != null && (vlib == 0 || flib == 0)) {
+				ent = null;
+				v = vPlain;
+				f = fPlain;
+				vlib = Native.libraryNew(ctx, MemoryUtil.memAddress(stack.UTF8(v.msl)), err, 4096);
+				flib = 0;
+			}
 			if (vlib == 0) throw new IllegalStateException(info.name() + " vertex: " + MemoryUtil.memUTF8(err) + "\n" + v.msl);
-			flib = Native.libraryNew(ctx, MemoryUtil.memAddress(stack.UTF8(f.msl)), err, 4096);
+			if (flib == 0) flib = Native.libraryNew(ctx, MemoryUtil.memAddress(stack.UTF8(f.msl)), err, 4096);
 			if (flib == 0) throw new IllegalStateException(info.name() + " fragment: " + MemoryUtil.memUTF8(err) + "\n" + f.msl);
 			t2 = System.nanoTime();
 			long vname = MemoryUtil.memAddress(stack.UTF8(v.entry)), fname = MemoryUtil.memAddress(stack.UTF8(f.entry));
@@ -127,6 +154,7 @@ final class MetalPipeline implements BackendRenderPipeline {
 			int compare = depth == null ? 7 : MetalConst.compare(depth.depthTest());
 			long depthState = Native.depthStateNew(ctx, compare, depth != null && depth.writeDepth() ? 1 : 0);
 			MetalPipeline pipeline = new MetalPipeline(encoder, withDepth, withoutDepth, pulled, depthState, compare, info);
+			pipeline.imEntity = ent != null;
 			if (hasLdrTarget(info)) {
 				// (Imagine Metal) its HDR twin, from the same libraries
 				pipeline.withDepthHdr = pipelineNewCounted(ctx, vlib, vname, flib, fname, describe(stack, info, true, true, true), err, 4096);

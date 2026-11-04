@@ -70,6 +70,9 @@ public final class Config {
 		# The Nether as Reimagined has it: each biome its own glowing haze (orange wastes, teal soul sand valleys, ash-grey deltas),
 		# and its storm: slow drifting clouds of that haze through the caverns.
 		imaginemetal.netherFog=true
+		# Mobs, chests and signs, dropped items and particles lit as the land is: the sun and its shadows, the sky, coloured torch
+		# light (takes effect after a restart).
+		imaginemetal.entityLight=true
 		imaginemetal.netherStorm=true
 		# TAA: smooth edges and less grain (the terrain sampled at a new sub-pixel spot each frame, averaged over frames).
 		imaginemetal.taa=true

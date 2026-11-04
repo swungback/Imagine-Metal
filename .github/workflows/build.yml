@@ -45,6 +45,9 @@ jobs:
           xcrun -sdk macosx metal -std=metal3.0 -c $R/imaginemetal/shaders/light.metal -o build/msl/light.air
           { cat $R/imaginemetal/shaders/lighting.metal; echo; cat $R/imaginemetal/shaders/sky.metal; } > build/msl/sky.metal
           xcrun -sdk macosx metal -std=metal3.0 -c build/msl/sky.metal -o build/msl/sky.air
+          # Minecraft's entity, item and particle shaders with our lighting patched in (imaginemetal.EntityShade)
+          python3 ci/entity_check.py $R build/msl/entity
+          for f in build/msl/entity/*.metal; do xcrun -sdk macosx metal -std=metal3.0 -c "$f" -o "$f.air"; done
           echo "Metal shaders compile"
 
       - name: Build the mod

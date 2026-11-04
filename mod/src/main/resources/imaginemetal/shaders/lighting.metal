@@ -986,3 +986,55 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	}
 	return pow(c, 1.0 / 2.2);
 }
+
+// Entities, block entities, dropped items and particles (Minecraft's own shaders, patched by imaginemetal.EntityShade): the same
+// light as the terrain's. col: their colour as Minecraft drew it but unlit (texture x tint x overlay, fogged), display-encoded;
+// p camera-relative position, nrm the vertex normal (0: none, a particle: lit as if facing the light half-way), light (block,
+// sky) 0..1. Sun with the shadow maps, the sky's light from above, block light in the grid's colour, the floor, the held light,
+// combined as the terrain combines them, through the same tone curve. Returns display-encoded.
+static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, constant ImFrame &f, depth2d_array<float> smap, sampler cmp,
+	texture3d<float> lvol, sampler lsamp) {
+	if (f.flags.z == 0 || f.flags.y != 0) return col;
+	if (f.flags.x == 2) light.y = 1.0;
+	float3 base = pow(max(col, 0.0), 2.2);
+	float nlen = length(nrm);
+	bool particle = nlen < 0.1;
+	float3 n = particle ? -normalize(p) : nrm / nlen;
+	float block = saturate(light.x), sky = saturate(light.y);
+	float skyF = imSkyCurve(sky);
+	if (f.water.z > 0.5 && f.flags.x == 0) skyF = max(skyF, 0.22);
+	float nl = dot(n, f.lightDir.xyz);
+	float wrap = particle ? 0.6 : max(nl + 0.4, 0.0) * (1.0 / 1.4);
+	float2 sm = imShadow(p, n, float2(0.0), f, smap, cmp);
+	float open = smoothstep(0.45, 0.9, sky);
+	float sun = mix(open, sm.x, sm.y) * (f.water.z > 0.5 && f.flags.x == 0 ? 0.3 + 0.7 * smoothstep(0.0, 0.6, sky) : smoothstep(0.0, 0.07, sky));
+	float3 direct = f.lightColor.rgb * (wrap * sun);
+	float ny = particle ? 0.6 : n.y;
+	float3 ambient = mix(f.ambientDown.rgb, f.ambientUp.rgb, ny * 0.5 + 0.5) * skyF;
+	ambient += f.auroraLight.rgb * (skyF * (0.12 + 0.88 * saturate(ny)));
+	if (f.water.z > 0.5 && f.flags.x == 0) ambient += float3(0.04, 0.09, 0.12) * mix(0.12, 1.0, f.nightMiddle.w);
+	float4 bl = imBlockLight(p, particle ? float3(0.0, 1.0, 0.0) : n, f, lvol, lsamp);
+	float3 torch = bl.rgb * imBlockCurve(max(block, bl.a)) * (1.0 - 0.45 * f.blockColor.w * smoothstep(0.5, 1.0, sky));
+	if (f.held.w > 0.0) {
+		float hl = saturate(min(f.held.w + 4.0 / 15.0, 1.0) - length(p) / 15.0);
+		if (hl > 0.0) {
+			float3 hh = f.held.rgb;
+			float hlum = imLuma(hh);
+			hh = max(hlum + (hh - hlum) * 1.35, 0.0);
+			float3 hc = hh * (max(max(f.blockColor.r, f.blockColor.g), f.blockColor.b) / max(max(max(hh.r, hh.g), hh.b), 1e-3));
+			torch = max(torch, hc * imBlockCurve(hl) * (1.0 - 0.45 * f.blockColor.w * smoothstep(0.5, 1.0, sky)));
+		}
+	}
+	float3 day = direct + ambient;
+	float3 lit = sqrt(day * day + torch * torch + f.minLight.rgb * f.minLight.rgb);
+	if (f.nightMiddle.w > 0.0 && f.flags.x == 0) {
+		const float g = 1.0 / 2.2;
+		float3 dayG = pow(max(direct, 0.0), g) + pow(max(ambient, 0.0), g);
+		float3 tG = pow(max(torch, 0.0), g), mG = pow(max(f.minLight.rgb, 0.0), g);
+		float3 litG = pow(sqrt(dayG * dayG + tG * tG + mG * mG), 2.2);
+		lit = mix(lit, litG, f.nightMiddle.w);
+	}
+	float3 radiance = base * lit * f.minLight.w;
+	float3 c = imGrade(imTonemap(radiance, f.tonemap), f);
+	return pow(max(c, 0.0), 1.0 / 2.2);
+}

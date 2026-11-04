@@ -2159,3 +2159,23 @@ void mco_vgroup_stats(Own *w, uint64_t *out) {
 id<MTLLibrary> mco_library(Own *w) {
 	return w ? w->library : nil;
 }
+
+// (Imagine Metal) Minecraft's entity, item and particle pipelines patched with our lighting (imaginemetal.EntityShade): right
+// after one is set on a pass, its extra resources. on: 1 in the level's (HDR) pass, where they're lit as the terrain is; 0
+// elsewhere (the GUI, the hand), where they keep Minecraft's light. Slots the translated vanilla shaders don't use.
+void mc_im_entity_bind(Enc *enc, int on) {
+	id<MTLRenderCommandEncoder> r = enc->render;
+	if (!r) return;
+	float flag[4] = {on ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
+	[r setVertexBytes:flag length:sizeof flag atIndex:25];
+	[r setFragmentBytes:flag length:sizeof flag atIndex:25];
+	[r setFragmentBytes:imFrame length:sizeof imFrame atIndex:30];
+	if (imLightTex) {
+		[r setFragmentTexture:imLightTex atIndex:21];
+		[r setFragmentSamplerState:imLightSampler atIndex:12];
+	}
+	if (imShadowTex) {
+		[r setFragmentTexture:imShadowTex atIndex:20];
+		[r setFragmentSamplerState:imShadowCmp atIndex:13];
+	}
+}

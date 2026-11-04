@@ -40,6 +40,8 @@ public final class Settings {
 	public static volatile boolean taa = Engine.flag("imaginemetal.taa", true);
 	public static volatile boolean rainbows = Engine.flag("imaginemetal.rainbows", true);
 	public static volatile boolean netherFog = Engine.flag("imaginemetal.netherFog", true);
+	/** mobs, block entities, dropped items and particles lit as the terrain is (EntityShade; read when their shaders are made) */
+	public static volatile boolean entityLight = Engine.flag("imaginemetal.entityLight", true);
 	public static volatile boolean netherStorm = Engine.flag("imaginemetal.netherStorm", true);
 	public static volatile boolean bloomFog = Engine.flag("imaginemetal.bloomFog", true);
 	public static volatile boolean shadowFarAlternate = Engine.flag("imaginemetal.shadowFarAlternate", true);
@@ -90,6 +92,7 @@ public final class Settings {
 		v.put("imaginemetal.bloomFog", String.valueOf(bloomFog));
 		v.put("imaginemetal.rainbows", String.valueOf(rainbows));
 		v.put("imaginemetal.netherFog", String.valueOf(netherFog));
+		v.put("imaginemetal.entityLight", String.valueOf(entityLight));
 		v.put("imaginemetal.netherStorm", String.valueOf(netherStorm));
 		v.put("imaginemetal.taa", String.valueOf(taa));
 		v.put("imaginemetal.intenseDeepDark", String.valueOf(intenseDeepDark));
