@@ -56,8 +56,8 @@ public final class SettingsScreen extends OptionsSubScreen {
 			case MAIN -> {
 				this.list.addSmall(open(Page.LIGHT), open(Page.SKY));
 				this.list.addSmall(open(Page.SURFACES), open(Page.AURORA));
-				this.list.addBig(cycle("Colours", new String[] {"Linear (moody)", "Reimagined (lively)"}, Settings.colorStyle, v -> Settings.colorStyle = v,
-					"Reimagined lights the textures' colours as they are: brighter mid tones, open shadows, lively. Linear is the physically based way: darker and moodier."));
+				this.list.addBig(cycle("Colours", new String[] {"Moody", "Lively"}, Settings.colorStyle, v -> Settings.colorStyle = v,
+					"Lively: dark and mid colours lifted, shadows more open. Moody: the darker, physically based look from before."));
 				this.list.addBig(open(Page.ADVANCED));
 			}
 			case LIGHT -> {

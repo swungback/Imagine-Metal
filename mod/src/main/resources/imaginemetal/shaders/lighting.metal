@@ -609,7 +609,9 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	}
 	// (Reimagined lights the texture's colours as they are and encodes only at the end; that lifts the mid tones and keeps the
 	// shadows open: its bright, lively look. Linearizing them first, as physically based packs do, gives a darker, moodier picture.)
-	float3 base = f.grade.z > 0.5 ? max(albedo, 0.0) : pow(max(albedo, 0.0), 2.2);
+	// (lively: halfway, a 1.6 curve: dark and mid tones lifted, bright ones (sand, snow) about where they were, so they don't
+	// blow out to white the way the full Reimagined way does with this lighting)
+	float3 base = pow(max(albedo, 0.0), f.grade.z > 0.5 ? 1.6 : 2.2);
 	bool pbr = f.shadow.w > 0.5 && f.flags.y == 0;
 	ImSurf surf = pbr ? imSurface(cls, albedo, tex) : ImSurf{0.0, 0.0, 0.0, 0.04, 0.0};
 	float3 V = -normalize(p);
@@ -639,7 +641,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	float skyF = imSkyCurve(sky);
 	// under water (the eyes in it): the sky light drops a level a block down, which left the sea floor nearly black; Reimagined's
 	// stays a lit blue-green, so the sky's light keeps at least about half
-	if (f.water.z > 0.5 && f.flags.x == 0) skyF = max(skyF, 0.45 * smoothstep(0.0, 0.2, sky));
+	if (f.water.z > 0.5 && f.flags.x == 0) skyF = max(skyF, 0.3 * smoothstep(0.0, 0.2, sky));
 
 	// direct light: wrapped N.L; until there are shadow maps, the sky light stands in for them (no sun under a roof)
 	float nl = dot(N, f.lightDir.xyz);
@@ -777,7 +779,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	}
 	// water and glass (Reimagined's: a share by the angle, 15 % head-on; water less on its sides and from below; glass none right
 	// up close): what the last frame's picture shows along the reflected ray, the sky where nothing is in the way
-	if (kind != 0u && f.flags.y == 0 && (kind == 2u ? f.water.y > 0.5 : f.water.x > 0.5)) {
+	if (kind != 0u && f.flags.y == 0 && (kind == 2u ? f.water.y > 0.5 : f.water.x > 0.5 && f.water.z < 0.5)) {
 		float fresnel = 1.0 - saturate(dot(N, V));
 		float rm = kind == 1u ? (0.5 + 0.5 * saturate(n.y)) * (f.water.z > 0.5 ? 0.5 : 1.0) : 1.0 - smoothstep(1.8, 0.3, length(p));
 		float fm = (fresnel * fresnel * fresnel * 0.85 + 0.15) * rm;

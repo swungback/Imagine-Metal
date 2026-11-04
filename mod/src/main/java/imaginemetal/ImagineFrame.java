@@ -164,15 +164,12 @@ public final class ImagineFrame {
 			}
 			float[] sunsetTint = {1.21f, 0.92f, 0.76f};
 			for (int i = 0; i < 3; i++) {
-				float dayAmb = Settings.colorStyle == 1
-					// (Reimagined's own, for its colours: lighting the texture as it is, not linearized; noonClearAmbientColor)
-					? (float) Math.pow(Math.max(skyc[i], 0f), 0.75) * 0.85f * mix(1f, sunsetTint[i], golden) * 0.95f
-					: (float) Math.pow(Math.max(skyc[i], 0f), 1.65) * 0.52f * mix(1f, sunsetTint[i], golden);
+				float dayAmb = (float) Math.pow(Math.max(skyc[i], 0f), 1.65) * 0.52f * mix(1f, sunsetTint[i], golden);
 				up[i] = mix(NIGHT_SKY[i] * Settings.nightBrightness, dayAmb, day);
 			}
 			// (rain: Reimagined's rain ambient, a light blue-grey, brighter than the clear sky's shadows: an overcast day is evenly lit;
 			// converted like the clear one for the linear colours)
-			float[] rainAmb = Settings.colorStyle == 1 ? new float[] {0.574f, 0.574f, 0.718f} : new float[] {0.22f, 0.22f, 0.36f};
+			float[] rainAmb = {0.22f, 0.22f, 0.36f};
 			for (int i = 0; i < 3; i++) up[i] = mix(up[i], mix(NIGHT_SKY[i] * 1.2f * Settings.nightBrightness, rainAmb[i], day), rain);
 
 			// the sky itself: Complementary Reimagined's sky colours (lib/colors/skyColors.glsl), from Minecraft's sky colour for this
