@@ -322,6 +322,8 @@ fragment float4 im_bloom_ao(ImBloomOut in [[stage_in]], depth2d<float> depth [[t
 	float3 T = normalize(abs(N.y) < 0.9 ? cross(N, float3(0.0, 1.0, 0.0)) : cross(N, float3(1.0, 0.0, 0.0)));
 	float3 Bt = cross(N, T);
 	float j = fract(52.9829189 * fract(dot(in.pos.xy, float2(0.06711056, 0.00583715))));
+	// (with TAA a new turn each frame (from its jitter, eight a cycle): averaged into smooth shading instead of a fixed grain)
+	if (p.taa.z > 0.5) j = fract(j + fract(p.taa.x * 7919.0 + p.taa.y * 4513.0));
 	float dist = length(P);
 	float radius = 0.8;
 	float occ = 0.0;
@@ -515,7 +517,7 @@ fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur 
 	float4 w = p.clipInv * float4(uv * 2.0 - 1.0, dmin >= 0.99999 ? 0.9999 : dmin, 1.0);
 	float3 P = w.xyz / w.w;
 	float4 pc = p.prevClip * float4(P, 1.0);
-	float3 res = c;
+	float3 res = c, shown = c;
 	if (pc.w > 0.05) {
 		float2 puv = pc.xy / pc.w * 0.5 + 0.5;
 		if (all(puv > 0.0) && all(puv < 1.0)) {
@@ -526,11 +528,13 @@ fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur 
 			float moved = length((puv - in.uv) * float2(size));
 			float k = mix(0.88, 0.7, saturate(moved / 12.0));
 			res = mix(c, h, k);
-			// (a light sharpen against what's left of the softness: the pixel against its neighbours' mean)
-			res = max(res + (res - m1) * 0.18, 0.0);
+			// (a light sharpen against what's left of the softness, on the screen only: fed back into the history it sharpened
+			// the already sharpened picture every frame, the finest grain growing until the colour box stopped it, a crawling
+			// static over walls and floors)
+			shown = max(res + (res - m1) * 0.15, 0.0);
 		}
 	}
-	o.screen = float4(res, 1.0);
-	o.history = o.screen;
+	o.screen = float4(shown, 1.0);
+	o.history = float4(res, 1.0);
 	return o;
 }

@@ -588,6 +588,11 @@ static inline float imValueNoise(float2 q) {
 	return mix(mix(imHash2(i), imHash2(i + int2(1, 0)), u.x), mix(imHash2(i + int2(0, 1)), imHash2(i + int2(1, 1)), u.x), u.y);
 }
 
+static inline float imDither(float2 pixel, constant ImFrame &f) {
+	float d = fract(dot(pixel, float2(0.06711056, 0.00583715)) * 52.9829189);
+	return f.taa.z > 0.5 ? fract(d + 0.61803399 * float(f.flags.w & 63)) : d;
+}
+
 static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint mat, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp,
 	texture3d<float> lvol, sampler lsamp, float2 uv, float4 rect, texture2d<float> atlas, texture2d<float> hc, depth2d<float> hd, sampler hs) {
 	if (f.flags.z == 0) return albedo * (0.2 + 0.8 * max(light.x, light.y)); // the engine hasn't filled a frame yet
@@ -815,8 +820,9 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			float3 R = reflect(-V, N);
 			if (dot(R, n) < 0.02) R = normalize(R - n * (dot(R, n) - 0.02));  // (a bumped normal can't reflect into the face)
 			float lod = (1.0 - surf.d) * 5.0;
-			// (a fixed dither: without TAA a per-frame one would only shimmer)
-			float dither = fract(dot(pixel, float2(0.06711056, 0.00583715)) * 52.9829189);
+			// (a fixed dither without TAA (a per-frame one would only shimmer); with it a new one each frame, which TAA averages away
+			// instead of leaving a fixed grain on every glossy surface)
+			float dither = imDither(pixel, f);
 			// (traced within 96 blocks, fading out from 64: farther, a reflection is a few pixels and the sky stands in)
 			float rd = length(p);
 			float4 hit = f.histShift.w > 0.5 && rd < 96.0 ? imReflect(p, n, R, lod, dither, f, hc, hd, hs, true) : float4(0.0);
@@ -844,7 +850,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		if (fm > 0.01) {
 			float3 R = reflect(-V, N);
 			if (dot(R, n) < 0.02) R = normalize(R - n * (dot(R, n) - 0.02));
-			float dither = fract(dot(pixel, float2(0.06711056, 0.00583715)) * 52.9829189);
+			float dither = imDither(pixel, f);
 			// (traced only within 64 blocks: past that the reflection is the sky, cheaper and without the depth's banding)
 			float dist = length(p);
 			float4 hit = f.histShift.w > 0.5 && dist < 64.0 ? imReflect(p, n, R, kind == 1u ? 0.0 : 1.5, dither, f, hc, hd, hs, false) : float4(0.0);

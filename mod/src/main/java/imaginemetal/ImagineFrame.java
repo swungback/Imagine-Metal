@@ -378,9 +378,11 @@ public final class ImagineFrame {
 		float[] co = Clouds.mapW > 0 ? Clouds.offset(cam.x, cam.z) : new float[2];
 		put(co[0], co[1], Clouds.height, cloudsOn && Clouds.mapW > 0 ? 1f : 0f);
 		double secs = (System.nanoTime() / 1e9) % 100000.0;
-		double ax = cam.x * 0.0075 + secs * 0.8 * 0.04, az = cam.z * 0.0075;
-		ax -= Math.floor(ax / 1000.0) * 1000.0;
-		az -= Math.floor(az / 1000.0) * 1000.0;
+		double ax = cam.x * 0.0075 + (System.nanoTime() / 1e9 * 0.8 * 0.04) % 10000.0, az = cam.z * 0.0075;
+		// (wrapped every 10000 units: the shader scales them by 0.0007, so that's 7 whole repeats of its noise and the pixel style's
+		// steps stay whole; the old 1000 was 0.7 of a repeat, so the curtains jumped wherever it wrapped, at z = 0 among others)
+		ax -= Math.floor(ax / 10000.0) * 10000.0;
+		az -= Math.floor(az / 10000.0) * 10000.0;
 		put(auroraVis, (float) ((secs * 0.001) % 1000.0), (float) ax, (float) az);
 		put((float) (cam.x - Math.floor(cam.x / 4096.0) * 4096.0), (float) (cam.y), (float) (cam.z - Math.floor(cam.z / 4096.0) * 4096.0),
 			(float) (secs % 3600.0));
