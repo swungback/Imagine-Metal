@@ -142,7 +142,7 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 		// the beams: brightest near the sun, fading over the screen (the air lit along the way, seen against the light)
 		float sh = shafts.sample(s, in.uv).r;
 		float r = length((in.uv - p.shaft.xy) * float2(1.0, p.shaft.w));
-		c += p.shaftColor.rgb * (sh * p.shaft.z * (0.06 + 0.5 * exp(-4.0 * r)));
+		c += p.shaftColor.rgb * (sh * p.shaft.z * (0.04 + 0.3 * exp(-4.0 * r)));
 	}
 	if (p.mix.x != 0.0) {
 		float3 glow = imbTent(src, s, in.uv, p.texel.xy) / p.mix.y;

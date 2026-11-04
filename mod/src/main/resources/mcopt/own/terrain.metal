@@ -1826,10 +1826,10 @@ vertex VOut own_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant Dr
 		if (wc != 0u && (wc == 15u || ((wc >> corner) & 1u) != 0u)) {
 			float3 wp = float3(origin & 1023) + rel;
 			float tw = g.GameTime * 1200.0;
-			float amp = wc == 15u ? 0.045 : 0.085;
+			const float amp = 0.065;  // (one for every waving block: a tall plant's halves share their corners and must move alike)
 			float ph = wp.x * 0.55 + wp.z * 0.38;
 			float3 d = float3(sin(tw * 1.6 + ph) * 0.7 + sin(tw * 2.9 + wp.z * 1.3) * 0.3,
-				sin(tw * 2.1 + wp.x * 0.9 + wp.z * 0.7) * (wc == 15u ? 0.25 : 0.1),
+				sin(tw * 2.1 + wp.x * 0.9 + wp.z * 0.7) * 0.15,
 				cos(tw * 1.3 + ph * 0.8) * 0.6 + sin(tw * 3.3 + wp.x * 1.1) * 0.3) * amp;
 			float4x4 m = CPU_CLIP ? df.clip : proj.ProjMat * t.ModelViewMat;
 			float4 dc = m * float4(d, 0.0);

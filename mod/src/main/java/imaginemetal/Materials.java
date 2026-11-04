@@ -96,7 +96,10 @@ public final class Materials {
 			if (name.contains(":vine}") || name.contains("weeping_vines") || name.contains("twisting_vines")) return 2;
 			boolean plant = state.is(BlockTags.FLOWERS) || state.is(BlockTags.SAPLINGS) || state.is(BlockTags.CROPS)
 				|| state.is(BlockTags.REPLACEABLE_BY_TREES) || name.contains("grass}") || name.contains("fern") || name.contains("bush")
-				|| name.contains("seagrass") || name.contains("sugar_cane");
+				|| name.contains("seagrass");
+			// (not things flat on a wall or the ground: their top edge would flap)
+			if (name.contains("lichen") || name.contains("vein") || name.contains("carpet") || name.contains("roots") || name.contains("clump")
+				|| name.contains("lily_pad") || name.contains("litter")) return 0;
 			if (!plant || state.isSolidRender()) return 0;
 			if (!state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).isEmpty()) return 0;
 			if (state.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF) && state.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF) == DoubleBlockHalf.UPPER)

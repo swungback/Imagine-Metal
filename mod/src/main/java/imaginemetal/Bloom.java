@@ -48,7 +48,8 @@ public final class Bloom {
 		// facing it: full; the sun far off the screen's edge: fading out
 		float off = Math.max(Math.abs(x), Math.abs(y));
 		float k = off < 1.2f ? 1f : Math.max(0f, 1f - (off - 1.2f) / 1.3f);
-		k *= (1f - ImagineFrame.cave) * (1f - 0.7f * ImagineFrame.shaftRain);
+		// (Reimagined's are strongest at sunrise and sunset, weaker at noon)
+		k *= (1f - ImagineFrame.cave) * (1f - 0.7f * ImagineFrame.shaftRain) * (1f - 0.6f * ImagineFrame.shaftNoon);
 		if (k <= 0.001f) return r;
 		r[0] = x * 0.5f + 0.5f;
 		r[1] = y * 0.5f + 0.5f;

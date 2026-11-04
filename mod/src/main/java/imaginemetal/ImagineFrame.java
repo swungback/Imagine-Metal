@@ -33,7 +33,7 @@ public final class ImagineFrame {
 	/** the light shafts (Bloom): the light's direction and colour, this frame's sky ours (overworld, eyes in air), rain */
 	static final float[] shaftDir = new float[3], shaftColor = new float[3];
 	static boolean shaftOn;
-	static float shaftRain;
+	static float shaftRain, shaftNoon;
 	private static boolean failed;
 
 	// Tone curve (Lottes 2016): mid-grey 0.25 stays 0.25, white at 8 (highlights roll off), contrast 1.05.
@@ -280,6 +280,7 @@ public final class ImagineFrame {
 			shaftColor[i] = light[i];
 		}
 		shaftRain = rain;
+		shaftNoon = dim == 0 ? noonF : 0f;
 		BUF.clear();
 		put(lightDir[0], lightDir[1], lightDir[2], sunFlag);
 		put(light[0], light[1], light[2], rain);
