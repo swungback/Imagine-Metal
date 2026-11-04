@@ -36,6 +36,7 @@ public final class Settings {
 	public static volatile boolean wet = Engine.flag("imaginemetal.wet", true);
 	public static volatile boolean rainbows = Engine.flag("imaginemetal.rainbows", true);
 	public static volatile boolean bloomFog = Engine.flag("imaginemetal.bloomFog", true);
+	public static volatile boolean shadowFarAlternate = Engine.flag("imaginemetal.shadowFarAlternate", true);
 	public static volatile boolean ssao = Engine.flag("imaginemetal.ssao", true);
 	public static volatile float ssaoStrength = Config.number("imaginemetal.ssaoStrength", 0.7f, 0f, 1f);
 	public static volatile boolean shafts = Engine.flag("imaginemetal.shafts", true);

@@ -47,6 +47,12 @@ public final class Shadows {
 	/** Each cascade's grid anchor (world position, kept within half a texel of the camera across the light's plane). */
 	private static final double[][] ANCHOR = new double[2][];
 	private static boolean prepared, everRendered, failed;
+	/** the far cascade's last drawn transform and camera (it's drawn every other frame), whether this frame skips it */
+	private static final Matrix4f FAR_CLIP = new Matrix4f();
+	private static double[] FAR_CAM;
+	private static double farLightRun = Double.NaN;
+	private static int frameParity;
+	private static boolean skipFar;
 	private static long state, atlas;
 	private static int pipelines; // 1 ready, -1 failed
 
@@ -110,6 +116,19 @@ public final class Shadows {
 				.lookAt(cx + (float) z[0] * DEPTH, cy + (float) z[1] * DEPTH, cz + (float) z[2] * DEPTH, cx, cy, cz, (float) y[0], (float) y[1], (float) y[2]);
 			CLIP[c].get(MATRIX[c]);
 		}
+		// the far cascade every other frame (it covers what's far off, where a frame's delay doesn't show; about a third of the
+		// shadow work saved): on the frames in between its last map is kept and read through its own transform, moved by how far the
+		// camera has gone since
+		frameParity ^= 1;
+		double moved = FAR_CAM == null ? 1e9 : Math.abs(cam.x - FAR_CAM[0]) + Math.abs(cam.y - FAR_CAM[1]) + Math.abs(cam.z - FAR_CAM[2]);
+		skipFar = Settings.shadowFarAlternate && FAR_CAM != null && frameParity == 1 && moved < 8.0 && farLightRun == run;
+		if (skipFar) {
+			new Matrix4f(FAR_CLIP).translate((float) (cam.x - FAR_CAM[0]), (float) (cam.y - FAR_CAM[1]), (float) (cam.z - FAR_CAM[2])).get(MATRIX[1]);
+		} else {
+			FAR_CLIP.set(CLIP[1]);
+			FAR_CAM = new double[] {cam.x, cam.y, cam.z};
+			farLightRun = run;
+		}
 		LIGHT[0] = (float) lx;
 		LIGHT[1] = (float) ly;
 		LIGHT[2] = (float) lz;
@@ -159,7 +178,11 @@ public final class Shadows {
 				MemoryUtil.memPutFloat(f + 88, (float) (bz - cam.z));
 				boolean drew = false;
 				for (int c = 0; c < 2; c++) {
-					if (!own.shadowCull(c, CLIP[c], LIGHT[0], LIGHT[1], LIGHT[2])) return;
+					if (c == 1 && skipFar) continue;
+					if (!own.shadowCull(c, CLIP[c], LIGHT[0], LIGHT[1], LIGHT[2])) {
+						if (c == 1) FAR_CAM = null;
+						return;
+					}
 					long[] b = own.shadowBuffers(c);
 					if (b[0] == 0 || b[4] == 0) return;
 					for (int i = 0; i < 16; i++) MemoryUtil.memPutFloat(f + i * 4L, MATRIX[c][i]);
