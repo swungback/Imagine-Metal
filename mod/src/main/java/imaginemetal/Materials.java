@@ -118,7 +118,7 @@ public final class Materials {
 	/**
 	 * Which ore (bits 4-7 of an ore's material byte; lighting.metal imOre has each one's glow, Reimagined's): 0 one we don't know
 	 * (modded: glows by its own colours), 1 iron, 2 copper, 3 gold, 4 diamond, 5 emerald, 6 lapis, 7 redstone, 8 redstone lit,
-	 * 9 coal, 10 nether quartz, 11 nether gold, 12 ancient debris, 13 gilded blackstone.
+	 * 9 coal, 10 nether quartz, 11 nether gold, 12 ancient debris, 13 gilded blackstone, 14 crimson stem, 15 warped stem.
 	 */
 	private static int oreType(String n, BlockState state) {
 		if (n.contains("ancient_debris")) return 12;
@@ -150,6 +150,10 @@ public final class Materials {
 		if (name.contains("ancient_debris") || name.contains("nether") && name.contains("_ore") || name.contains("gilded_blackstone"))
 			return (byte) (NETHER_ORE | oreType(name, state) << 4);
 		if (name.contains("_ore")) return (byte) (ORE | oreType(name, state) << 4);
+		// crimson and warped stems: their veins glow (Reimagined's terrainIPBR "Emissive Part"), through the ore path, which
+		// carries a type per block (14 crimson, 15 warped)
+		if (!name.contains("stripped") && (name.contains("crimson_stem") || name.contains("crimson_hyphae"))) return (byte) (NETHER_ORE | 14 << 4);
+		if (!name.contains("stripped") && (name.contains("warped_stem") || name.contains("warped_hyphae"))) return (byte) (NETHER_ORE | 15 << 4);
 		// sculk: its cyan specks glow like stars in the deep dark (the blocks themselves give off no light)
 		if (name.contains("sculk") && state.getLightEmission() == 0) return SCULK;
 		int light = state.getLightEmission();

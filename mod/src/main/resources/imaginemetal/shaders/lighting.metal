@@ -658,6 +658,12 @@ static float imOre(uint t, float3 c, thread float3 &cm) {
 		case 13u:  // gilded blackstone
 			if (c.r > c.b * 3.0) return c.g * 1.5;
 			break;
+		case 14u:  // crimson stem and hyphae: the orange veins (Reimagined: red over blue past 2.5)
+			if (c.r > 2.5 * c.b) { cm = float3(1.0, 0.5, 0.5); return c.r * c.r * 6.5; }
+			break;
+		case 15u:  // warped stem and hyphae: the teal veins
+			if (c.r < 0.37 * c.b || c.r + c.g * 3.0 < 3.4 * c.b) { float g = c.g + 0.2 * c.b; return g * g * 4.5 + 0.15; }
+			break;
 		default:
 			break;
 	}
