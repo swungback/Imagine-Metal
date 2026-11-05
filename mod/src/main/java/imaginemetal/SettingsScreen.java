@@ -71,6 +71,8 @@ public final class SettingsScreen extends OptionsSubScreen {
 					"The air near lights glows faintly in their colour (Reimagined's coloured light fog). Needs coloured light."));
 				this.list.addBig(toggle("Sunlight through stained glass", Settings.glassSun, v -> Settings.glassSun = v,
 					"Sunlight coming through stained glass takes its colour, throwing coloured light on the floor. Needs coloured light."));
+				this.list.addBig(toggle("Mob shadows", Settings.mobShadows, v -> Settings.mobShadows = v,
+					"Mobs, players and items cast short shadows on the ground beside them in the sun."));
 				this.list.addHeader(Component.literal("Light"));
 				this.list.addSmall(toggle("Coloured light", Settings.coloredLight, v -> Settings.coloredLight = v,
 					"Light sources light the world in their own colours: soul fire blue, redstone red, lava orange."),

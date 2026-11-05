@@ -67,7 +67,7 @@ public final class EntityShade {
 			Matcher m = FS_MAIN.matcher(fs);
 			if (!m.find() || !fs.contains("out.fragColor")) return null;
 			String f = fs.substring(0, m.end()) + ", constant float4& imOn [[buffer(25)]]" + fs.substring(m.end());
-			f = beforeLastReturn(f, "    out.fragColor.xyz *= imOn.x > 0.5 ? 2.6 : 1.5;");
+			f = beforeLastReturn(f, "    out.fragColor.xyz *= imOn.x > 0.5 && imOn.x < 1.5 ? 2.6 : 1.5;");
 			if (f == null) return null;
 			System.out.println("[Imagine Metal] glint glow: " + name);
 			return new String[] {vs, f};
@@ -87,7 +87,7 @@ public final class EntityShade {
 			String f = fs.substring(0, m.end()) + ", constant float4& imOn [[buffer(25)]]" + fs.substring(m.end());
 			f = beforeLastReturn(f, "    { float3 ec = out.fragColor.xyz; float el = max(max(ec.x, ec.y), ec.z);\n"
 				+ "      ec = mix(float3(el) * float3(0.35, 1.0, 0.95), ec, 0.35) + float3(0.0, 0.035, 0.04);\n"
-				+ "      out.fragColor.xyz = ec * (imOn.x > 0.5 ? 2.2 : 1.2); }");
+				+ "      out.fragColor.xyz = ec * (imOn.x > 0.5 && imOn.x < 1.5 ? 2.2 : 1.2); }");
 			if (f == null) return null;
 			System.out.println("[Imagine Metal] end portal glow: " + name);
 			return new String[] {vs, f};
@@ -100,6 +100,7 @@ public final class EntityShade {
 		"pipeline/cutout_block", "pipeline/translucent_block"};
 	private static final String[] SKIP = {"oit_", "terrain", "text", "wireframe", "weather", "leash", "beam", "breeze", "lines", "gui", "eyes"};
 
+	private static final Pattern PROJ = Pattern.compile("constant\\s+Projection&\\s+(\\w+)");
 	private static final Pattern VS_MAIN = Pattern.compile("vertex\\s+main0_out\\s+main0\\s*\\(\\s*main0_in\\s+in\\s*\\[\\[stage_in\\]\\]");
 	private static final Pattern FS_MAIN = Pattern.compile("fragment\\s+main0_out\\s+main0\\s*\\(\\s*main0_in\\s+in\\s*\\[\\[stage_in\\]\\]");
 
@@ -121,14 +122,18 @@ public final class EntityShade {
 		Matcher m = VS_MAIN.matcher(vs);
 		if (!m.find()) return null;
 		String v = vs.substring(0, m.end()) + ", constant float4& imOn [[buffer(25)]]" + vs.substring(m.end());
-		v = addMembers(v, "main0_out", "    float3 imPos [[user(locn20)]];\n    float3 imNrm [[user(locn21)]];\n    float2 imLm [[user(locn22)]];");
+		v = addMembers(v, "main0_out", "    float3 imPos [[user(locn20)]];\n    float3 imNrm [[user(locn21)]];\n    float2 imLm [[user(locn22)]];\n    float imHand [[user(locn23)]];");
 		if (v == null) return null;
 		boolean normal = v.contains("in.Normal"), uv2 = v.contains("in.UV2"), color = v.contains("in.Color");
 		StringBuilder c = new StringBuilder();
 		c.append("    out.imPos = in.Position;\n");
 		c.append("    out.imNrm = ").append(normal && !particle ? "in.Normal" : "float3(0.0)").append(";\n");
 		c.append("    out.imLm = ").append(uv2 ? "float2(in.UV2) / 240.0" : "float2(1.0)").append(";\n");
-		c.append("    if (imOn.x > 0.5) {\n");
+		// (outside the level's pass (imOn 2): only the hand, told from the inventory's flat items by its perspective projection)
+		Matcher pm = PROJ.matcher(v);
+		String persp = pm.find() ? pm.group(1) + ".ProjMat[2][3] != 0.0" : "false";
+		c.append("    out.imHand = imOn.x > 1.5 && ").append(persp).append(" ? 1.0 : 0.0;\n");
+		c.append("    if (imOn.x > 0.5 && (imOn.x < 1.5 || out.imHand > 0.5)) {\n");
 		if (color) {
 			if (v.contains("out.vertexPerFaceColorBack")) c.append("        out.vertexPerFaceColorBack = in.Color;\n        out.vertexPerFaceColorFront = in.Color;\n");
 			if (v.contains("out.vertexColor")) c.append("        out.vertexColor = in.Color;\n");
@@ -144,10 +149,13 @@ public final class EntityShade {
 		String f = fs.substring(0, m.end()) + ", constant float4& imOn [[buffer(25)]], constant ImFrame& imf [[buffer(30)]]"
 			+ ", depth2d_array<float> imShadowMap [[texture(20)]], sampler imShadowCmp [[sampler(13)]]"
 			+ ", texture3d<float> imLightVol [[texture(21)]], sampler imLightSampler [[sampler(12)]]" + fs.substring(m.end());
-		f = addMembers(f, "main0_in", "    float3 imPos [[user(locn20)]];\n    float3 imNrm [[user(locn21)]];\n    float2 imLm [[user(locn22)]];");
+		f = addMembers(f, "main0_in", "    float3 imPos [[user(locn20)]];\n    float3 imNrm [[user(locn21)]];\n    float2 imLm [[user(locn22)]];\n    float imHand [[user(locn23)]];");
 		if (f == null) return null;
-		f = beforeLastReturn(f, "    if (imOn.x > 0.5) out.fragColor.xyz = imShadeEntity(out.fragColor.xyz, in.imPos, in.imNrm, in.imLm, imf, imShadowMap,"
-			+ " imShadowCmp, imLightVol, imLightSampler, " + kind + ");");
+		// (the hand: lit at the eye, as a thing held there; its torch's flame glowing as a dropped one's does)
+		f = beforeLastReturn(f, "    if (imOn.x > 0.5 && imOn.x < 1.5) out.fragColor.xyz = imShadeEntity(out.fragColor.xyz, in.imPos, in.imNrm, in.imLm, imf,"
+			+ " imShadowMap, imShadowCmp, imLightVol, imLightSampler, " + kind + ");\n"
+			+ "    else if (imOn.x > 1.5 && in.imHand > 0.5) out.fragColor.xyz = imShadeEntity(out.fragColor.xyz, float3(0.0, -0.4, 0.001),"
+			+ " float3(0.0), in.imLm, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, 1.0);");
 		if (f == null) return null;
 		if (lighting == null) lighting = Engine.resource("/imaginemetal/shaders/lighting.metal");
 		return lighting + "\n// ---- Minecraft's shader (SPIRV-Cross), patched ----\n" + f;
@@ -161,7 +169,7 @@ public final class EntityShade {
 				var symbol = MetalBridge.library().find("mc_im_entity_bind").orElseThrow();
 				bind = Linker.nativeLinker().downcallHandle(symbol, FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT), Linker.Option.critical(false));
 			}
-			bind.invokeExact(enc, level && Settings.entityLight ? 1 : 0);
+			bind.invokeExact(enc, !Settings.entityLight ? 0 : level ? 1 : 2);
 		} catch (Throwable t) {
 			bindFailed = true;
 			System.out.println("[Imagine Metal] entity light off: " + t);

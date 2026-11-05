@@ -63,7 +63,7 @@ struct ImFrame {
 	float4 nether;       // the Nether's haze (Reimagined's netherColor as the terrain shows it, linear), w its full distance (0: not ours)
 	float4 extra;        // x 1 = portal effects, y 1 = sunlight coloured by stained glass, z 1 = an End portal near (endPortal), w 1 = night nebula
 	float4 endPortal;    // the End portal's rays (bloom.metal): xyz its middle, camera-relative; w the time (s)
-	float4 toggles;      // x 1 = coated textures, y 1 = coloured light fog (bloom.metal)
+	float4 toggles;      // x 1 = coated textures, y 1 = coloured light fog (bloom.metal), z 1 = mob shadows
 };
 
 static inline float imSqrt2(float x) { x = 1.0 - x; x *= x; x *= x; return 1.0 - x; }
@@ -615,6 +615,34 @@ static inline float imValueNoise(float2 q) {
 	return mix(mix(imHash2(i), imHash2(i + int2(1, 0)), u.x), mix(imHash2(i + int2(0, 1)), imHash2(i + int2(1, 1)), u.x), u.y);
 }
 
+// Contact shadows toward the sun from the last frame's depth: what the screen showed between this point and the sun, up to 3 blocks
+// away, shades it. Mobs, players and items aren't drawn into the shadow map, so this is their shadow on the ground beside them.
+static float imContactShadow(float3 p, float3 n, constant ImFrame &f, depth2d<float> hd, float dither) {
+	float dist = length(p);
+	if (dist > 40.0) return 1.0;
+	float3 q = p + f.histShift.xyz + n * (0.04 + dist * 0.003);
+	float2 size = float2(hd.get_width(), hd.get_height());
+	float3 L = f.lightDir.xyz;
+	float occ = 0.0;
+	for (int i = 0; i < 10; i++) {
+		float t = (float(i) + dither) * 0.3;
+		float3 r = q + L * t;
+		float4 c = f.histClip * float4(r, 1.0);
+		if (c.w <= 0.05) break;
+		float2 ndc = c.xy / c.w;
+		if (any(abs(ndc) > 1.0)) break;
+		float d = hd.read(uint2(clamp(ndc * 0.5 + 0.5, 0.0, 0.9999) * size));
+		float4 sp = f.histClipInv * float4(ndc, d, 1.0);
+		float diff = length(r) - length(sp.xyz / sp.w);
+		// (just behind a surface the screen shows: something is between here and the sun; far behind is only passing behind it)
+		if (diff > 0.03 + length(r) * 0.003 && diff < 0.9) {
+			occ = 1.0 - float(i) / 12.0;
+			break;
+		}
+	}
+	return 1.0 - 0.85 * occ * (1.0 - smoothstep(24.0, 40.0, dist));
+}
+
 // Sunlight through stained glass (Reimagined's coloured shadows): from the surface toward the sun, block by block through the
 // coloured light grid's seeds (light.metal: bit 6 of a marks stained glass, rgb its colour), the light takes the colour of
 // each pane it passes, as through a coloured filter. Up to 20 blocks; solid blocks end it (the shadow map has those).
@@ -830,6 +858,8 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	float2 sm = imShadow(p, n, pixel, f, smap, cmp);
 	float open = smoothstep(0.45, 0.9, sky);
 	float sun = mix(open, sm.x, sm.y) * (f.water.z > 0.5 && f.flags.x == 0 ? 0.3 + 0.7 * smoothstep(0.0, 0.6, sky) : smoothstep(0.0, 0.07, sky));
+	// mobs' and items' shadows (they aren't in the shadow map): a short trace toward the sun through the last frame's depth
+	if (f.toggles.z > 0.5 && sun > 0.02 && f.histShift.w > 0.5 && kind == 0u) sun *= imContactShadow(p, n, f, hd, imDither(pixel, f));
 	// caustics (eyes under water: what you see is under it too): the waves above focus the sunlight into a moving net of bright
 	// lines on everything it reaches, from two drifting noises' crossings, along the light's direction
 	if (f.water.z > 0.5 && f.flags.x == 0 && sun > 0.0) {
@@ -864,7 +894,8 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	if (f.water.z > 0.5 && f.flags.x == 0) ambient += float3(0.04, 0.09, 0.12) * mix(0.12, 1.0, f.nightMiddle.w);
 
 	// torches: warm, weaker in full daylight
-	float4 bl = imBlockLight(p, n, f, lvol, lsamp);
+	// (no block light and full daylight: the grid's eight reads skipped, most of an open landscape by day)
+	float4 bl = block < 0.01 && sky > 0.97 && f.blockColor.w > 0.5 ? float4(f.blockColor.rgb, 0.0) : imBlockLight(p, n, f, lvol, lsamp);
 	float3 torch = bl.rgb * imBlockCurve(max(block, bl.a)) * (1.0 - 0.25 * f.blockColor.w * smoothstep(0.5, 1.0, sky));
 	// the light in the player's hands: a level falling one a block from the eye, as a placed light would, softer at the edge
 	if (f.held.w > 0.0) {

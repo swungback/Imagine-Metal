@@ -31,7 +31,7 @@ public final class Benchmark {
 
 	public static void start() {
 		saved = new boolean[] {Settings.shadows, Settings.ssao, Settings.shafts, Settings.pbr, Settings.taa, Settings.coloredLight,
-			Settings.entityLight, Settings.bloom, Settings.bloomFog, Settings.clouds, Settings.glassReflections, Settings.glassSun, Settings.lightFog};
+			Settings.entityLight, Settings.bloom, Settings.bloomFog, Settings.clouds, Settings.glassReflections, Settings.glassSun, Settings.lightFog, Settings.mobShadows};
 		savedWater = Settings.waterStyle;
 		steps = new ArrayList<>();
 		steps.add(new Step("everything on", () -> {
@@ -44,6 +44,7 @@ public final class Benchmark {
 		steps.add(new Step("coloured light off", () -> Settings.coloredLight = false));
 		steps.add(new Step("sunlight through glass off", () -> Settings.glassSun = false));
 		steps.add(new Step("light fog off", () -> Settings.lightFog = false));
+		steps.add(new Step("mob shadows off", () -> Settings.mobShadows = false));
 		steps.add(new Step("mobs and items lit off", () -> Settings.entityLight = false));
 		steps.add(new Step("bloom off", () -> Settings.bloom = false));
 		steps.add(new Step("bloom fog off", () -> Settings.bloomFog = false));
@@ -118,6 +119,7 @@ public final class Benchmark {
 		Settings.glassReflections = saved[10];
 		Settings.glassSun = saved[11];
 		Settings.lightFog = saved[12];
+		Settings.mobShadows = saved[13];
 		Settings.waterStyle = savedWater;
 	}
 

@@ -490,7 +490,7 @@ public final class ImagineFrame {
 		float tSec = (float) ((System.nanoTime() / 1e9) % 1000.0);
 		if (pc != null) put(pc[0], pc[1], pc[2], tSec);
 		else put(0f, 0f, 0f, tSec);
-		put(Settings.coated ? 1f : 0f, Settings.lightFog && Settings.coloredLight ? 1f : 0f, 0f, 0f);
+		put(Settings.coated ? 1f : 0f, Settings.lightFog && Settings.coloredLight ? 1f : 0f, Settings.mobShadows && Settings.shadows ? 1f : 0f, 0f);
 		if (BUF.position() != SIZE) throw new IllegalStateException("ImFrame is " + BUF.position() + " bytes, not " + SIZE);
 	}
 

@@ -8,7 +8,7 @@ OUT = sys.argv[2]
 lighting = open(os.path.join(R, 'imaginemetal/shaders/lighting.metal')).read()
 VS_MAIN = re.compile(r'vertex\s+main0_out\s+main0\s*\(\s*main0_in\s+in\s*\[\[stage_in\]\]')
 FS_MAIN = re.compile(r'fragment\s+main0_out\s+main0\s*\(\s*main0_in\s+in\s*\[\[stage_in\]\]')
-MEMBERS = '    float3 imPos [[user(locn20)]];\n    float3 imNrm [[user(locn21)]];\n    float2 imLm [[user(locn22)]];'
+MEMBERS = '    float3 imPos [[user(locn20)]];\n    float3 imNrm [[user(locn21)]];\n    float2 imLm [[user(locn22)]];\n    float imHand [[user(locn23)]];'
 
 def add_members(src, struct):
     s = src.find('struct ' + struct)
@@ -31,7 +31,10 @@ def patch_vs(vs, particle):
     c = '    out.imPos = in.Position;\n'
     c += '    out.imNrm = ' + ('in.Normal' if normal and not particle else 'float3(0.0)') + ';\n'
     c += '    out.imLm = ' + ('float2(in.UV2) / 240.0' if uv2 else 'float2(1.0)') + ';\n'
-    c += '    if (imOn.x > 0.5) {\n'
+    pm = re.search(r'constant\s+Projection&\s+(\w+)', v)
+    persp = (pm.group(1) + '.ProjMat[2][3] != 0.0') if pm else 'false'
+    c += '    out.imHand = imOn.x > 1.5 && ' + persp + ' ? 1.0 : 0.0;\n'
+    c += '    if (imOn.x > 0.5 && (imOn.x < 1.5 || out.imHand > 0.5)) {\n'
     if color:
         if 'out.vertexPerFaceColorBack' in v: c += '        out.vertexPerFaceColorBack = in.Color;\n        out.vertexPerFaceColorFront = in.Color;\n'
         if 'out.vertexColor' in v: c += '        out.vertexColor = in.Color;\n'
@@ -48,8 +51,10 @@ def patch_fs(fs):
         ', texture3d<float> imLightVol [[texture(21)]], sampler imLightSampler [[sampler(12)]]') + fs[m.end():]
     f = add_members(f, 'main0_in')
     if f is None: return None
-    f = before_last_return(f, '    if (imOn.x > 0.5) out.fragColor.xyz = imShadeEntity(out.fragColor.xyz, in.imPos, in.imNrm, in.imLm, imf, imShadowMap,'
-        ' imShadowCmp, imLightVol, imLightSampler, ' + '0.0);')
+    f = before_last_return(f, '    if (imOn.x > 0.5 && imOn.x < 1.5) out.fragColor.xyz = imShadeEntity(out.fragColor.xyz, in.imPos, in.imNrm, in.imLm, imf,'
+        ' imShadowMap, imShadowCmp, imLightVol, imLightSampler, 0.0);\n'
+        '    else if (imOn.x > 1.5 && in.imHand > 0.5) out.fragColor.xyz = imShadeEntity(out.fragColor.xyz, float3(0.0, -0.4, 0.001),'
+        ' float3(0.0), in.imLm, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, 1.0);')
     if f is None: return None
     return lighting + '\n// ---- Minecraft\'s shader (SPIRV-Cross), patched ----\n' + f
 
