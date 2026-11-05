@@ -197,16 +197,11 @@ static inline float3 imFaceNormal(float3 p, thread bool &slanted) {
 // One cascade's 3x3 tent filter at uv (each tap 2x2 filtered by the compare sampler). A fixed pattern: soft edges that stay still
 // when the view turns (a per-pixel rotated pattern crawled).
 static inline float imShadowPcf(depth2d_array<float> smap, sampler cmp, float2 uv, float ref, uint slice) {
-	float o = 1.5 / float(smap.get_width());
-	float lit = 0.0, wsum = 0.0;
-	for (int j = -1; j <= 1; j++) {
-		for (int i = -1; i <= 1; i++) {
-			float w = (2.0 - abs(float(i))) * (2.0 - abs(float(j)));
-			lit += w * smap.sample_compare(cmp, uv + float2(i, j) * o, slice, ref);
-			wsum += w;
-		}
-	}
-	return lit / wsum;
+	// (four filtered compares (each one 2x2 texels) three quarters of a texel out: about the softness of the nine taps it
+	// replaced, at under half the reads, on every pixel the sun reaches)
+	float o = 0.75 / float(smap.get_width());
+	return 0.25 * (smap.sample_compare(cmp, uv + float2(-o, -o), slice, ref) + smap.sample_compare(cmp, uv + float2(o, -o), slice, ref)
+		+ smap.sample_compare(cmp, uv + float2(-o, o), slice, ref) + smap.sample_compare(cmp, uv + float2(o, o), slice, ref));
 }
 
 // The depth one shadow texel spans along a surface at this slope (tan of the light's angle to the normal), in the cascade's depth
@@ -488,8 +483,11 @@ static float4 imReflect(float3 p, float3 n, float3 R, float lod, float dither, c
 	float3 q = p + f.histShift.xyz + n * (0.03 + dist * 0.004);
 	float2 size = float2(hd.get_width(), hd.get_height());
 	float stepLen = 0.2 + dist * 0.03;
-	float t = stepLen * (0.25 + 0.75 * dither), tPrev = 0.0;
-	for (int i = 0; i < 26; i++) {
+	// (the start jittered over half a step, not most of one: a full step's jitter put neighbouring pixels on either side of
+	// an edge, hit and missed, the static on water and polished floors that TAA couldn't settle)
+	float t = stepLen * (0.5 + 0.5 * dither), tPrev = 0.0;
+	// (18 steps growing by 1.4: as far as the 26 by 1.3 reached, with fewer reads of the depth)
+	for (int i = 0; i < 18; i++) {
 		float3 r = q + R * t;
 		float4 c = f.histClip * float4(r, 1.0);
 		if (c.w <= 0.05) break;
@@ -508,7 +506,7 @@ static float4 imReflect(float3 p, float3 n, float3 R, float lod, float dither, c
 			if (thinTest && diff > 0.15 + stepLen * 0.6) return float4(0.0, 0.0, 0.0, -1.0);
 			float a = tPrev, b = t;
 			float2 uv = float2(0.0);
-			for (int j = 0; j < 6; j++) {
+			for (int j = 0; j < 5; j++) {
 				float m = 0.5 * (a + b);
 				float3 rm = q + R * m;
 				float4 cm = f.histClip * float4(rm, 1.0);
@@ -524,14 +522,16 @@ static float4 imReflect(float3 p, float3 n, float3 R, float lod, float dither, c
 			float db = hd.read(uint2(clamp(uv, 0.0, 0.9999) * size));
 			float4 spb = f.histClipInv * float4(nb, db, 1.0);
 			if (abs(length(rb) - length(spb.xyz / spb.w)) > 0.1 + 0.01 * length(rb)) return float4(0.0, 0.0, 0.0, -1.0);
+			// (fading out over the outer part of the screen: rays from the upper part of the picture leave it soon, and a hard cut
+			// there between reflection and sky flickered as the jitter moved it)
 			float2 e = abs(nb);
-			float edge = saturate(1.0 - pow(max(e.x, e.y), 24.0));
+			float edge = (1.0 - smoothstep(0.8, 1.0, e.x)) * (1.0 - smoothstep(0.6, 1.0, e.y));
 			float3 col = hc.sample(hs, uv, level(lod)).rgb;
 			return float4(pow(max(col, 0.0), 2.2), edge);
 		}
 		tPrev = t;
 		t += stepLen;
-		stepLen *= 1.3;
+		stepLen *= 1.4;
 	}
 	return float4(0.0);
 }
@@ -848,6 +848,11 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		}
 	}
 	if (oreE > 0.0) albedo *= oreCm;
+	// (sand and sandstone a little richer and less bright: in full sun they washed out to a flat white)
+	if (cls == IM_MAT_SAND && kind == 0u) {
+		float al = imLuma(albedo);
+		albedo = max(al + (albedo - al) * 1.3, 0.0) * 0.93;
+	}
 	float3 base = pow(max(albedo, 0.0), 2.2);
 	bool pbr = f.shadow.w > 0.5 && f.flags.y == 0;
 	// Reimagined's coated textures: each texel a touch lighter or darker than its neighbours, so flat colours read as a material
@@ -1127,8 +1132,9 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			if (open * smoothstep(-0.1, 0.2, R.y) > 0.0)
 				skyR = (f.flags.x == 0 ? imPresent(imSkyColor(R, f, false), f) : imPresent(f.ambientUp.rgb * 2.0, f)) * (open * open)
 					* smoothstep(-0.1, 0.2, R.y);
-			float3 refl = hit.a > 0.0 ? mix(skyR, hit.rgb, hit.a) : skyR;
-			if (hit.a < 0.0) fm = 0.0;
+			// (a ray that passed behind something: the surface itself, a little darker, not no reflection at all: pixel by pixel
+			// that switched the reflection on and off, a grain)
+			float3 refl = hit.a > 0.0 ? mix(skyR, hit.rgb, hit.a) : hit.a < 0.0 ? c * 0.9 : skyR;
 			// (texture kept: Reimagined keeps 70 % of the surface under its reflection)
 			refl = mix(refl, max(c, refl), 0.7);
 			if (surf.metal < 0.5) fm *= cls == IM_MAT_GEM ? mix(1.0, 0.5, gemDark) : 0.75;  // (a dark gem or obsidian stays dark: its reflection a sheen over it)
@@ -1233,7 +1239,10 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 		float3 litG = pow(sqrt(dayG * dayG + tG * tG + mG * mG), 2.2);
 		lit = mix(lit, litG, f.nightMiddle.w);
 	}
-	float3 radiance = base * lit * f.minLight.w;
+	// (shaded by which way the face points, as the terrain's blocks are: tops full, sides a little less, undersides darker; mobs
+	// lit evenly from every side read flat, cut-outs)
+	float face = particle ? 1.0 : (n.y >= 0.0 ? 1.0 : 1.0 + 0.4 * n.y) * (1.0 + 0.05 * abs(n.z) - 0.12 * abs(n.x));
+	float3 radiance = base * lit * face * f.minLight.w;
 	if (kind > 1.5 && !particle) {
 		// armour (Reimagined gives it a metal's smoothness by the texture's brightness): a sharp sun highlight and the sky's light
 		// mirrored, stronger at a grazing angle, both tinted by the metal's own colour; dull cloth and leather barely
@@ -1252,8 +1261,10 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 	// saturated warm pixels glow past white, so the bloom haloes them and they aren't dark in a cave
 	if (item) {
 		float hi = max(max(base.r, base.g), base.b), lo = min(min(base.r, base.g), base.b);
+		// (warm, or the soul flame's cyan: green and blue well over red, and bright)
 		float warm = step(base.b, base.g) * step(base.g, base.r);
-		float e = warm * smoothstep(0.55, 0.85, hi) * smoothstep(0.45, 0.75, (hi - lo) / max(hi, 1e-3));
+		float soul = step(base.r * 1.6, base.g) * step(base.r * 1.6, base.b) * smoothstep(0.7, 0.9, hi);
+		float e = max(warm, soul) * smoothstep(0.55, 0.85, hi) * smoothstep(0.45, 0.75, (hi - lo) / max(hi, 1e-3));
 		c += base * (1.6 * e);
 	}
 	return pow(max(c, 0.0), 1.0 / 2.2);

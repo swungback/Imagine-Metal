@@ -213,6 +213,17 @@ public final class ImagineFrame {
 			// converted like the clear one for the linear colours)
 			float[] rainAmb = {0.22f, 0.22f, 0.36f};
 			for (int i = 0; i < 3; i++) up[i] = mix(up[i], mix(NIGHT_SKY[i] * 1.2f * Settings.nightBrightness, rainAmb[i], day), rain);
+			// dry biomes (desert, badlands, savanna) by day: a warmer sun and warm, softer shade (the plain sky colour there is a pale
+			// cyan, and the sand's shadows came out a cold teal), so they read hot and sunny
+			float dryW = Haze.dry * day * (1f - rain);
+			if (dryW > 0f) {
+				float lum = 0.2126f * up[0] + 0.7152f * up[1] + 0.0722f * up[2];
+				float[] warmShade = {1.2f, 1.0f, 0.74f}, warmSun = {1.07f, 0.99f, 0.84f};
+				for (int i = 0; i < 3; i++) {
+					up[i] = mix(up[i], lum * warmShade[i] * 0.85f, 0.65f * dryW);
+					light[i] *= mix(1f, warmSun[i], dryW);
+				}
+			}
 
 			// the sky itself: Complementary Reimagined's sky colours (lib/colors/skyColors.glsl), from Minecraft's sky colour for this
 			// biome and time (so every biome's sky keeps its own hue): a deep colour overhead, a bright band at the horizon, a
@@ -256,6 +267,11 @@ public final class ImagineFrame {
 				dayUp[i] = mix(noonUp, ssUp, invNoon2);
 				dayMid[i] = mix(noonMid, ssMid, invNoon2);
 				dayDown[i] = mix(noonDown, ssDown, invNoon2);
+				// (dry biomes: a warm, dusty horizon under a deeper blue, in place of the pale haze)
+				float dryS = Haze.dry * (1f - rain);
+				dayMid[i] *= mix(1f, new float[] {1.1f, 0.98f, 0.82f}[i], dryS);
+				dayDown[i] *= mix(1f, new float[] {1.12f, 0.97f, 0.78f}[i], dryS);
+				dayUp[i] *= mix(1f, new float[] {0.9f, 0.95f, 1.0f}[i], dryS);
 				float ncf = 0.9f * nightK[i] * (1f - 0.5f * rain) + raw[i];
 				nightUp[i] = (float) Math.pow(ncf, 0.9) * 0.45f;
 				nightMid[i] = (float) Math.sqrt(nightUp[i]) * 0.65f;
@@ -293,7 +309,8 @@ public final class ImagineFrame {
 			lightDir[2] = BLACK_HOLE[2];
 			normalize(lightDir);
 			// (IterationT's End: the islands bright in a warm white light, the shadows nearly black)
-			float[] bl = {1.9f, 1.62f, 1.3f}, sk = {0.03f, 0.03f, 0.04f};
+			// (whiter and brighter, and the shade less black: the islands read white-lit, as IterationT's)
+			float[] bl = {2.15f, 2.0f, 1.8f}, sk = {0.065f, 0.065f, 0.075f};
 			for (int i = 0; i < 3; i++) {
 				light[i] = bl[i];
 				up[i] = sk[i];

@@ -588,10 +588,11 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 			if (any(v < 0) || any(v > top)) continue;
 			float4 l = lvol.read(uint3(v));
 			if (l.a <= 0.0) continue;
+			// (by the light level squared, three times stronger than at first: at its fourth power and 0.012 it was too faint to see)
 			float a2 = l.a * l.a;
-			acc += l.rgb / max(max(max(l.r, l.g), l.b), 1e-3) * (a2 * a2);
+			acc += l.rgb / max(max(max(l.r, l.g), l.b), 1e-3) * (a2 * (0.35 + 0.65 * a2));
 		}
-		c += acc * (stepL * 0.012);
+		c += acc * (stepL * 0.036) * (1.0 - 0.6 * smoothstep(0.4, 1.2, imbLuma(c)));  // (less over what's already bright: daylight)
 	}
 	if (fx.z > 0.5) {
 		float d = depth.read(uint2(clamp(in.uv, 0.0, 0.9999) * float2(depth.get_width(), depth.get_height())));
@@ -652,7 +653,14 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 				bf *= bf;
 			}
 			float k = bf * p.grade.y;
-			float3 blur = imbLinear(pic.sample(ms, in.uv, level(4.0)).rgb) * 0.5 + imbLinear(pic.sample(ms, in.uv, level(5.5)).rgb) * 0.5;
+			// (four taps a texel of that level apart, diagonally: one tap of a small level is a coarse grid, read bilinearly a
+			// lumpy one, and bright things far off (the Nether's lava falls) got a wavy outline from it)
+			float2 pt = 16.0 / float2(pic.get_width(), pic.get_height());
+			float3 blur = float3(0.0);
+			for (int k = 0; k < 4; k++) {
+				float2 o = float2((k & 1) != 0 ? 0.7 : -0.7, (k & 2) != 0 ? 0.7 : -0.7) * pt;
+				blur += imbLinear(pic.sample(ms, in.uv + o, level(3.5)).rgb) * 0.15 + imbLinear(pic.sample(ms, in.uv + o * 2.5, level(5.0)).rgb) * 0.1;
+			}
 			c = mix(c, blur, k / (1.0 + k));
 		}
 	}
@@ -800,7 +808,8 @@ fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur 
 			// (a light sharpen against what's left of the softness, on the screen only: fed back into the history it sharpened
 			// the already sharpened picture every frame, the finest grain growing until the colour box stopped it, a crawling
 			// static over walls and floors)
-			shown = max(res + (res - m1) * 0.15, 0.0);
+			// (0.3: the softness TAA leaves read as a blurry picture at 0.15)
+			shown = max(res + (res - m1) * 0.3, 0.0);
 		}
 	}
 	o.screen = float4(shown + imbDither8(in.pos.xy), 1.0);

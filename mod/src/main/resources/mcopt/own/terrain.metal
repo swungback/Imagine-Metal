@@ -2337,23 +2337,35 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 		bool sl;
 		float3 fnT = imFaceNormal(in.imPos, sl);
 		if (imKind == 1u) {
-			// (refraction: what's under the water shifted by a slow wobble of the surface, own_fs_tr; top faces only)
+			// (own_fs_tr: imWaterN.z 1 a top face, its xy the surface's wobble (refraction); 0.5 a side face)
+			imWaterN = float3(0.0, 0.0, 0.5);
 			if (fnT.y > 0.5) {
 				float2 wq = (in.imPos.xz + imf.world.xz) * 0.9;
 				float wt = imf.world.w;
 				imWaterN = float3(imValueNoise(wq + float2(wt * 0.5, wt * 0.3)) - 0.5, imValueNoise(wq * 1.3 - float2(wt * 0.4, wt * 0.6) + 7.0) - 0.5, 1.0);
 			}
-			// Reimagined (water.glsl, its own style): the texture squared, tinted by the biome's water colour (its green kept up),
-			// a little warmer; nearly opaque where deep, clear up close, opaque at a grazing angle
-			float3 wc = getColor(in).rgb;
+			float3 wc = getColor(in).rgb;  // (the biome's water colour: Minecraft's tint)
 			wc.g = max(wc.g, 0.39);
-			wc = sqrt(wc) * float3(1.0, 0.85, 0.8);
-			color.rgb = texel.rgb * texel.rgb * wc;
-			float a = 1.0 - (1.0 - color.a) * (1.0 - color.a);
-			color.a = a * (0.3 + 0.4 * smoothstep(4.0, 48.0, length(in.imPos)));
 			float fr = 1.0 - saturate(dot(fnT, -normalize(in.imPos)));
 			fr *= fr;
-			color.a = mix(color.a, 1.0, fr * fr);
+			if (imf.toggles.w > 0.5 && imf.water.z < 0.5) {
+				// with the depth under the water (own_fs_tr): the water body's colour, the biome's (normalized, brightened, nudged a
+				// little toward turquoise), lit like any surface; own_fs_tr lays it over what's under the water by how deep it is.
+				// Here only the surface's own share: its ripples faintly, and more at a grazing angle
+				float3 wn = wc / max(max(wc.r, max(wc.g, wc.b)), 1e-3);
+				wn = mix(wn, float3(0.25, 0.8, 0.9), 0.2);
+				float tl = dot(texel.rgb, float3(0.299, 0.587, 0.114));
+				color.rgb = wn * (0.34 + 0.3 * tl);
+				color.a = mix(0.05 + 0.1 * tl * tl, 1.0, fr * fr * 0.9);
+			} else {
+				// Reimagined (water.glsl, its own style): the texture squared, tinted by the biome's water colour (its green kept up),
+				// a little warmer; nearly opaque where deep, clear up close, opaque at a grazing angle
+				float3 wq3 = sqrt(wc) * float3(1.0, 0.9, 0.85);
+				color.rgb = texel.rgb * texel.rgb * wq3 * 1.25;
+				float a = 1.0 - (1.0 - color.a) * (1.0 - color.a);
+				color.a = a * (0.3 + 0.35 * smoothstep(4.0, 48.0, length(in.imPos)));
+				color.a = mix(color.a, 1.0, fr * fr);
+			}
 			if (imf.water.z > 0.5) {
 				// (from below: past a steep angle the surface mirrors the water under it (total internal reflection), so it reads as
 				// the deep water's colour, not the bright sky behind it, which showed as a white band along the far surface)
@@ -2363,8 +2375,9 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 				color.rgb = mix(color.rgb, pow(imPresent(wfc0, imf), 1.0 / 2.2), tir);
 				color.a = mix(color.a, 1.0, tir);
 			}
-			// what's under the water turns blue (Reimagined's translucentMult: the biome's water colour, normalized; less far away)
-			if (imf.water.z < 0.5) {
+			// what's under the water turns blue (Reimagined's translucentMult: the biome's water colour, normalized; less far away;
+			// with the depth under the water, own_fs_tr's absorption by how deep it is instead)
+			if (imf.water.z < 0.5 && imf.toggles.w < 0.5) {
 				float3 wt = getColor(in).rgb;
 				wt = 1.0 - (1.0 - wt) * (1.0 - wt);
 				wt = normalize(max(wt, 1e-3));
@@ -2474,28 +2487,44 @@ fragment float4 own_fs_tr(VOut in [[stage_in]], float4 imDst [[color(0)]], const
 		imHistSampler, imTint, imWaterN);
 	float a = saturate(c.a);
 	float3 dst = imDst.rgb;
+	float3 behind;
 	float foam = 0.0;
-	if (imWaterN.z > 0.5 && imf.toggles.w > 0.5) {
-		// water over what was drawn before it (the copy taken before this pass): how deep it is here, from that depth; what's under
-		// it shifted by the surface's wobble, more where it's deeper (never toward something in front of the water); and foam
-		// where it's only a sliver deep, along the shore
+	if (imWaterN.z > 0.25 && imf.toggles.w > 0.5 && imf.water.z < 0.5) {
+		// water seen from above, with the opaque picture and depth taken before this pass: how much water the view crosses here
+		// (along this pixel's ray the distance goes as 1 / depth, reversed Z; the far plane's term left out, a few percent at most
+		// over the 64 blocks that count), then what's under it: shifted by the surface's wobble (top faces), its colours absorbed
+		// by the water (red first, by the biome's colour), and the water body's own colour over it, thicker the deeper, never
+		// quite opaque: the shallows clear, the deep a murky but still see-through blue
 		float2 sz = float2(imUnder.get_width(), imUnder.get_height());
-		float2 uv0 = in.pos.xy / sz;
-		float du0 = imUnderDepth.read(uint2(min(in.pos.xy, sz - 1.0)));
-		float4 sp = imf.histClipInv * float4(uv0 * 2.0 - 1.0, max(du0, 1e-6), 1.0);
-		float3 under = sp.xyz / sp.w - imf.histShift.xyz;
+		uint2 pi = uint2(min(in.pos.xy, sz - 1.0));
+		float du0 = imUnderDepth.read(pi);
 		float dist = length(in.imPos);
-		float thick = du0 <= 1e-6 ? 64.0 : max(length(under) - dist, 0.0);
-		float2 uv1 = uv0 + imWaterN.xy * (0.05 * saturate(thick * 0.6) / max(1.0, dist * 0.08));
-		float du1 = imUnderDepth.read(uint2(clamp(uv1 * sz, float2(0.0), sz - 1.0)));
-		if (du1 < in.pos.z) dst = imUnder.sample(imHistSampler, uv1).rgb;
-		float edge = 1.0 - smoothstep(0.02, 0.45, thick);
-		float fn = imValueNoise((in.imPos.xz + imf.world.xz) * 3.0 + imf.world.w * 0.4);
-		foam = edge * smoothstep(0.25, 0.6, fn + edge * 0.35) * (1.0 - smoothstep(32.0, 64.0, dist));
+		float thick = du0 <= 1e-7 ? 64.0 : clamp(dist * (in.pos.z / du0 - 1.0), 0.0, 64.0);
+		if (imWaterN.z > 0.75) {
+			float2 uv1 = in.pos.xy / sz + imWaterN.xy * (0.045 * saturate(thick * 0.5) / max(1.0, dist * 0.08));
+			uint2 p1 = uint2(clamp(uv1 * sz, float2(0.0), sz - 1.0));
+			float du1 = imUnderDepth.read(p1);
+			// (only toward something that's under the water too: never toward a thing in front of it)
+			if (du1 < in.pos.z) dst = imUnder.read(p1).rgb;
+			else dst = imUnder.read(pi).rgb;
+			float edge = 1.0 - smoothstep(0.03, 0.35, thick);
+			float fn = imValueNoise((in.imPos.xz + imf.world.xz) * 3.0 + imf.world.w * 0.4);
+			foam = edge * smoothstep(0.35, 0.7, fn + edge * 0.3) * (1.0 - smoothstep(24.0, 48.0, dist)) * 0.55;
+		} else {
+			dst = imUnder.read(pi).rgb;
+		}
+		float3 wc = getColor(in).rgb;
+		wc.g = max(wc.g, 0.39);
+		float3 wn = wc / max(max(wc.r, max(wc.g, wc.b)), 1e-3);
+		float3 absorb = (1.0 - wn) * 0.42 + 0.035;
+		behind = pow(max(dst, 0.0), 2.2) * exp(-absorb * thick);
+		float vol = (1.0 - exp(-thick * 0.16)) * 0.82;
+		a = max(a, vol);
+	} else {
+		behind = pow(max(dst, 0.0), 2.2) * imTint;
 	}
-	float3 behind = pow(max(dst, 0.0), 2.2) * imTint;
 	float3 col = mix(behind, pow(max(c.rgb, 0.0), 2.2), a);
-	if (foam > 0.0) col = mix(col, pow(saturate(c.rgb * 1.6 + 0.35), 2.2), foam * 0.75);
+	if (foam > 0.0) col = mix(col, pow(saturate(c.rgb * 1.5 + 0.4), 2.2), foam);
 	return float4(pow(col, 1.0 / 2.2), a + imDst.a * (1.0 - a));
 }
 #endif

@@ -39,7 +39,7 @@ public final class Haze {
 
 	// Photon's defaults: {r, g, b (sRGB), density per block}
 	private static final float[] TEMPERATE = {0.31f, 0.67f, 1.00f, 0.0005f};
-	private static final float[] ARID = {0.65f, 0.80f, 1.00f, 0.0003f};
+	private static final float[] ARID = {0.86f, 0.78f, 0.74f, 0.0003f};  // (a warm, dusty haze: the pale blue one made the desert cold)
 	private static final float[] SNOWY = {0.50f, 0.81f, 1.00f, 0.0010f};
 	private static final float[] TAIGA = {0.31f, 0.85f, 1.00f, 0.0006f};
 	private static final float[] JUNGLE = {0.40f, 0.95f, 1.00f, 0.0013f};

@@ -88,7 +88,9 @@ void mc_im_under_bind(id<MTLTexture> color, id<MTLTexture> depth);  // mcown.m
 // Before the translucent pass (no pass open on the encoder): the opaque picture and its depth, for water's refraction and its foam
 // along the shore. Returns 0 (copied or skipped), 1 with err.
 int im_under_capture(Enc *enc, ImSsr *s, id<MTLTexture> color, id<MTLTexture> depth, char *err, int errCap) {
-	if (!s || !color || !depth || enc->render) return 0;
+	// (a pass still open on the encoder is closed by mc_frame_cmd, as for the history: skipping here left the copy never taken,
+	// and the water read an empty texture, black, as what's under it)
+	if (!s || !color || !depth) return 0;
 	@autoreleasepool {
 		if (!s->under || s->under.width != color.width || s->under.height != color.height || s->under.pixelFormat != color.pixelFormat) {
 			[s->under release];
