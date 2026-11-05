@@ -61,8 +61,9 @@ struct ImFrame {
 	                     // w how wet the world is (rain, eased; 0 in dry biomes or with the setting off)
 	float4 taa;          // TAA: xy this frame's sub-pixel jitter (Minecraft's clip units, y up), z 1 = on
 	float4 nether;       // the Nether's haze (Reimagined's netherColor as the terrain shows it, linear), w its full distance (0: not ours)
-	float4 extra;        // x 1 = portal effects, y 1 = sunlight coloured by stained glass
-	float4 endPortal;    // the End portal's rays (bloom.metal): xyz its middle, camera-relative; w 1 + time (s), 0 none
+	float4 extra;        // x 1 = portal effects, y 1 = sunlight coloured by stained glass, z 1 = an End portal near (endPortal), w 1 = night nebula
+	float4 endPortal;    // the End portal's rays (bloom.metal): xyz its middle, camera-relative; w the time (s)
+	float4 toggles;      // x 1 = coated textures
 };
 
 static inline float imSqrt2(float x) { x = 1.0 - x; x *= x; x *= x; return 1.0 - x; }
@@ -760,6 +761,12 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	if (oreE > 0.0) albedo *= oreCm;
 	float3 base = pow(max(albedo, 0.0), 2.2);
 	bool pbr = f.shadow.w > 0.5 && f.flags.y == 0;
+	// Reimagined's coated textures: each texel a touch lighter or darker than its neighbours, so flat colours read as a material
+	if (f.toggles.x > 0.5 && kind == 0u && cls != IM_MAT_EMITTER && cls != IM_MAT_LAVA && cls != IM_MAT_FLAME) {
+		float2 tx = floor(uv * float2(atlas.get_width(), atlas.get_height()));
+		float hn = fract(sin(dot(tx, float2(12.9898, 78.233))) * 43758.5453);
+		albedo *= 1.0 + (hn - 0.5) * 0.14;
+	}
 	ImSurf surf = pbr ? imSurface(cls, albedo, tex) : ImSurf{0.0, 0.0, 0.0, 0.04, 0.0};
 	// (obsidian and crying obsidian: dark gems, kept to a sheen; diamond, emerald, amethyst: bright ones, kept shiny)
 	float gemDark = 1.0 - smoothstep(0.15, 0.4, imLuma(tex));
@@ -949,6 +956,8 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		return pow(gm > 1e-4 ? gl.rgb / gm * saturate(gl.a * 1.5) : float3(0.0), 1.0 / 2.2) * 0.9 + base * 0.1;
 	}
 	float emit = oreT != 0u ? 0.0 : imEmission(cls, tex);
+	// (Reimagined's distant light bokeh: far torches, lanterns and glowstone glow brighter, so they read as soft points of light)
+	if (cls == IM_MAT_FLAME || cls == IM_MAT_EMITTER) emit *= 1.0 + 1.8 * smoothstep(20.0, 140.0, length(p));
 	if (cls == IM_MAT_LAVA) {
 		// lava's slow currents (after Reimagined's lava noise): two layers of noise drifting against each other across the surface,
 		// hotter where they meet, so a lava lake churns instead of only playing its texture's loop
@@ -1127,13 +1136,13 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 		// mirrored, stronger at a grazing angle, both tinted by the metal's own colour; dull cloth and leather barely
 		float3 V = -normalize(p);
 		float3 H = normalize(V + f.lightDir.xyz);
-		float shine = smoothstep(0.08, 0.55, imLuma(base));
-		float sp = pow(saturate(dot(n, H)), 40.0) * 5.0 * sun * saturate(nl * 4.0);
+		float shine = smoothstep(0.03, 0.3, imLuma(base));
+		float sp = pow(saturate(dot(n, H)), 24.0) * 3.5 * sun * saturate(nl * 4.0);
 		float3 R = reflect(-V, n);
 		float fres = pow(1.0 - saturate(dot(n, V)), 4.0);
 		float3 env = mix(f.ambientDown.rgb, f.ambientUp.rgb, R.y * 0.5 + 0.5) * skyF + torch * 0.5;
 		float3 tintM = base / max(max(max(base.r, base.g), base.b), 0.05);
-		radiance += tintM * (f.lightColor.rgb * sp + env * (0.35 + 1.2 * fres)) * (shine * f.minLight.w);
+		radiance += tintM * (f.lightColor.rgb * sp + env * (0.12 + 0.6 * fres)) * (shine * f.minLight.w);
 	}
 	float3 c = imGrade(imTonemap(radiance, f.tonemap), f);
 	// items in the world that give off light (a lava bucket's lava, a torch's flame, glowstone dust, blaze rods): their hot,

@@ -533,7 +533,7 @@ static float3 imbEndPortalRays(float3 dir, float4 pp) {
 	float2 fi = (front - start.xz) / sd, bi = (back - start.xz) / sd;
 	float t0 = max(fi.x, fi.y), t1 = min(bi.x, bi.y);
 	if (t0 >= t1) return float3(0.0);
-	float t = pp.w - 1.0;
+	float t = pp.w;
 	float3 col = float3(0.0);
 	for (int k = 0; k < 2; k++) {
 		float tk = k == 0 ? t0 : t1;
@@ -559,10 +559,17 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 	texture2d<float> hdr [[texture(1)]], texture2d<float> shafts [[texture(2)]], texture2d<float> aoT [[texture(3)]],
 	texture2d<float> pic [[texture(4)]], depth2d<float> depth [[texture(5)]], sampler ms [[sampler(1)]],
 	constant ImBloomParams &p [[buffer(0)]], constant ImVlFrame &f [[buffer(1)]]) {
-	float4 h = hdr.read(uint2(in.pos.xy));
+	float4 pp = ((constant float4 *) &f)[54];  // (ImFrame.endPortal, byte 864: w the time)
+	float4 fx = ((constant float4 *) &f)[53];  // (ImFrame.extra)
+	uint2 rp = uint2(in.pos.xy);
+	if (p.grade.z > 0.5) {
+		// under water: the picture wavers gently (Reimagined's underwater distortion)
+		float2 wv = float2(sin(in.pos.y * 0.035 + pp.w * 2.1), cos(in.pos.x * 0.03 + pp.w * 1.7)) * 2.5;
+		rp = uint2(clamp(in.pos.xy + wv, float2(0.0), float2(hdr.get_width() - 1, hdr.get_height() - 1)));
+	}
+	float4 h = hdr.read(rp);
 	float3 c = imbLinear(h.rgb);
-	float4 pp = ((constant float4 *) &f)[54];  // (ImFrame.endPortal, byte 864)
-	if (pp.w > 0.5) {
+	if (fx.z > 0.5) {
 		float d = depth.read(uint2(clamp(in.uv, 0.0, 0.9999) * float2(depth.get_width(), depth.get_height())));
 		float4 w = p.clipInv * float4(in.uv * 2.0 - 1.0, d <= 0.00001 ? 0.0001 : d, 1.0);
 		float3 P = w.xyz / w.w;

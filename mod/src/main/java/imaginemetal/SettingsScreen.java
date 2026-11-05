@@ -94,6 +94,8 @@ public final class SettingsScreen extends OptionsSubScreen {
 				this.list.addSmall(cycle("Stars", new String[] {"Minecraft's", "Reimagined, twinkling"}, Settings.stars, v -> Settings.stars = v,
 					"Reimagined's star field, each star twinkling on its own."),
 					toggle("Shooting stars", Settings.shootingStars, v -> Settings.shootingStars = v, "Now and then a shooting star on a clear night."));
+				this.list.addBig(toggle("Night nebula", Settings.nebula, v -> Settings.nebula = v,
+					"A faint band of violet and blue cloud across the night sky, under the stars."));
 			}
 			case WORLDS -> {
 				this.list.addSmall(cycle("End sky", new String[] {"Reimagined", "Black hole"}, Settings.endStyle, v -> Settings.endStyle = v,
@@ -141,6 +143,8 @@ public final class SettingsScreen extends OptionsSubScreen {
 					v -> Settings.waterStyle = v, "Reimagined's water: its colour, clearer up close, reflections of the sky and the world. Waves add moving ripples."),
 					toggle("Glass reflections", Settings.glassReflections, v -> Settings.glassReflections = v,
 						"Stained glass, ice and other see-through blocks reflect the sky and the world."));
+				this.list.addBig(toggle("Coated textures", Settings.coated, v -> Settings.coated = v,
+					"Reimagined's coated textures: each texture pixel a touch lighter or darker, so flat colours read as a material."));
 				this.list.addBig(toggle("Wet in the rain", Settings.wet, v -> Settings.wet = v,
 					"In the rain everything under the sky gets darker and glossy, with puddles on top of blocks. Needs PBR."));
 				this.list.addSmall(toggle("PBR", Settings.pbr, v -> Settings.pbr = v,

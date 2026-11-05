@@ -321,6 +321,25 @@ static float4 imSkyPixel(ImSkyOut in, constant ImFrame &f, constant float4x4 &ro
 	uint st = uint(f.auroraLight.w + 0.5);
 	if (st != 0u && d.y > 0.0 && f.flags.x == 0) {
 		if ((st & 1u) != 0u) sky += imStars(d, f);
+		if (f.extra.w > 0.5) {
+			// a night nebula: a faint band of violet and blue cloud across the sky, the galaxy's arm, under the stars
+			float inv = f.sunsetDown.w * f.sunsetDown.w;
+			float vis = (1.0 - f.dayUp.w) * inv * inv * (1.0 - f.nightMiddle.w);
+			if (vis > 0.0) {
+				float3 axis = normalize(float3(0.35, 0.25, 0.9));
+				float band = exp(-pow(dot(d, axis) * 3.2, 2.0));
+				float2 nq = float2(atan2(d.z, d.x), d.y) * float2(2.2, 4.0);
+				float nb = 0.0, amp = 0.5;
+				for (int i = 0; i < 4; i++) {
+					nb += amp * imValueNoise(nq);
+					nq = nq * 2.1 + 1.7;
+					amp *= 0.5;
+				}
+				float neb = smoothstep(0.35, 0.8, nb) * band;
+				float3 nc = mix(float3(0.25, 0.1, 0.45), float3(0.1, 0.25, 0.55), imValueNoise(nq * 0.2 + 5.0));
+				sky += nc * neb * 0.05 * vis * smoothstep(0.0, 0.2, d.y);
+			}
+		}
 		if ((st & 2u) != 0u) {
 			float inv = f.sunsetDown.w * f.sunsetDown.w;
 			float vis = (1.0 - f.dayUp.w) * inv * inv * (1.0 - f.nightMiddle.w);

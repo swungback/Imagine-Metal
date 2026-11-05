@@ -14,7 +14,7 @@ import org.joml.Vector4f;
 import org.lwjgl.system.MemoryUtil;
 
 /**
- * The lighting's per-frame values (lighting.metal ImFrame, 880 bytes): where the sun or moon is, the colours of its light, of
+ * The lighting's per-frame values (lighting.metal ImFrame, 896 bytes): where the sun or moon is, the colours of its light, of
  * the sky's light and of torches for this time of day and weather, the cave floor, the tone curve. Made once per frame at
  * LevelRenderer.render's start (LevelRendererMixin) and handed to the backend, which binds it on every terrain draw.
  *
@@ -22,7 +22,7 @@ import org.lwjgl.system.MemoryUtil;
  * a deep orange golden hour, blue-violet nights), tuned for our pipeline.
  */
 public final class ImagineFrame {
-	static final int SIZE = 880;
+	static final int SIZE = 896;
 	private static final ByteBuffer BUF = MemoryUtil.memAlloc(SIZE).order(ByteOrder.LITTLE_ENDIAN);
 	private static final long ADDRESS = MemoryUtil.memAddress(BUF);
 	private static int frame;
@@ -300,6 +300,13 @@ public final class ImagineFrame {
 		}
 		Shadows.prepare(lightDir, dim);
 		// the light bounced up from the ground: the sky's, dimmer, and a little of the sun's
+		// lightning: the whole world lit a cold white for a moment, as the sky flashes
+		int flashT = 0;
+		try {
+			flashT = Minecraft.getInstance().level != null ? Minecraft.getInstance().level.getSkyFlashTime() : 0;
+		} catch (Throwable ignored) {
+		}
+		if (dim == 0 && flashT > 0) for (int i = 0; i < 3; i++) up[i] += new float[] {0.9f, 0.95f, 1.15f}[i] * 1.4f;
 		for (int i = 0; i < 3; i++) down[i] = (dim == 1 ? 1.1f : 0.6f) * up[i] + 0.10f * light[i];
 		// the aurora: at night in cold biomes, out of rain; its pink-violet and green light added to the sky's (aurora influence)
 		// where and when (the setting: every night, cold biomes, full moon, or either), eased both ways over a few seconds, so it
@@ -472,11 +479,14 @@ public final class ImagineFrame {
 		// (in the End, x the sky's style)
 		if (dim == 2) put(Settings.endStyle, 0f, 0f, endFog ? -Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f : 0f);
 		else put(netherFog[0], netherFog[1], netherFog[2], netherHaze ? farM : 0f);
-		put(Settings.portals ? 1f : 0f, Settings.glassSun && Settings.coloredLight && LightVolume.glassInGrid() ? 1f : 0f, 0f, 0f);
-		// (the End portal's rays: its middle, camera-relative; w the time (1 + seconds), 0 none)
 		float[] pc = Settings.portals ? LightVolume.portalCentre(cam.x, cam.y, cam.z) : null;
-		if (pc != null) put(pc[0], pc[1], pc[2], 1f + (float) ((System.nanoTime() / 1e9) % 1000.0));
-		else put(0f, 0f, 0f, 0f);
+		put(Settings.portals ? 1f : 0f, Settings.glassSun && Settings.coloredLight && LightVolume.glassInGrid() ? 1f : 0f, pc != null ? 1f : 0f,
+			Settings.nebula && dim == 0 ? 1f : 0f);
+		// (the End portal's rays: its middle, camera-relative; w the time in seconds, always)
+		float secs = (float) ((System.nanoTime() / 1e9) % 1000.0);
+		if (pc != null) put(pc[0], pc[1], pc[2], secs);
+		else put(0f, 0f, 0f, secs);
+		put(Settings.coated ? 1f : 0f, 0f, 0f, 0f);
 		if (BUF.position() != SIZE) throw new IllegalStateException("ImFrame is " + BUF.position() + " bytes, not " + SIZE);
 	}
 
