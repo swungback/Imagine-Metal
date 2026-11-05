@@ -147,8 +147,11 @@ static inline float imLuma(float3 c) {
 // 0.57 at 10, 0.15 at 7, 0.05 at 5), so weak lights still light their surroundings: a redstone torch (level 7) or a soul torch
 // (10) colours the wall it's on. The dark between lights comes from the grade (Bloom's resolve), not from cutting the reach.
 static inline float imBlockCurve(float b) {
+	// Reimagined's own curve (mainLighting.glsl: a steep part near the light plus a calm one that carries it across a room,
+	// to the power 2.25), scaled to our light's brightness: it reaches further and stays even through a room, where ours fell
+	// off fast and left everything a few blocks from a light dark
 	float b2 = b * b, b4 = b2 * b2, b8 = b4 * b4;
-	return 2.2 * pow(b, 3.5) + 1.6 * b8;  // (brighter near the light, as Reimagined's)
+	return 0.07 * pow(2.5 * b8 + 3.1 * b, 2.25);
 }
 
 // Sky light level 0..1 -> how much of the sky's light reaches the surface.

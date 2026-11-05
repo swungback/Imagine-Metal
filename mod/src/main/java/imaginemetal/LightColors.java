@@ -49,7 +49,7 @@ public final class LightColors {
 	// (after the shader's saturation push, imBlockLight, this comes out as Reimagined's torch light, measured on matching
 	// screenshots: redder, and with some blue kept, where the old colour's blue was pushed to nothing and floors turned mustard)
 	// (Reimagined's fire light, linear: a deep orange, so a torch room glows orange, not pinkish white)
-	private static final float[] FLAME = {1.00f, 0.42f, 0.18f};
+	private static final float[] FLAME = {1.00f, 0.37f, 0.12f};  // (Reimagined's fire light, 2.25 0.83 0.27: a deeper orange)
 	private static final float[] SOUL = {0.20f, 0.75f, 1.00f}, RED = {1.00f, 0.08f, 0.04f}, COPPER = {0.55f, 1.00f, 0.50f};
 	private static final ConcurrentHashMap<BlockState, float[]> CACHE = new ConcurrentHashMap<>();
 
@@ -77,8 +77,8 @@ public final class LightColors {
 		float[] c = EXTRA.get(state);
 		if (c == null) {
 			String n = state.getBlock().toString().toLowerCase(java.util.Locale.ROOT);
-			c = n.contains("redstone_block") ? new float[] {1f, 0.025f, 0.025f, 7}
-				: n.contains("lapis_block") ? new float[] {0.25f, 0.25f, 1f, 6}
+			c = n.contains("redstone_block") ? new float[] {1f, 0.025f, 0.025f, 10}
+				: n.contains("lapis_block") ? new float[] {0.25f, 0.25f, 1f, 9}
 				: n.contains("redstone_ore") ? new float[] {1f, 0.025f, 0.025f, 4}
 				: n.contains("diamond_ore") ? new float[] {0.25f, 1f, 1f, 4}
 				: n.contains("emerald_ore") ? new float[] {0.14f, 1f, 0.14f, 4}

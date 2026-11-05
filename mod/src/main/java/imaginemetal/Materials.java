@@ -156,6 +156,8 @@ public final class Materials {
 		if (name.contains("sea_lantern")) return EMITTER; // (a whole glowing block, pale: the flame rule would miss it)
 		if (name.contains("crying_obsidian")) return GLOW_GEM;
 		if (name.contains("end_portal_frame")) return FLAME;  // (only its eye glows: the pale stone glowed whole and lit the grass green)
+		// (Reimagined's redstone and lapis blocks glow their colour and light the room around them)
+		if (name.contains("redstone_block") || name.contains("lapis_block")) return DIM;
 		if (light > 0) {
 			// a flame or a small lit part on an unlit body: only its bright, saturated texels glow
 			if (name.contains("torch") || name.contains("lantern") || name.contains("candle") || name.contains("fire") || name.contains("campfire")
