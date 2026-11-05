@@ -1104,19 +1104,20 @@ static float4 imPortalLook(float2 u, float3 p, float4 texel, texture2d<float> at
 	float3 V = normalize(p);
 	float into = max(abs(dot(V, n)), 0.25);
 	constexpr sampler ns(filter::nearest, address::clamp_to_edge);
-	float l0 = imLuma(texel.rgb);
-	float g0 = smoothstep(0.5, 0.8, l0);
-	float3 col = texel.rgb * texel.rgb * 0.18 + texel.rgb * g0 * 2.4;
-	float a = mix(0.62, 1.0, g0);
+	// (by the brightest channel: the portal is violet, its luma low even where it's brightest, so by luma nothing glowed and the
+	// portal showed as clear glass)
+	float l0 = max(max(texel.r, texel.g), texel.b);
+	float g0 = smoothstep(0.6, 0.95, l0);
+	float3 col = texel.rgb * texel.rgb * 0.3 + float3(0.06, 0.0, 0.12) + texel.rgb * g0 * 2.4;
+	float a = mix(0.88, 1.0, g0);
 	for (int k = 1; k <= 3; k++) {
 		float depth = 0.22 * float(k);
 		float2 du = float2(dot(V, T), dot(V, B)) * (depth / into);
 		float2 lu = fract((u + du - r0) / rs);
 		float3 s = atlas.sample(ns, r0 + lu * rs, level(0.0)).rgb;
-		float g = smoothstep(0.55, 0.85, imLuma(s));
+		float g = smoothstep(0.6, 0.95, max(max(s.r, s.g), s.b));
 		float fade = 0.55 / float(k);
 		col += s * g * fade * float3(0.75, 0.7, 1.15);
-		a = max(a, 0.62 + 0.25 * g * fade);
 	}
 	return float4(col, a);
 }

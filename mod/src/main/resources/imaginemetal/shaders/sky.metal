@@ -200,10 +200,10 @@ static float3 imBlackHoleSky(float3 d, constant ImFrame &f, thread float3 &hdr) 
 	// the ringed planet: its centre beside the black hole, 1.75 of its radii away (so it fills a wide part of the sky); its rings
 	// from 1.6 to 2.6 radii in a plane passing just beside the eye, so they cross the sky as a band of thin streaks
 	float3 P = normalize(B * 0.55 - R * 0.78 + U * 0.08);
-	float3 C = P * 1.75;
+	float3 C = P * 3.6;  // (further off: at 1.75 it filled half the sky and its rings streaked across everything)
 	float3 Nr = normalize(U * 0.97 + R * 0.12 + B * 0.2);
 	Nr = normalize(Nr - P * dot(Nr, P));
-	float hOff = 0.014;  // (the eye's height over the ring plane, in planet radii)
+	float hOff = 0.22;  // (the eye's height over the ring plane, in planet radii)
 	float3 Cr = C - Nr * (dot(C, Nr) + hOff);  // (the plane through the planet's centre, moved so the eye is hOff above it)
 	float b = dot(rd, C);
 	float disc = b * b - (dot(C, C) - 1.0);
@@ -302,7 +302,20 @@ static float4 imSkyPixel(ImSkyOut in, constant ImFrame &f, constant float4x4 &ro
 		st *= st;
 		float au = abs(d.y), vu2 = (1.0 - au) * (1.0 - au);
 		float3 stars = st * endSky * 3000.0 * (min(vu2 + 0.015, 0.05) + 0.015) * smoothstep(0.0, 0.25, au);
-		return float4(pow(imPresent(endSky + stars, f), 1.0 / 2.2), 1.0);
+		// (deeper overhead, a glowing lavender band along the horizon, and slow nebula clouds drifting through it, pink and teal,
+		// so the End's sky has depth instead of one flat violet)
+		float3 base = endSky * mix(0.5, 1.45, pow(1.0 - au, 3.0));
+		float2 nq = d.xz / (abs(d.y) + 0.35) * 1.6 + f.world.w * 0.004;
+		float nb = 0.0, amp = 0.5;
+		for (int i = 0; i < 4; i++) {
+			nb += amp * imValueNoise(nq);
+			nq = nq * 2.1 + 3.7;
+			amp *= 0.5;
+		}
+		float neb = smoothstep(0.42, 0.85, nb) * (1.0 - au * 0.6);
+		float tone = imValueNoise(nq * 0.15 + 11.0);
+		float3 nebCol = mix(float3(0.42, 0.12, 0.45), float3(0.12, 0.3, 0.42), tone) * neb * 0.32;
+		return float4(pow(imPresent(base + nebCol + stars, f), 1.0 / 2.2), 1.0);
 	}
 	float3 sky = imSkyColor(d, f, true);
 	uint st = uint(f.auroraLight.w + 0.5);

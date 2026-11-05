@@ -155,6 +155,7 @@ public final class Materials {
 		int light = state.getLightEmission();
 		if (name.contains("sea_lantern")) return EMITTER; // (a whole glowing block, pale: the flame rule would miss it)
 		if (name.contains("crying_obsidian")) return GLOW_GEM;
+		if (name.contains("end_portal_frame")) return FLAME;  // (only its eye glows: the pale stone glowed whole and lit the grass green)
 		if (light > 0) {
 			// a flame or a small lit part on an unlit body: only its bright, saturated texels glow
 			if (name.contains("torch") || name.contains("lantern") || name.contains("candle") || name.contains("fire") || name.contains("campfire")
