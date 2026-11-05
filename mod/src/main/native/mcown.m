@@ -35,6 +35,9 @@ void mc_im_ssr_bind(id<MTLTexture> color, id<MTLTexture> depth, id<MTLSamplerSta
 id<MTLTexture> mc_im_shadow_map(void) {
 	return imShadowTex;
 }
+id<MTLTexture> mc_im_light_tex(void) {
+	return imLightTex;
+}
 id<MTLSamplerState> mc_im_shadow_cmp(void) {
 	return imShadowCmp;
 }

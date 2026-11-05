@@ -558,7 +558,7 @@ static float3 imbEndPortalRays(float3 dir, float4 pp) {
 fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> src [[texture(0)]], sampler s [[sampler(0)]],
 	texture2d<float> hdr [[texture(1)]], texture2d<float> shafts [[texture(2)]], texture2d<float> aoT [[texture(3)]],
 	texture2d<float> pic [[texture(4)]], depth2d<float> depth [[texture(5)]], sampler ms [[sampler(1)]],
-	constant ImBloomParams &p [[buffer(0)]], constant ImVlFrame &f [[buffer(1)]]) {
+	constant ImBloomParams &p [[buffer(0)]], constant ImVlFrame &f [[buffer(1)]], texture3d<float> lvol [[texture(7)]]) {
 	float4 pp = ((constant float4 *) &f)[54];  // (ImFrame.endPortal, byte 864: w the time)
 	float4 fx = ((constant float4 *) &f)[53];  // (ImFrame.extra)
 	uint2 rp = uint2(in.pos.xy);
@@ -569,6 +569,30 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 	}
 	float4 h = hdr.read(rp);
 	float3 c = imbLinear(h.rgb);
+	float4 tg = ((constant float4 *) &f)[55];  // (ImFrame.toggles: y light fog)
+	if (tg.y > 0.5 && f.lightVol.w > 0.5) {
+		// Reimagined's coloured light fog: the air near lights glows faintly in their colour, from the coloured light grid along
+		// the view ray (up to 24 blocks, 10 steps)
+		float d = depth.read(uint2(clamp(in.uv, 0.0, 0.9999) * float2(depth.get_width(), depth.get_height())));
+		float4 w = p.clipInv * float4(in.uv * 2.0 - 1.0, d <= 0.00001 ? 0.0001 : d, 1.0);
+		float3 P = w.xyz / w.w;
+		float len = min(length(P), 24.0);
+		float3 dir = normalize(P);
+		float j = fract(52.9829189 * fract(dot(in.pos.xy, float2(0.06711056, 0.00583715))));
+		float stepL = len / 10.0;
+		float3 acc = float3(0.0);
+		int3 top = int3(f.lightSize.xyz) - 1;
+		for (int i = 0; i < 10; i++) {
+			float3 q = dir * (stepL * (float(i) + j)) - f.lightVol.xyz;
+			int3 v = int3(floor(q));
+			if (any(v < 0) || any(v > top)) continue;
+			float4 l = lvol.read(uint3(v));
+			if (l.a <= 0.0) continue;
+			float a2 = l.a * l.a;
+			acc += l.rgb / max(max(max(l.r, l.g), l.b), 1e-3) * (a2 * a2);
+		}
+		c += acc * (stepL * 0.012);
+	}
 	if (fx.z > 0.5) {
 		float d = depth.read(uint2(clamp(in.uv, 0.0, 0.9999) * float2(depth.get_width(), depth.get_height())));
 		float4 w = p.clipInv * float4(in.uv * 2.0 - 1.0, d <= 0.00001 ? 0.0001 : d, 1.0);

@@ -67,6 +67,8 @@ public final class SettingsScreen extends OptionsSubScreen {
 				this.list.addSmall(toggle("Shadows", Settings.shadows, v -> Settings.shadows = v, "Sun and moon shadows."),
 					slider("Shadow distance", 64, 256, 16, Settings.shadowRange, v -> Settings.shadowRange = v, v -> Math.round(v) + " blocks",
 						"How far around you shadows reach. Less is faster."));
+				this.list.addBig(toggle("Light fog", Settings.lightFog, v -> Settings.lightFog = v,
+					"The air near lights glows faintly in their colour (Reimagined's coloured light fog). Needs coloured light."));
 				this.list.addBig(toggle("Sunlight through stained glass", Settings.glassSun, v -> Settings.glassSun = v,
 					"Sunlight coming through stained glass takes its colour, throwing coloured light on the floor. Needs coloured light."));
 				this.list.addHeader(Component.literal("Light"));

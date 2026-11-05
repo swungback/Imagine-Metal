@@ -23,7 +23,8 @@ typedef struct {
 	float taaPrev[4];     // TAA: xy the last frame's jitter in uv
 } ImBloomParams;
 
-id<MTLTexture> mc_im_ssr_depth(void);  // mcown.m: this frame's depth copy (Reflections), nil before the first
+id<MTLTexture> mc_im_ssr_depth(void);
+id<MTLTexture> mc_im_light_tex(void);  // mcown.m: the coloured light grid (light fog), nil before it exists  // mcown.m: this frame's depth copy (Reflections), nil before the first
 id<MTLTexture> mc_im_ssr_color(void);    // mcown.m: this frame's picture with its blurred mips (Reimagined's bloom fog reads it)
 id<MTLSamplerState> mc_im_ssr_sampler(void);
 id<MTLTexture> mc_im_shadow_map(void);  // mcown.m: the sun's shadow maps (two cascades), nil before the first
@@ -273,6 +274,8 @@ static void imbPass3(id<MTLCommandBuffer> cmd, id<MTLTexture> target, MTLLoadAct
 	[r setFragmentSamplerState:s atIndex:0];
 	[r setFragmentBytes:p length:sizeof *p atIndex:0];
 	if (frame && frameLen > 0) [r setFragmentBytes:frame length:(NSUInteger) frameLen atIndex:1];
+	id<MTLTexture> lt = mc_im_light_tex();
+	if (lt) [r setFragmentTexture:lt atIndex:7];
 	[r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 	[r endEncoding];
 }
