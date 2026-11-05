@@ -200,10 +200,10 @@ static float3 imBlackHoleSky(float3 d, constant ImFrame &f, thread float3 &hdr) 
 	// the ringed planet: its centre beside the black hole, 1.75 of its radii away (so it fills a wide part of the sky); its rings
 	// from 1.6 to 2.6 radii in a plane passing just beside the eye, so they cross the sky as a band of thin streaks
 	float3 P = normalize(B * 0.55 - R * 0.78 + U * 0.08);
-	float3 C = P * 3.6;  // (further off: at 1.75 it filled half the sky and its rings streaked across everything)
+	float3 C = P * 1.75;
 	float3 Nr = normalize(U * 0.97 + R * 0.12 + B * 0.2);
 	Nr = normalize(Nr - P * dot(Nr, P));
-	float hOff = 0.22;  // (the eye's height over the ring plane, in planet radii)
+	float hOff = 0.014;  // (the eye's height over the ring plane, in planet radii)
 	float3 Cr = C - Nr * (dot(C, Nr) + hOff);  // (the plane through the planet's centre, moved so the eye is hOff above it)
 	float b = dot(rd, C);
 	float disc = b * b - (dot(C, C) - 1.0);

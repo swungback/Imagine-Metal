@@ -578,7 +578,7 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 		float3 P = w.xyz / w.w;
 		float len = min(length(P), 24.0);
 		float3 dir = normalize(P);
-		float j = fract(52.9829189 * fract(dot(in.pos.xy, float2(0.06711056, 0.00583715))));
+		float j = fract(52.9829189 * fract(dot(in.pos.xy, float2(0.06711056, 0.00583715))) + 0.61803399 * float(f.flags.w & 1023));
 		float stepL = len / 10.0;
 		float3 acc = float3(0.0);
 		int3 top = int3(f.lightSize.xyz) - 1;
@@ -628,7 +628,8 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 			rb /= 3.0;
 			rb.r += pow(max(rc - 0.5, 0.0), 2.0) * max(1.0 - rc, 0.0) * 26.0;
 			rb = pow(rb, 2.2) * float3(0.25, 0.075, 0.25) * 3.0;
-			c += rb * rf;
+			// (not over bright clouds, which are in front of it: Reimagined hides it behind them by their depth)
+			c += rb * rf * (1.0 - smoothstep(0.35, 0.8, dot(c, float3(0.2126, 0.7152, 0.0722))));
 		}
 	}
 	if (p.grade.y > 0.0) {
@@ -657,9 +658,15 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 	}
 	if (p.shaftColor.w > 0.0) {
 		// (four taps a half-size texel apart: the pattern's grain smoothed)
+		// (eight taps over about 4x4 of its texels: the pattern's diagonal grain, the static on walls and floors, smoothed away)
 		float2 at = 1.0 / float2(aoT.get_width(), aoT.get_height());
-		float ao = 0.25 * (aoT.sample(s, in.uv + at * float2(-0.75, -0.75)).r + aoT.sample(s, in.uv + at * float2(0.75, -0.75)).r
-			+ aoT.sample(s, in.uv + at * float2(-0.75, 0.75)).r + aoT.sample(s, in.uv + at * float2(0.75, 0.75)).r);
+		float ao = 0.0;
+		for (int k = 0; k < 8; k++) {
+			float2 o = float2(k < 4 ? ((k & 1) != 0 ? 1.5 : -1.5) : 0.0, k < 4 ? ((k & 2) != 0 ? 1.5 : -1.5) : 0.0);
+			if (k >= 4) o = float2(k == 4 ? 1.75 : k == 5 ? -1.75 : 0.0, k == 6 ? 1.75 : k == 7 ? -1.75 : 0.0);
+			ao += aoT.sample(s, in.uv + at * o).r;
+		}
+		ao *= 0.125;
 		// (light given off isn't shaded: lava, glowing blocks)
 		float l = max(max(c.r, c.g), c.b);
 		c *= mix(1.0, ao, saturate(p.shaftColor.w) * (1.0 - smoothstep(1.0, 2.0, l)));
@@ -710,7 +717,12 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 	float lumH = dot(c, float3(0.2126, 0.7152, 0.0722));
 	// (fading out toward the top: lifting the bright sky and sunsets pushed them into the roll-off, washing their colour out)
 	float mxH = max(max(c.r, c.g), c.b);
-	c *= 1.0 + 0.25 * smoothstep(0.18, 0.5, lumH) * (1.0 - smoothstep(0.5, 0.85, mxH));
+	c *= 1.0 + 0.25 * smoothstep(0.18, 0.45, lumH) * (1.0 - smoothstep(0.4, 0.7, mxH));
+	// (bright sunlit sand and snow kept from bleaching: a little of their colour pushed back in toward white)
+	{
+		float lb = dot(c, float3(0.2126, 0.7152, 0.0722));
+		c = max(lb + (c - lb) * (1.0 + 0.25 * smoothstep(0.45, 0.9, lb)), 0.0);
+	}
 	// (Reimagined's tone curve's "path to white": the very brightest light, lava's hot spots, a flame's core, the sun's glare,
 	// turns toward white, so lava reads yellow-hot instead of a flat orange)
 	float lum2 = dot(c, float3(0.2126, 0.7152, 0.0722));

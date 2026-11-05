@@ -758,6 +758,23 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		oreE = (1.35 + f14 * f14 * 7.5) * f0;
 		oreCm = float3(1.15, 1.0, 1.0);
 	}
+	if (cls == IM_MAT_NETHER_ORE && oreT == 2u) {
+		// Reimagined's End portal frame: the eye of ender glowing from its middle out, the frame's pale corner bits a soft green
+		oreE = 0.0;
+		oreCm = float3(1.0);
+		if (abs(tex.r - tex.g - 0.05) >= 0.10) {
+			float2 ac = abs(fract(p.xz + f.world.xz) - 0.5);
+			float mx = max(ac.x, ac.y);
+			if (mx < 0.2505) {
+				float g = min(tex.g, 0.25);
+				oreE = sqrt(g * g * 170.0 * max(0.28 - mx, 0.0));
+				oreCm = float3(0.8, 1.15, 1.0);
+			} else if (min(ac.x, ac.y) > 0.25 && all(abs(tex - float3(0.6, 0.776, 0.576)) < 0.03)) {
+				oreE = 1.2;
+				oreCm = float3(0.75, 1.3, 1.0);
+			}
+		}
+	}
 	if (oreE > 0.0) albedo *= oreCm;
 	float3 base = pow(max(albedo, 0.0), 2.2);
 	bool pbr = f.shadow.w > 0.5 && f.flags.y == 0;
