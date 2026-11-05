@@ -30,15 +30,20 @@ kernel void im_light_step(texture3d<float, access::read> seeds [[texture(0)]], t
 	float weight = level * level;
 	int3 c = v + shift.xyz;
 	const int3 dirs[6] = {int3(1, 0, 0), int3(-1, 0, 0), int3(0, 1, 0), int3(0, -1, 0), int3(0, 0, 1), int3(0, 0, -1)};
+	float4 nb[6];
 	for (int i = 0; i < 6; i++) {
 		int3 q = c + dirs[i];
-		if (any(q < 0) || any(q >= size)) continue;
-		float4 n = float4(prev.read(uint3(q)));
-		float a = n.a - 1.0 / 15.0;
+		nb[i] = any(q < 0) || any(q >= size) ? float4(0.0) : float4(prev.read(uint3(q)));
+		strength = max(strength, nb[i].a - 1.0 / 15.0);
+	}
+	// (the colour comes from upstream, the neighbours the light arrives from: each level dimmer counts an eighth as much. Mixed
+	// evenly, light flowed back the way it came: the colour stained glass gave it spread back into the room the light came from)
+	for (int i = 0; i < 6; i++) {
+		float a = nb[i].a - 1.0 / 15.0;
 		if (a <= 0.0) continue;
-		strength = max(strength, a);
-		colour += n.rgb * (a * a);
-		weight += a * a;
+		float w = a * a * exp2(-(strength - a) * 45.0);
+		colour += nb[i].rgb * w;
+		weight += w;
 	}
 	float3 hue = weight > 0.0 ? colour / weight : float3(0.0);
 	// stained glass (bit 6, rgb its colour): the light passing through takes its colour, as through a coloured filter

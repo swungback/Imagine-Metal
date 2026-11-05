@@ -23,6 +23,7 @@ abstract class LevelRendererMixin {
 	private void imaginemetal$frame(GraphicsResourceAllocator resourceAllocator, boolean renderOutline, CameraRenderState cameraState,
 		GpuBufferSlice terrainFog, Vector4f fogColor, boolean shouldRenderSky, boolean consistentDepthRequired, CallbackInfo ci) {
 		ImagineFrame.update(cameraState);
+		imaginemetal.Benchmark.frame();
 		// (the Nether: the picture is cleared to its haze, so the void past the land matches the fogged land at its edge)
 		ImagineFrame.netherClear(fogColor);
 		Hdr.begin();

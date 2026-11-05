@@ -714,6 +714,8 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	float3 base = pow(max(albedo, 0.0), 2.2);
 	bool pbr = f.shadow.w > 0.5 && f.flags.y == 0;
 	ImSurf surf = pbr ? imSurface(cls, albedo, tex) : ImSurf{0.0, 0.0, 0.0, 0.04, 0.0};
+	// (obsidian and crying obsidian: dark gems, kept to a sheen; diamond, emerald, amethyst: bright ones, kept shiny)
+	float gemDark = 1.0 - smoothstep(0.15, 0.4, imLuma(tex));
 	float3 V = -normalize(p);
 	if (kind == 1u && f.water.x > 1.5 && n.y > 0.5) N = imWaterNormal(p, n, f);
 	// rain puddles (Reimagined's, RAIN_PUDDLES 1): on tops of blocks under the open sky, away from torches; their shape from three
@@ -791,7 +793,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 
 	// torches: warm, weaker in full daylight
 	float4 bl = imBlockLight(p, n, f, lvol, lsamp);
-	float3 torch = bl.rgb * imBlockCurve(max(block, bl.a)) * (1.0 - 0.45 * f.blockColor.w * smoothstep(0.5, 1.0, sky));
+	float3 torch = bl.rgb * imBlockCurve(max(block, bl.a)) * (1.0 - 0.25 * f.blockColor.w * smoothstep(0.5, 1.0, sky));
 	// the light in the player's hands: a level falling one a block from the eye, as a placed light would, softer at the edge
 	if (f.held.w > 0.0) {
 		// (as placed coloured lights are: 4 levels stronger, the colour's saturation pushed 1.6x, as bright as the torch colour)
@@ -802,7 +804,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			hh = max(hlum + (hh - hlum) * 1.35, 0.0);
 			float3 hc = hh * (max(max(f.blockColor.r, f.blockColor.g), f.blockColor.b) / max(max(max(hh.r, hh.g), hh.b), 1e-3));
 			float facing = 0.6 + 0.4 * saturate(dot(N, -normalize(p)));
-			torch = max(torch, hc * imBlockCurve(hl) * facing * (1.0 - 0.45 * f.blockColor.w * smoothstep(0.5, 1.0, sky)));
+			torch = max(torch, hc * imBlockCurve(hl) * facing * (1.0 - 0.25 * f.blockColor.w * smoothstep(0.5, 1.0, sky)));
 		}
 	}
 
@@ -861,7 +863,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			float nlt = saturate(dot(N, Lt));
 			float hl2 = imHighlight(N, V, Lt, nlt, surf.g) * surf.hl * mix(0.3, 1.0, max(surf.metal, smoothstep(0.04, 0.2, surf.f0)));
 			if (cls == IM_MAT_FOLIAGE) hl2 *= 0.3;
-			if (cls == IM_MAT_GEM) hl2 *= 0.35;  // (obsidian beside a torch washed out lavender: a glint, not a glaze)
+			if (cls == IM_MAT_GEM) hl2 *= mix(1.0, 0.35, gemDark);  // (obsidian beside a torch washed out lavender: a glint, not a glaze)
 			radiance += torch * (hl2 * 0.35) * tint * f.minLight.w;
 		}
 	}
@@ -969,7 +971,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			if (hit.a < 0.0) fm = 0.0;
 			// (texture kept: Reimagined keeps 70 % of the surface under its reflection)
 			refl = mix(refl, max(c, refl), 0.7);
-			if (surf.metal < 0.5) fm *= cls == IM_MAT_GEM ? 0.5 : 0.75;  // (a dark gem or obsidian stays dark: its reflection a sheen over it)
+			if (surf.metal < 0.5) fm *= cls == IM_MAT_GEM ? mix(1.0, 0.5, gemDark) : 0.75;  // (a dark gem or obsidian stays dark: its reflection a sheen over it)
 			refl *= mix(float3(1.0), base / max(max(max(base.r, base.g), base.b), 0.02), surf.metal);
 			c = mix(c, refl, saturate(fm));
 		}
@@ -980,6 +982,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		float fresnel = 1.0 - saturate(dot(N, V));
 		float rm = kind == 1u ? (0.5 + 0.5 * saturate(n.y)) * (f.water.z > 0.5 ? 0.5 : 1.0) : 1.0 - smoothstep(1.8, 0.3, length(p));
 		float fm = (fresnel * fresnel * fresnel * 0.85 + 0.15) * rm;
+		if (kind == 2u) fm *= 0.6;  // (glass: a sheen of the sky, not a mirror; a glass tunnel washed out white, reflections in reflections)
 		if (fm > 0.01) {
 			float3 R = reflect(-V, N);
 			if (dot(R, n) < 0.02) R = normalize(R - n * (dot(R, n) - 0.02));
@@ -1049,7 +1052,7 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 	ambient += f.auroraLight.rgb * (skyF * (0.12 + 0.88 * saturate(ny)));
 	if (f.water.z > 0.5 && f.flags.x == 0) ambient += float3(0.04, 0.09, 0.12) * mix(0.12, 1.0, f.nightMiddle.w);
 	float4 bl = imBlockLight(p, particle ? float3(0.0, 1.0, 0.0) : n, f, lvol, lsamp);
-	float3 torch = bl.rgb * imBlockCurve(max(block, bl.a)) * (1.0 - 0.45 * f.blockColor.w * smoothstep(0.5, 1.0, sky));
+	float3 torch = bl.rgb * imBlockCurve(max(block, bl.a)) * (1.0 - 0.25 * f.blockColor.w * smoothstep(0.5, 1.0, sky));
 	if (f.held.w > 0.0) {
 		float hl = saturate(min(f.held.w + 4.0 / 15.0, 1.0) - length(p) / 15.0);
 		if (hl > 0.0) {
@@ -1057,7 +1060,7 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 			float hlum = imLuma(hh);
 			hh = max(hlum + (hh - hlum) * 1.35, 0.0);
 			float3 hc = hh * (max(max(f.blockColor.r, f.blockColor.g), f.blockColor.b) / max(max(max(hh.r, hh.g), hh.b), 1e-3));
-			torch = max(torch, hc * imBlockCurve(hl) * (1.0 - 0.45 * f.blockColor.w * smoothstep(0.5, 1.0, sky)));
+			torch = max(torch, hc * imBlockCurve(hl) * (1.0 - 0.25 * f.blockColor.w * smoothstep(0.5, 1.0, sky)));
 		}
 	}
 	float3 day = direct + ambient;

@@ -156,6 +156,13 @@ public final class SettingsScreen extends OptionsSubScreen {
 						.create(0, 0, 150, 20, Component.literal("Shadow detail*"), (b, v) -> Settings.shadowRes = v));
 				this.list.addBig(toggle("Imagine Metal lighting*", Settings.terrain, v -> Settings.terrain = v,
 					"Off: vanilla's lighting on the terrain, for comparing. " + RESTART));
+				this.list.addHeader(Component.literal("Speed"));
+				this.list.addBig(Button.builder(Component.literal("Run benchmark (stand still, ~1 minute)"), b -> {
+					Minecraft.getInstance().gui.setScreen(null);
+					Benchmark.start();
+				}).bounds(0, 0, 310, 20).tooltip(Tooltip.create(Component.literal(
+					"Turns each feature off in turn for a few seconds and measures the frame rate, then puts everything back. The results go to latest.log.")))
+					.build());
 				this.list.addHeader(Component.literal("Debug"));
 				String[] views = {"Off", "Light levels", "Normals", "Bloom glow only", "Coloured light grid"};
 				this.list.addBig(CycleButton.<Integer>builder(v -> Component.literal(views[v]), Settings.debug)
