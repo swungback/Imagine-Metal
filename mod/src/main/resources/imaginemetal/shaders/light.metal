@@ -48,7 +48,7 @@ kernel void im_light_step(texture3d<float, access::read> seeds [[texture(0)]], t
 	float3 hue = weight > 0.0 ? colour / weight : float3(0.0);
 	// stained glass (bit 6, rgb its colour): the light passing through takes its colour, as through a coloured filter
 	if ((bits & 64u) != 0u && level == 0.0) {
-		hue *= s.rgb;
+		hue = mix(hue, hue * s.rgb, 0.72);  // (most of the way: Reimagined's colour, a little of the light's own kept)
 		float m = max(max(hue.r, hue.g), hue.b);
 		hue = m > 1e-4 ? hue / m : hue;
 	}

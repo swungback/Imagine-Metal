@@ -472,7 +472,7 @@ public final class ImagineFrame {
 		// (in the End, x the sky's style)
 		if (dim == 2) put(Settings.endStyle, 0f, 0f, endFog ? -Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f : 0f);
 		else put(netherFog[0], netherFog[1], netherFog[2], netherHaze ? farM : 0f);
-		put(Settings.portals ? 1f : 0f, 0f, 0f, 0f);
+		put(Settings.portals ? 1f : 0f, Settings.glassSun && Settings.coloredLight ? 1f : 0f, 0f, 0f);
 		if (BUF.position() != SIZE) throw new IllegalStateException("ImFrame is " + BUF.position() + " bytes, not " + SIZE);
 	}
 

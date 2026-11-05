@@ -61,7 +61,7 @@ struct ImFrame {
 	                     // w how wet the world is (rain, eased; 0 in dry biomes or with the setting off)
 	float4 taa;          // TAA: xy this frame's sub-pixel jitter (Minecraft's clip units, y up), z 1 = on
 	float4 nether;       // the Nether's haze (Reimagined's netherColor as the terrain shows it, linear), w its full distance (0: not ours)
-	float4 extra;        // x 1 = portal effects
+	float4 extra;        // x 1 = portal effects, y 1 = sunlight coloured by stained glass
 };
 
 static inline float imSqrt2(float x) { x = 1.0 - x; x *= x; x *= x; return 1.0 - x; }
@@ -613,6 +613,41 @@ static inline float imValueNoise(float2 q) {
 	return mix(mix(imHash2(i), imHash2(i + int2(1, 0)), u.x), mix(imHash2(i + int2(0, 1)), imHash2(i + int2(1, 1)), u.x), u.y);
 }
 
+// Sunlight through stained glass (Reimagined's coloured shadows): from the surface toward the sun, block by block through the
+// coloured light grid's seeds (light.metal: bit 6 of a marks stained glass, rgb its colour), the light takes the colour of
+// each pane it passes, as through a coloured filter. Up to 20 blocks; solid blocks end it (the shadow map has those).
+static float3 imGlassTint(float3 p, float3 n, constant ImFrame &f, texture3d<float> seeds) {
+	if (f.lightVol.w < 0.5 || length(p) > 72.0) return float3(1.0);
+	float3 d = f.lightDir.xyz;
+	float3 q = p + n * 0.02 - f.lightVol.xyz;  // (voxel space: one voxel a block)
+	int3 size = int3(f.lightSize.xyz);
+	int3 v = int3(floor(q));
+	int3 st = int3(sign(d));
+	float3 inv = 1.0 / max(abs(d), 1e-5);
+	float3 tMax = (select(float3(v) + 1.0 - q, q - float3(v), d < 0.0)) * inv;
+	float3 tDelta = inv;
+	float3 tint = float3(1.0);
+	uint lastColour = 0u;
+	for (int i = 0; i < 20; i++) {
+		if (tMax.x < tMax.y && tMax.x < tMax.z) { v.x += st.x; tMax.x += tDelta.x; }
+		else if (tMax.y < tMax.z) { v.y += st.y; tMax.y += tDelta.y; }
+		else { v.z += st.z; tMax.z += tDelta.z; }
+		if (any(v < 0) || any(v >= size)) break;
+		float4 s = seeds.read(uint3(v));
+		uint bits = uint(s.a * 255.0 + 0.5);
+		if ((bits & 128u) != 0u) break;
+		if ((bits & 64u) != 0u) {
+			// (a run of the same glass tints once: a thick window isn't darker than a pane)
+			uint key = uint(s.r * 255.0) | uint(s.g * 255.0) << 8 | uint(s.b * 255.0) << 16;
+			if (key != lastColour) tint *= mix(float3(1.0), max(s.rgb, 0.04), 0.82);
+			lastColour = key;
+		}
+	}
+	// (kept bright: the colour, not a darkening; Reimagined's beams through glass stay luminous)
+	float m = max(max(tint.r, tint.g), tint.b);
+	return m < 0.999 ? tint / max(m, 0.15) * mix(m, 1.0, 0.6) : tint;
+}
+
 // Reimagined's glowing ores (lib/materials/materialHandling/terrainIPBR.glsl, GLOWING_ORE_*), ore by ore: which texels are the ore's
 // own (its rule on the texel's colour), how strongly they glow (e: Reimagined adds e^2 to the light, so the light given off is
 // (colour x e^2)^2.2 once linear: a diamond's core far past white, iron a soft peach) and how the speck's colour is deepened
@@ -676,7 +711,7 @@ static inline float imDither(float2 pixel, constant ImFrame &f) {
 }
 
 static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint mat, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp,
-	texture3d<float> lvol, sampler lsamp, float2 uv, float4 rect, texture2d<float> atlas, texture2d<float> hc, depth2d<float> hd, sampler hs) {
+	texture3d<float> lvol, sampler lsamp, texture3d<float> seeds, float2 uv, float4 rect, texture2d<float> atlas, texture2d<float> hc, depth2d<float> hd, sampler hs) {
 	if (f.flags.z == 0) return albedo * (0.2 + 0.8 * max(light.x, light.y)); // the engine hasn't filled a frame yet
 	// (the End has no sky light in Minecraft: everything there counts as open to its sky, so its light (Reimagined's lavender,
 	// or the black hole's) reaches the islands, the shadow maps deciding where)
@@ -782,6 +817,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		sun *= 0.45 + 1.8 * cl;
 	}
 	float3 direct = f.lightColor.rgb * (wrap * sun);
+	if (sun > 0.002 && f.extra.y > 0.5) direct *= imGlassTint(p, n, f, seeds);
 	// (and glow when the light is behind them: Reimagined's subsurface highlight, looking toward the sun through grass and leaves,
 	// their backlit edges lit up gold; added on top of the surface, as its highlight is)
 	float3 sssGlow = float3(0.0);
@@ -1038,7 +1074,8 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 // sky) 0..1. Sun with the shadow maps, the sky's light from above, block light in the grid's colour, the floor, the held light,
 // combined as the terrain combines them, through the same tone curve. Returns display-encoded.
 static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, constant ImFrame &f, depth2d_array<float> smap, sampler cmp,
-	texture3d<float> lvol, sampler lsamp, bool item) {
+	texture3d<float> lvol, sampler lsamp, float kind) {
+	bool item = kind > 0.5 && kind < 1.5;
 	if (f.flags.z == 0 || f.flags.y != 0) return col;
 	if (f.flags.x == 2) light.y = 1.0;
 	float3 base = pow(max(col, 0.0), 2.2);
@@ -1082,6 +1119,19 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 		lit = mix(lit, litG, f.nightMiddle.w);
 	}
 	float3 radiance = base * lit * f.minLight.w;
+	if (kind > 1.5 && !particle) {
+		// armour (Reimagined gives it a metal's smoothness by the texture's brightness): a sharp sun highlight and the sky's light
+		// mirrored, stronger at a grazing angle, both tinted by the metal's own colour; dull cloth and leather barely
+		float3 V = -normalize(p);
+		float3 H = normalize(V + f.lightDir.xyz);
+		float shine = smoothstep(0.08, 0.55, imLuma(base));
+		float sp = pow(saturate(dot(n, H)), 40.0) * 5.0 * sun * saturate(nl * 4.0);
+		float3 R = reflect(-V, n);
+		float fres = pow(1.0 - saturate(dot(n, V)), 4.0);
+		float3 env = mix(f.ambientDown.rgb, f.ambientUp.rgb, R.y * 0.5 + 0.5) * skyF + torch * 0.5;
+		float3 tintM = base / max(max(max(base.r, base.g), base.b), 0.05);
+		radiance += tintM * (f.lightColor.rgb * sp + env * (0.35 + 1.2 * fres)) * (shine * f.minLight.w);
+	}
 	float3 c = imGrade(imTonemap(radiance, f.tonemap), f);
 	// items in the world that give off light (a lava bucket's lava, a torch's flame, glowstone dust, blaze rods): their hot,
 	// saturated warm pixels glow past white, so the bloom haloes them and they aren't dark in a cave

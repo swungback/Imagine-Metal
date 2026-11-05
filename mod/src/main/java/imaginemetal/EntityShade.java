@@ -46,7 +46,7 @@ public final class EntityShade {
 			if (!lm && !particle) return null;
 			if (!fs.contains("out.fragColor") || !vs.contains("in.Position")) return null;
 			String v = patchVs(vs, particle);
-			String f = v == null ? null : patchFs(fs, n.contains("item"));
+			String f = v == null ? null : patchFs(fs, n.contains("armor") ? "2.0" : n.contains("item") ? "1.0" : "0.0");
 			if (v == null || f == null) {
 				System.out.println("[Imagine Metal] entity light: " + name + " left as Minecraft's (its shader isn't the shape expected)");
 				return null;
@@ -138,7 +138,7 @@ public final class EntityShade {
 		return beforeLastReturn(v, c.toString());
 	}
 
-	private static String patchFs(String fs, boolean item) {
+	private static String patchFs(String fs, String kind) {
 		Matcher m = FS_MAIN.matcher(fs);
 		if (!m.find()) return null;
 		String f = fs.substring(0, m.end()) + ", constant float4& imOn [[buffer(25)]], constant ImFrame& imf [[buffer(30)]]"
@@ -147,7 +147,7 @@ public final class EntityShade {
 		f = addMembers(f, "main0_in", "    float3 imPos [[user(locn20)]];\n    float3 imNrm [[user(locn21)]];\n    float2 imLm [[user(locn22)]];");
 		if (f == null) return null;
 		f = beforeLastReturn(f, "    if (imOn.x > 0.5) out.fragColor.xyz = imShadeEntity(out.fragColor.xyz, in.imPos, in.imNrm, in.imLm, imf, imShadowMap,"
-			+ " imShadowCmp, imLightVol, imLightSampler, " + (item ? "true" : "false") + ");");
+			+ " imShadowCmp, imLightVol, imLightSampler, " + kind + ");");
 		if (f == null) return null;
 		if (lighting == null) lighting = Engine.resource("/imaginemetal/shaders/lighting.metal");
 		return lighting + "\n// ---- Minecraft's shader (SPIRV-Cross), patched ----\n" + f;

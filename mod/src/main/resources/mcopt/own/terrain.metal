@@ -2288,7 +2288,7 @@ constant float CUTOUT_LIMIT [[function_constant(5)]];  // vanilla's ALPHA_CUTOUT
 // behind this fragment (water blue, stained glass its colour; 1: not at all).
 static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, constant Fog &fog, texture2d<float> atlas, sampler atlasSampler
 #ifdef IM_SHADE
-	, constant ImFrame &imf, depth2d_array<float> imShadowMap, sampler imShadowCmp, texture3d<float> imLightVol, sampler imLightSampler
+	, constant ImFrame &imf, depth2d_array<float> imShadowMap, sampler imShadowCmp, texture3d<float> imLightVol, sampler imLightSampler, texture3d<float> imSeeds
 	, texture2d<float> imHistColor, depth2d<float> imHistDepth, sampler imHistSampler, thread float3 &imTint
 #endif
 	) {
@@ -2379,7 +2379,7 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 			imTint = mix(gt, float3(1.0), saturate(far * far));
 		}
 	}
-	color.rgb = imShade(color.rgb, texel.rgb, in.imPos, in.imLight, in.imMat | (imKind << 8), in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler,
+	color.rgb = imShade(color.rgb, texel.rgb, in.imPos, in.imLight, in.imMat | (imKind << 8), in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imSeeds,
 		in.texCoord0, in.imRect, atlas, imHistColor, imHistDepth, imHistSampler); // (Imagine Metal)
 	if (imPortal && imf.extra.x > 0.5 && imf.portalRect.z > imf.portalRect.x) color = imPortalLook(in.texCoord0, in.imPos, texel, atlas, imf);
 	float3 imFogColor = fog.FogColor.rgb;
@@ -2439,13 +2439,13 @@ fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]],
 	texture2d<float> atlas [[texture(16)]], sampler atlasSampler [[sampler(14)]]
 #ifdef IM_SHADE
 	, constant ImFrame &imf [[buffer(30)]], depth2d_array<float> imShadowMap [[texture(20)]], sampler imShadowCmp [[sampler(13)]]
-	, texture3d<float> imLightVol [[texture(21)]], sampler imLightSampler [[sampler(12)]]
+	, texture3d<float> imLightVol [[texture(21)]], sampler imLightSampler [[sampler(12)]], texture3d<float> imSeeds [[texture(24)]]
 	, texture2d<float> imHistColor [[texture(22)]], depth2d<float> imHistDepth [[texture(23)]], sampler imHistSampler [[sampler(11)]]
 #endif
 	) {
 #ifdef IM_SHADE
 	float3 imTint = float3(1.0);
-	return ownFsBody(in, g, t, fog, atlas, atlasSampler, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imHistColor, imHistDepth,
+	return ownFsBody(in, g, t, fog, atlas, atlasSampler, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imSeeds, imHistColor, imHistDepth,
 		imHistSampler, imTint);
 #else
 	return ownFsBody(in, g, t, fog, atlas, atlasSampler);
@@ -2459,11 +2459,11 @@ fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]],
 fragment float4 own_fs_tr(VOut in [[stage_in]], float4 imDst [[color(0)]], constant Globals &g [[buffer(22)]], constant Terrain &t [[buffer(23)]],
 	constant Fog &fog [[buffer(24)]], texture2d<float> atlas [[texture(16)]], sampler atlasSampler [[sampler(14)]]
 	, constant ImFrame &imf [[buffer(30)]], depth2d_array<float> imShadowMap [[texture(20)]], sampler imShadowCmp [[sampler(13)]]
-	, texture3d<float> imLightVol [[texture(21)]], sampler imLightSampler [[sampler(12)]]
+	, texture3d<float> imLightVol [[texture(21)]], sampler imLightSampler [[sampler(12)]], texture3d<float> imSeeds [[texture(24)]]
 	, texture2d<float> imHistColor [[texture(22)]], depth2d<float> imHistDepth [[texture(23)]], sampler imHistSampler [[sampler(11)]]
 	) {
 	float3 imTint = float3(1.0);
-	float4 c = ownFsBody(in, g, t, fog, atlas, atlasSampler, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imHistColor, imHistDepth,
+	float4 c = ownFsBody(in, g, t, fog, atlas, atlasSampler, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imSeeds, imHistColor, imHistDepth,
 		imHistSampler, imTint);
 	float a = saturate(c.a);
 	float3 behind = pow(max(imDst.rgb, 0.0), 2.2) * imTint;

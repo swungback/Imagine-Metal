@@ -7,7 +7,7 @@
 #import "mcmetal.h"
 #include <string.h>
 
-void mc_im_light_bind(id<MTLTexture> volume, id<MTLSamplerState> sampler);  // mcown.m
+void mc_im_light_bind(id<MTLTexture> volume, id<MTLSamplerState> sampler, id<MTLTexture> seeds);  // mcown.m
 
 #define IM_LIGHT_PENDING 160
 typedef struct {
@@ -130,5 +130,5 @@ void im_light_step(Enc *enc, ImLight *l, int shiftX, int shiftY, int shiftZ, int
 		[c endEncoding];
 		l->cur = next;
 	}
-	mc_im_light_bind(l->light[l->cur], l->linear);
+	mc_im_light_bind(l->light[l->cur], l->linear, l->seeds);
 }

@@ -49,7 +49,7 @@ def patch_fs(fs):
     f = add_members(f, 'main0_in')
     if f is None: return None
     f = before_last_return(f, '    if (imOn.x > 0.5) out.fragColor.xyz = imShadeEntity(out.fragColor.xyz, in.imPos, in.imNrm, in.imLm, imf, imShadowMap,'
-        ' imShadowCmp, imLightVol, imLightSampler, ' + 'false);')
+        ' imShadowCmp, imLightVol, imLightSampler, ' + '0.0);')
     if f is None: return None
     return lighting + '\n// ---- Minecraft\'s shader (SPIRV-Cross), patched ----\n' + f
 
