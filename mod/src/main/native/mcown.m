@@ -8,12 +8,16 @@
 // (Imagine Metal) the shader engine's per-frame values (imaginemetal.ImagineFrame, terrain.metal / lighting.metal ImFrame,
 // 240 bytes), bound at fragment buffer 30 on every terrain draw. All zero until the engine's first frame: imShade then falls
 // back to a plain light-level look (ImFrame.flags.z == 0).
-static uint8_t imFrame[912];
+static uint8_t imFrame[928];
 // (Imagine Metal) the shadow map and its compare sampler (imshadow.m), bound at fragment texture 20 / sampler 13 once it exists;
 // own_fs only samples it when ImFrame.shadow.y says this frame's map is valid
 static id<MTLTexture> imLightTex;
 static id<MTLSamplerState> imLightSampler;
-static id<MTLTexture> imSeedTex, imUnderTex, imUnderDepthTex;
+static id<MTLTexture> imSeedTex, imUnderTex, imUnderDepthTex, imPbrN, imPbrS;
+void mc_im_pbr_bind(id<MTLTexture> n, id<MTLTexture> s) {
+	imPbrN = n;  // (kept for good: one per resource reload, the last one's few MB)
+	imPbrS = s;
+}
 void mc_im_under_bind(id<MTLTexture> color, id<MTLTexture> depth) {
 	imUnderTex = color;
 	imUnderDepthTex = depth;
@@ -881,6 +885,10 @@ drawCall:
 	if (imUnderTex) {
 		[r setFragmentTexture:imUnderTex atIndex:25];
 		[r setFragmentTexture:imUnderDepthTex atIndex:26];
+	}
+	if (imPbrN) {
+		[r setFragmentTexture:imPbrN atIndex:27];
+		[r setFragmentTexture:imPbrS atIndex:28];
 	}
 	if (imShadowTex) {
 		[r setFragmentTexture:imShadowTex atIndex:20];

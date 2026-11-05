@@ -45,6 +45,16 @@ final class ImNative {
 	private static final MethodHandle SSR_CAPTURE = fn("im_ssr_capture", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG,
 		JAVA_LONG, JAVA_INT), false);
 
+	private static final MethodHandle PBR_UPLOAD = fn("im_pbr_upload", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_LONG, JAVA_LONG), false);
+
+	static int pbrUpload(long ctx, int w, int h, long n, long s) {
+		try {
+			return (int) PBR_UPLOAD.invokeExact(ctx, w, h, n, s);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
 	private static final MethodHandle UNDER_CAPTURE = fn("im_under_capture", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG,
 		JAVA_LONG, JAVA_INT), false);
 

@@ -14,7 +14,7 @@ import org.joml.Vector4f;
 import org.lwjgl.system.MemoryUtil;
 
 /**
- * The lighting's per-frame values (lighting.metal ImFrame, 912 bytes): where the sun or moon is, the colours of its light, of
+ * The lighting's per-frame values (lighting.metal ImFrame, 928 bytes): where the sun or moon is, the colours of its light, of
  * the sky's light and of torches for this time of day and weather, the cave floor, the tone curve. Made once per frame at
  * LevelRenderer.render's start (LevelRendererMixin) and handed to the backend, which binds it on every terrain draw.
  *
@@ -22,7 +22,7 @@ import org.lwjgl.system.MemoryUtil;
  * a deep orange golden hour, blue-violet nights), tuned for our pipeline.
  */
 public final class ImagineFrame {
-	static final int SIZE = 912;
+	static final int SIZE = 928;
 	private static final ByteBuffer BUF = MemoryUtil.memAlloc(SIZE).order(ByteOrder.LITTLE_ENDIAN);
 	private static final long ADDRESS = MemoryUtil.memAddress(BUF);
 	private static int frame;
@@ -504,6 +504,7 @@ public final class ImagineFrame {
 		put(Settings.coated ? 1f : 0f, Settings.lightFog && Settings.coloredLight ? 1f : 0f, Settings.mobShadows && Settings.shadows ? 1f : 0f,
 			Settings.waterFx && Settings.waterStyle > 0 && Reflections.underReady ? 1f : 0f);
 		put(endFlashDir[0], endFlashDir[1], endFlashDir[2], dim == 2 ? endFlash : 0f);
+		put(PbrAtlas.on && Settings.pbrPack ? 1f : 0f, Settings.parallax ? 1f : 0f, 0f, 0f);
 		if (BUF.position() != SIZE) throw new IllegalStateException("ImFrame is " + BUF.position() + " bytes, not " + SIZE);
 	}
 

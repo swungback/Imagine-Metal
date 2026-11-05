@@ -125,3 +125,27 @@ int im_under_capture(Enc *enc, ImSsr *s, id<MTLTexture> color, id<MTLTexture> de
 	mc_im_under_bind(s->under, s->underDepth);
 	return 0;
 }
+
+void mc_im_pbr_bind(id<MTLTexture> n, id<MTLTexture> s);  // mcown.m
+
+// A PBR resource pack's maps as the block atlas lays them out (PbrAtlas): RGBA8 each, uploaded once per resource reload.
+// Returns 1 made, 0 not.
+int im_pbr_upload(Ctx *ctx, int w, int h, const void *n, const void *s) {
+	if (!ctx || w <= 0 || h <= 0 || !n || !s) return 0;
+	@autoreleasepool {
+		MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm width:(NSUInteger) w
+			height:(NSUInteger) h mipmapped:NO];
+		td.storageMode = MTLStorageModeShared;
+		td.usage = MTLTextureUsageShaderRead;
+		id<MTLTexture> tn = [ctx->device newTextureWithDescriptor:td];
+		id<MTLTexture> ts = [ctx->device newTextureWithDescriptor:td];
+		if (!tn || !ts) return 0;
+		MTLRegion r = MTLRegionMake2D(0, 0, (NSUInteger) w, (NSUInteger) h);
+		[tn replaceRegion:r mipmapLevel:0 withBytes:n bytesPerRow:(NSUInteger) w * 4];
+		[ts replaceRegion:r mipmapLevel:0 withBytes:s bytesPerRow:(NSUInteger) w * 4];
+		tn.label = @"Imagine Metal PBR normals";
+		ts.label = @"Imagine Metal PBR specular";
+		mc_im_pbr_bind(tn, ts);
+	}
+	return 1;
+}

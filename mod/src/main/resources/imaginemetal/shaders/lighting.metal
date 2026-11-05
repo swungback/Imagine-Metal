@@ -65,6 +65,7 @@ struct ImFrame {
 	float4 endPortal;    // the End portal's rays (bloom.metal): xyz its middle, camera-relative; w the time (s)
 	float4 toggles;      // x 1 = coated textures, y 1 = coloured light fog (bloom.metal), z 1 = mob shadows, w 1 = water refraction and foam
 	float4 endFlash;     // the End's flashes: xyz toward the flash, w its strength now (0 none)
+	float4 pbrPack;      // x 1 = a PBR resource pack's maps (PbrAtlas, textures 27 and 28), y 1 = parallax from their height
 };
 
 static inline float imSqrt2(float x) { x = 1.0 - x; x *= x; x *= x; return 1.0 - x; }
@@ -744,7 +745,7 @@ static inline float imDither(float2 pixel, constant ImFrame &f) {
 }
 
 static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint mat, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp,
-	texture3d<float> lvol, sampler lsamp, texture3d<float> seeds, float2 uv, float4 rect, texture2d<float> atlas, texture2d<float> hc, depth2d<float> hd, sampler hs) {
+	texture3d<float> lvol, sampler lsamp, texture3d<float> seeds, texture2d<float> pbrN, texture2d<float> pbrS, float2 uv, float4 rect, texture2d<float> atlas, texture2d<float> hc, depth2d<float> hd, sampler hs) {
 	if (f.flags.z == 0) return albedo * (0.2 + 0.8 * max(light.x, light.y)); // the engine hasn't filled a frame yet
 	// (the End has no sky light in Minecraft: everything there counts as open to its sky, so its light (Reimagined's lavender,
 	// or the black hole's) reaches the islands, the shadow maps deciding where)
@@ -770,6 +771,48 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			float im = rsqrt(max(max(dot(T, T), dot(B, B)), 1e-30));
 			N = normalize(T * (tn.x * im) + B * (tn.y * im) + n * tn.z);
 		}
+	}
+	// a PBR resource pack (LabPBR): its normal map, ambient occlusion and height (parallax), and below its smoothness, metalness and
+	// glow; in place of ours where the pack has a map
+	float4 pS = float4(0.0);
+	bool packed = false;
+	if (f.pbrPack.x > 0.5 && kind == 0u && !slanted) {
+		constexpr sampler ps(filter::nearest, address::clamp_to_edge);
+		float3 dp2perp = cross(dp2, n), dp1perp = cross(n, dp1);
+		float3 T = dp2perp * duv1.x + dp1perp * duv2.x;
+		float3 B = dp2perp * duv1.y + dp1perp * duv2.y;
+		float im = rsqrt(max(max(dot(T, T), dot(B, B)), 1e-30));
+		float3 Tn = T * im, Bn = B * im;
+		float2 puv = uv;
+		float4 pn = pbrN.sample(ps, uv, level(0.0));
+		if (f.pbrPack.y > 0.5 && pn.a < 0.999 && length(p) < 24.0) {
+			// (parallax: the surface's height pushes the texture along the view, four steps into it)
+			float3 Vv = -normalize(p);
+			float3 vt = float3(dot(Vv, normalize(Tn)), dot(Vv, normalize(Bn)), max(dot(Vv, n), 0.25));
+			float2 rs = rect.zw - rect.xy;
+			float2 stepUv = -vt.xy / vt.z * 0.25 * rs * 0.25;
+			float hgt = 1.0;
+			for (int k = 0; k < 4; k++) {
+				float hh = pbrN.sample(ps, puv, level(0.0)).a;
+				if (hh >= hgt) break;
+				puv = clamp(puv + stepUv, rect.xy, rect.zw);
+				hgt -= 0.25;
+			}
+			if (any(puv != uv)) {
+				float3 t2 = atlas.sample(ps, puv, level(0.0)).rgb;
+				albedo *= t2 / max(tex, float3(0.004));
+				tex = t2;
+				pn = pbrN.sample(ps, puv, level(0.0));
+			}
+		}
+		pS = pbrS.sample(ps, puv, level(0.0));
+		packed = any(pS != 0.0);
+		float2 nxy = pn.rg * 2.0 - 1.0;
+		if (any(abs(nxy) > 0.004)) {
+			float nz = sqrt(saturate(1.0 - dot(nxy, nxy)));
+			N = normalize(Tn * nxy.x - Bn * nxy.y + n * nz);
+		}
+		albedo *= mix(1.0, pn.b, 0.8);
 	}
 	// (Reimagined lights the texture's colours as they are and encodes only at the end; that lifts the mid tones and keeps the
 	// shadows open: its bright, lively look. Linearizing them first, as physically based packs do, gives a darker, moodier picture.)
@@ -814,6 +857,14 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		albedo *= 1.0 + (hn - 0.5) * 0.32;
 	}
 	ImSurf surf = pbr ? imSurface(cls, albedo, tex) : ImSurf{0.0, 0.0, 0.0, 0.04, 0.0};
+	if (pbr && packed) {
+		// (LabPBR: r perceptual smoothness, g f0 (230 and up: a metal), a emission (255: none))
+		float metalP = pS.g * 255.0 >= 229.5 ? 1.0 : 0.0;
+		surf.d = pS.r;
+		surf.g = pS.r;
+		surf.metal = metalP;
+		surf.f0 = metalP > 0.5 ? 0.9 : max(pS.g, 0.02);
+	}
 	// (obsidian and crying obsidian: dark gems, kept to a sheen; diamond, emerald, amethyst: bright ones, kept shiny)
 	float gemDark = 1.0 - smoothstep(0.15, 0.4, imLuma(tex));
 	float3 V = -normalize(p);
@@ -1005,6 +1056,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		return pow(gm > 1e-4 ? gl.rgb / gm * saturate(gl.a * 1.5) : float3(0.0), 1.0 / 2.2) * 0.9 + base * 0.1;
 	}
 	float emit = oreT != 0u ? 0.0 : imEmission(cls, tex);
+	if (packed && pS.a * 255.0 < 254.5) emit = max(emit, pS.a * 3.0);
 	// (Reimagined's distant light bokeh: far torches, lanterns and glowstone glow brighter, so they read as soft points of light)
 	if (cls == IM_MAT_FLAME || cls == IM_MAT_EMITTER) emit *= 1.0 + 1.8 * smoothstep(20.0, 140.0, length(p));
 	if (cls == IM_MAT_LAVA) {

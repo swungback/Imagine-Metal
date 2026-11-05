@@ -151,6 +151,9 @@ public final class SettingsScreen extends OptionsSubScreen {
 						"Stained glass, ice and other see-through blocks reflect the sky and the world."));
 				this.list.addBig(toggle("Water refraction and foam", Settings.waterFx, v -> Settings.waterFx = v,
 					"What's under the water wavers with its surface, and foam gathers where it meets the shore. Needs Reimagined water."));
+				this.list.addSmall(toggle("PBR resource packs", Settings.pbrPack, v -> Settings.pbrPack = v,
+					"Use a LabPBR resource pack's normal and specular maps (its bumps, shine, metals and glow) where it has them. Needs PBR."),
+					toggle("Parallax", Settings.parallax, v -> Settings.parallax = v, "The pack's height maps push the texture in, so its bumps have depth up close."));
 				this.list.addBig(toggle("Coated textures", Settings.coated, v -> Settings.coated = v,
 					"Reimagined's coated textures: each texture pixel a touch lighter or darker, so flat colours read as a material."));
 				this.list.addBig(toggle("Wet in the rain", Settings.wet, v -> Settings.wet = v,
