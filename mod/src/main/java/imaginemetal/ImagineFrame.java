@@ -213,15 +213,14 @@ public final class ImagineFrame {
 			// converted like the clear one for the linear colours)
 			float[] rainAmb = {0.22f, 0.22f, 0.36f};
 			for (int i = 0; i < 3; i++) up[i] = mix(up[i], mix(NIGHT_SKY[i] * 1.2f * Settings.nightBrightness, rainAmb[i], day), rain);
-			// dry biomes (desert, badlands, savanna) by day: a warmer sun and warm, softer shade (the plain sky colour there is a pale
-			// cyan, and the sand's shadows came out a cold teal), so they read hot and sunny
-			float dryW = Haze.dry * day * (1f - rain);
-			if (dryW > 0f) {
+			// each biome's own light by day (Haze.look): the sun's tint, and the shade pulled toward the biome's colour (a desert's
+			// warm, a jungle's green, snow's blue; the plain sky colour made a desert's shadows a cold teal)
+			float bw = day * (1f - rain);
+			if (bw > 0f) {
 				float lum = 0.2126f * up[0] + 0.7152f * up[1] + 0.0722f * up[2];
-				float[] warmShade = {1.2f, 1.0f, 0.74f}, warmSun = {1.07f, 0.99f, 0.84f};
 				for (int i = 0; i < 3; i++) {
-					up[i] = mix(up[i], lum * warmShade[i] * 0.85f, 0.65f * dryW);
-					light[i] *= mix(1f, warmSun[i], dryW);
+					up[i] = mix(up[i], lum * Haze.look[3 + i], Haze.look[6] * bw);
+					light[i] *= mix(1f, Haze.look[i], bw);
 				}
 			}
 

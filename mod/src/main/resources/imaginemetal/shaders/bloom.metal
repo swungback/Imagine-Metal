@@ -562,8 +562,9 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 	float4 pp = ((constant float4 *) &f)[54];  // (ImFrame.endPortal, byte 864: w the time)
 	float4 fx = ((constant float4 *) &f)[53];  // (ImFrame.extra)
 	uint2 rp = uint2(in.pos.xy);
-	if (p.grade.z > 0.5) {
+	if (p.grade.z > 0.5 && p.grade.z < 1.5) {
 		// under water: the picture wavers gently (Reimagined's underwater distortion)
+		// (grade.z 1 only: the Nether's fog mode is 2 + its distance, and the waver ran there too, the whole Nether wobbling)
 		float2 wv = float2(sin(in.pos.y * 0.035 + pp.w * 2.1), cos(in.pos.x * 0.03 + pp.w * 1.7)) * 2.5;
 		rp = uint2(clamp(in.pos.xy + wv, float2(0.0), float2(hdr.get_width() - 1, hdr.get_height() - 1)));
 	}

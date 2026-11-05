@@ -47,7 +47,41 @@ public final class Haze {
 	// (Photon's is 0.03: a wall of grey; a fifth of it keeps the pale garden misty without drowning it)
 	private static final float[] PALE_GARDEN = {0.90f, 0.86f, 1.00f, 0.0060f};
 
+	/**
+	 * Each biome's own light by day, eased as you walk between them: x3 the sun's tint, x3 the shade's colour (the sky light
+	 * pulled toward it, its brightness included), and how far the shade is pulled. Deserts hot and golden with warm shade,
+	 * jungles and swamps lush and green in the shade, taigas cool, snow crisp and blue, cherry groves pink, the pale garden grey.
+	 */
+	static final float[] look = {1f, 1f, 1f, 1f, 1f, 1f, 0f};
+	private static final float[] lookTarget = {1f, 1f, 1f, 1f, 1f, 1f, 0f};
+	private static final float[] LOOK_TEMPERATE = {1.04f, 1.0f, 0.92f, 0.95f, 1.0f, 1.06f, 0.15f};
+	private static final float[] LOOK_DRY = {1.07f, 0.99f, 0.84f, 1.02f, 0.85f, 0.63f, 0.65f};
+	private static final float[] LOOK_JUNGLE = {1.03f, 1.0f, 0.88f, 0.86f, 1.04f, 0.78f, 0.35f};
+	private static final float[] LOOK_SWAMP = {1.0f, 0.98f, 0.85f, 0.8f, 0.95f, 0.72f, 0.45f};
+	private static final float[] LOOK_TAIGA = {1.0f, 0.98f, 0.95f, 0.84f, 0.99f, 1.08f, 0.25f};
+	private static final float[] LOOK_SNOWY = {0.97f, 0.99f, 1.04f, 0.84f, 0.99f, 1.25f, 0.3f};
+	private static final float[] LOOK_CHERRY = {1.04f, 0.97f, 0.97f, 1.1f, 0.92f, 1.06f, 0.35f};
+	private static final float[] LOOK_PALE = {0.95f, 0.95f, 0.97f, 0.95f, 0.96f, 0.98f, 0.6f};
+	private static final float[] LOOK_DARK_FOREST = {1.02f, 1.0f, 0.9f, 0.86f, 1.0f, 0.82f, 0.3f};
+	private static final float[] LOOK_MUSHROOM = {1.02f, 0.98f, 1.0f, 1.05f, 0.9f, 1.12f, 0.3f};
+	private static final float[] LOOK_WATER = {1.02f, 1.0f, 0.95f, 0.9f, 1.02f, 1.1f, 0.2f};
+
 	private Haze() {
+	}
+
+	private static float[] lookOf(String n) {
+		if (n.contains("pale_garden")) return LOOK_PALE;
+		if (n.contains("swamp") || n.contains("mangrove")) return LOOK_SWAMP;
+		if (n.contains("jungle") || n.contains("bamboo")) return LOOK_JUNGLE;
+		if (n.contains("desert") || n.contains("badlands") || n.contains("mesa") || n.contains("savanna")) return LOOK_DRY;
+		if (n.contains("cherry")) return LOOK_CHERRY;
+		if (n.contains("snowy") || n.contains("frozen") || n.contains("ice") || n.contains("grove") || n.contains("jagged") || n.contains("peaks"))
+			return LOOK_SNOWY;
+		if (n.contains("taiga")) return LOOK_TAIGA;
+		if (n.contains("dark_forest")) return LOOK_DARK_FOREST;
+		if (n.contains("mushroom")) return LOOK_MUSHROOM;
+		if (n.contains("ocean") || n.contains("beach") || n.contains("river")) return LOOK_WATER;
+		return LOOK_TEMPERATE;
 	}
 
 	private static float[] biome(String n) {
@@ -79,6 +113,7 @@ public final class Haze {
 			targetCold = b == SNOWY ? 1f : 0f;
 			targetDry = b == ARID ? 1f : 0f;
 			targetDeepDark = name.contains("deep_dark") ? 1f : 0f;
+			System.arraycopy(lookOf(name), 0, lookTarget, 0, 7);
 			float[] nc = name.contains("nether_wastes") ? new float[] {0.4f, 0.14f, 0.06f}
 				: name.contains("crimson_forest") ? new float[] {0.36f, 0.07f, 0.05f}
 				: name.contains("warped_forest") ? new float[] {0.18f, 0.1f, 0.25f}
@@ -94,6 +129,7 @@ public final class Haze {
 		cold += (targetCold - cold) * k;
 		dry += (targetDry - dry) * k;
 		deepDark += (targetDeepDark - deepDark) * k;
+		for (int i = 0; i < 7; i++) look[i] += (lookTarget[i] - look[i]) * k;
 		// (Reimagined eases these over seconds too: crossing into a soul sand valley the haze turns teal as you walk in)
 		float kn = k >= 1f ? 1f : 1f - (float) Math.exp(-dt / 4f);
 		for (int i = 0; i < 3; i++) netherPreset[i] += (netherTarget[i] - netherPreset[i]) * kn;
