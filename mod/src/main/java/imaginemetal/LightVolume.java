@@ -38,6 +38,39 @@ public final class LightVolume {
 		boolean active;
 		int sx, sy, sz;
 		boolean placed;
+		final java.util.ArrayList<int[]> portals = new java.util.ArrayList<>();
+	}
+
+	/** End portal blocks by section (world block coordinates), for the End portal's rays (portalCentre). */
+	private static final ConcurrentHashMap<Long, int[][]> PORTALS = new ConcurrentHashMap<>();
+
+	/**
+	 * The middle of the end portal nearest the camera (its blocks within 2 of the nearest one), camera-relative, or null when none
+	 * is within 40 blocks.
+	 */
+	static float[] portalCentre(double cx, double cy, double cz) {
+		int[] best = null;
+		double bd = 40.0 * 40.0;
+		for (int[][] list : PORTALS.values())
+			for (int[] b : list) {
+				double dx = b[0] + 0.5 - cx, dy = b[1] + 0.5 - cy, dz = b[2] + 0.5 - cz, d = dx * dx + dy * dy + dz * dz;
+				if (d < bd) {
+					bd = d;
+					best = b;
+				}
+			}
+		if (best == null) return null;
+		double sx = 0, sy = 0, sz = 0;
+		int n = 0;
+		for (int[][] list : PORTALS.values())
+			for (int[] b : list)
+				if (Math.abs(b[0] - best[0]) <= 2 && Math.abs(b[2] - best[2]) <= 2 && b[1] == best[1]) {
+					sx += b[0];
+					sy += b[1];
+					sz += b[2];
+					n++;
+				}
+		return new float[] {(float) (sx / n + 0.5 - cx), (float) (sy / n + 0.5 - cy), (float) (sz / n + 0.5 - cz)};
 	}
 
 	private static final ThreadLocal<Collector> COLLECTOR = ThreadLocal.withInitial(Collector::new);
@@ -59,12 +92,15 @@ public final class LightVolume {
 			c.count = 0;
 			c.placed = false;
 			c.active = true;
+			c.portals.clear();
 			return;
 		}
 		if (!c.active) return;
 		c.active = false;
 		if (!c.placed) return;
 		long k = key(c.sx, c.sy, c.sz);
+		if (c.portals.isEmpty()) PORTALS.remove(k);
+		else PORTALS.put(k, c.portals.toArray(new int[0][]));
 		SECTIONS.put(k, new SectionLight(c.opaque.clone(), java.util.Arrays.copyOf(c.sources, c.count)));
 		DIRTY.add(k);
 	}
@@ -80,6 +116,7 @@ public final class LightVolume {
 			c.placed = true;
 		}
 		if (state.isAir()) return;
+		if (state.getBlock() == net.minecraft.world.level.block.Blocks.END_PORTAL) c.portals.add(new int[] {x, y, z});
 		int i = (y & 15) << 8 | (z & 15) << 4 | x & 15;
 		if (state.isSolidRender()) c.opaque[i >> 6] |= 1L << (i & 63);
 		int light = state.getLightEmission(), glass;

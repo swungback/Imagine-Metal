@@ -62,6 +62,7 @@ struct ImFrame {
 	float4 taa;          // TAA: xy this frame's sub-pixel jitter (Minecraft's clip units, y up), z 1 = on
 	float4 nether;       // the Nether's haze (Reimagined's netherColor as the terrain shows it, linear), w its full distance (0: not ours)
 	float4 extra;        // x 1 = portal effects, y 1 = sunlight coloured by stained glass
+	float4 endPortal;    // the End portal's rays (bloom.metal): xyz its middle, camera-relative; w 1 + time (s), 0 none
 };
 
 static inline float imSqrt2(float x) { x = 1.0 - x; x *= x; x *= x; return 1.0 - x; }

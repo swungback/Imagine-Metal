@@ -515,12 +515,61 @@ fragment float4 im_bloom_ao(ImBloomOut in [[stage_in]], depth2d<float> depth [[t
 	return float4(ao, 0.0, 0.0, 1.0);
 }
 
+// Euphoria Patches' End portal rays (lib/atmospherics/endPortalBeam.glsl): light rising from the portal's rim, where the view ray
+// crosses the walls of a 3x3 box around it, up to 2 blocks over it, brightest at the bottom, in drifting teal noise.
+static float imbVNoise(float2 q) {
+	float2 i = floor(q), u = fract(q);
+	u = u * u * (3.0 - 2.0 * u);
+	float a = fract(sin(dot(i, float2(127.1, 311.7))) * 43758.5453), b = fract(sin(dot(i + float2(1, 0), float2(127.1, 311.7))) * 43758.5453);
+	float c = fract(sin(dot(i + float2(0, 1), float2(127.1, 311.7))) * 43758.5453), d = fract(sin(dot(i + float2(1, 1), float2(127.1, 311.7))) * 43758.5453);
+	return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+static float3 imbEndPortalRays(float3 dir, float4 pp) {
+	float3 start = float3(0.0);
+	float2 sd = dir.xz + 0.000001 * float2(dir.xz == 0.0);
+	float2 lo = pp.xz - 1.49, hi = pp.xz + 1.49;
+	float2 front = mix(hi, lo, 0.5 * sign(sd) + 0.5), back = mix(lo, hi, 0.5 * sign(sd) + 0.5);
+	float2 fi = (front - start.xz) / sd, bi = (back - start.xz) / sd;
+	float t0 = max(fi.x, fi.y), t1 = min(bi.x, bi.y);
+	if (t0 >= t1) return float3(0.0);
+	float t = pp.w - 1.0;
+	float3 col = float3(0.0);
+	for (int k = 0; k < 2; k++) {
+		float tk = k == 0 ? t0 : t1;
+		if (tk <= 0.0 || tk >= 1.0) continue;
+		float3 rel = dir * tk - pp.xyz;
+		if (rel.y <= 0.0 || rel.y >= 2.0) continue;
+		float mixF = imbVNoise((rel.xz + 0.1 * t * float2(-0.5, 1.5)) * 10.0 / 8.0);
+		float sm = imbVNoise((rel.xz + 0.1 * t * float2(1.5, -1.0)) * 5.0 / 8.0 + 0.2);
+		mixF *= mixF;
+		mixF *= mixF;
+		sm *= sm;
+		float3 c = mix(float3(0.1137, 0.5569, 0.5255), float3(0.3725, 0.8863, 0.749), mixF);
+		float s = (2.0 - rel.y) / (3.0 * rel.y * rel.y * rel.y + 1.0) * (sm + 0.5);
+		col += (c * s) * (c * s);
+	}
+	float3 ad = abs(dir);
+	float md = max(ad.x, max(ad.y, ad.z));
+	float tr = 1.0 - pow(min(md / 40.0 * 2.0, 1.0), 3.0);
+	return col * max(tr, 0.0);
+}
+
 fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> src [[texture(0)]], sampler s [[sampler(0)]],
 	texture2d<float> hdr [[texture(1)]], texture2d<float> shafts [[texture(2)]], texture2d<float> aoT [[texture(3)]],
 	texture2d<float> pic [[texture(4)]], depth2d<float> depth [[texture(5)]], sampler ms [[sampler(1)]],
 	constant ImBloomParams &p [[buffer(0)]], constant ImVlFrame &f [[buffer(1)]]) {
 	float4 h = hdr.read(uint2(in.pos.xy));
 	float3 c = imbLinear(h.rgb);
+	float4 pp = ((constant float4 *) &f)[54];  // (ImFrame.endPortal, byte 864)
+	if (pp.w > 0.5) {
+		float d = depth.read(uint2(clamp(in.uv, 0.0, 0.9999) * float2(depth.get_width(), depth.get_height())));
+		float4 w = p.clipInv * float4(in.uv * 2.0 - 1.0, d <= 0.00001 ? 0.0001 : d, 1.0);
+		float3 P = w.xyz / w.w;
+		if (d <= 0.00001) P = normalize(P) * 64.0;
+		float3 rays = imbEndPortalRays(P, pp);
+		c += rays * 2.5;
+	}
 	if (p.grade.w > 0.0) {
 		// Reimagined's rainbow (lib/atmospherics/rainbow.glsl, after rain): a ring opposite the sun, over the sky and far land
 		float d = depth.read(uint2(clamp(in.uv, 0.0, 0.9999) * float2(depth.get_width(), depth.get_height())));
