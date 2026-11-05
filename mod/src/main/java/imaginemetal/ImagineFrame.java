@@ -303,7 +303,11 @@ public final class ImagineFrame {
 		// lightning: the whole world lit a cold white for a moment, as the sky flashes
 		int flashT = 0;
 		try {
-			flashT = Minecraft.getInstance().level != null ? Minecraft.getInstance().level.getSkyFlashTime() : 0;
+			if (FLASH == null) {
+				FLASH = net.minecraft.client.multiplayer.ClientLevel.class.getDeclaredMethod("getSkyFlashTime");
+				FLASH.setAccessible(true);
+			}
+			flashT = Minecraft.getInstance().level != null ? (int) FLASH.invoke(Minecraft.getInstance().level) : 0;
 		} catch (Throwable ignored) {
 		}
 		if (dim == 0 && flashT > 0) for (int i = 0; i < 3; i++) up[i] += new float[] {0.9f, 0.95f, 1.15f}[i] * 1.4f;
@@ -483,12 +487,14 @@ public final class ImagineFrame {
 		put(Settings.portals ? 1f : 0f, Settings.glassSun && Settings.coloredLight && LightVolume.glassInGrid() ? 1f : 0f, pc != null ? 1f : 0f,
 			Settings.nebula && dim == 0 ? 1f : 0f);
 		// (the End portal's rays: its middle, camera-relative; w the time in seconds, always)
-		float secs = (float) ((System.nanoTime() / 1e9) % 1000.0);
-		if (pc != null) put(pc[0], pc[1], pc[2], secs);
-		else put(0f, 0f, 0f, secs);
+		float tSec = (float) ((System.nanoTime() / 1e9) % 1000.0);
+		if (pc != null) put(pc[0], pc[1], pc[2], tSec);
+		else put(0f, 0f, 0f, tSec);
 		put(Settings.coated ? 1f : 0f, 0f, 0f, 0f);
 		if (BUF.position() != SIZE) throw new IllegalStateException("ImFrame is " + BUF.position() + " bytes, not " + SIZE);
 	}
+
+	private static java.lang.reflect.Method FLASH;
 
 	private static void put(float x, float y, float z, float w) {
 		BUF.putFloat(x).putFloat(y).putFloat(z).putFloat(w);
