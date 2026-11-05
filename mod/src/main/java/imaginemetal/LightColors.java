@@ -77,7 +77,11 @@ public final class LightColors {
 		float[] c = EXTRA.get(state);
 		if (c == null) {
 			String n = state.getBlock().toString().toLowerCase(java.util.Locale.ROOT);
-			c = n.contains("redstone_block") ? new float[] {1f, 0.025f, 0.025f, 10}
+			// (Reimagined's blocklightColors: the nether stems light their room red or teal, the fungi and weeping vines faintly orange)
+			c = !n.contains("stripped") && (n.contains("crimson_stem") || n.contains("crimson_hyphae")) ? new float[] {1f, 0.17f, 0.11f, 7}
+				: !n.contains("stripped") && (n.contains("warped_stem") || n.contains("warped_hyphae")) ? new float[] {0.16f, 1f, 0.79f, 7}
+				: n.contains("crimson_fungus") || n.contains("warped_fungus") || n.contains("weeping_vines") ? new float[] {1f, 0.3f, 0.07f, 4}
+				: n.contains("redstone_block") ? new float[] {1f, 0.025f, 0.025f, 10}
 				: n.contains("lapis_block") ? new float[] {0.25f, 0.25f, 1f, 9}
 				: n.contains("redstone_ore") ? new float[] {1f, 0.025f, 0.025f, 4}
 				: n.contains("diamond_ore") ? new float[] {0.25f, 1f, 1f, 4}

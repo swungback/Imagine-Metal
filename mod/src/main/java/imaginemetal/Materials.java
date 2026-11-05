@@ -152,6 +152,8 @@ public final class Materials {
 		if (name.contains("_ore")) return (byte) (ORE | oreType(name, state) << 4);
 		// crimson and warped stems: their veins glow (Reimagined's terrainIPBR "Emissive Part"), through the ore path, which
 		// carries a type per block (14 crimson, 15 warped)
+		// Reimagined's glowing nether plants: the fungi's and weeping vines' bright orange spots (NETHER_ORE type 1)
+		if (name.contains("crimson_fungus") || name.contains("warped_fungus") || name.contains("weeping_vines")) return (byte) (NETHER_ORE | 1 << 4);
 		if (!name.contains("stripped") && (name.contains("crimson_stem") || name.contains("crimson_hyphae"))) return (byte) (NETHER_ORE | 14 << 4);
 		if (!name.contains("stripped") && (name.contains("warped_stem") || name.contains("warped_hyphae"))) return (byte) (NETHER_ORE | 15 << 4);
 		// sculk: its cyan specks glow like stars in the deep dark (the blocks themselves give off no light)

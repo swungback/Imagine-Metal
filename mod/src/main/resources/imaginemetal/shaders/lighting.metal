@@ -653,8 +653,10 @@ static float3 imGlassTint(float3 p, float3 n, constant ImFrame &f, texture3d<flo
 // own (its rule on the texel's colour), how strongly they glow (e: Reimagined adds e^2 to the light, so the light given off is
 // (colour x e^2)^2.2 once linear: a diamond's core far past white, iron a soft peach) and how the speck's colour is deepened
 // (cm: colour x colour^k; redstone's green and blue cut to a tenth). t: the ore (Materials.oreType); c: the texel (gamma).
-static float imOre(uint t, float3 c, thread float3 &cm) {
+static float imOre(uint t, float3 c, thread float3 &cm, bool nether) {
 	cm = float3(1.0);
+	// (the Nether's class reuses the overworld ores' numbers for its plants: 1 crimson and warped fungus, weeping vines)
+	if (nether && t == 1u) return c.r > 0.91 ? 3.0 * c.g : 0.0;
 	switch (t) {
 		case 1u:  // iron
 			if (c.r != c.g && c.r - c.b > 0.15) { cm = pow(max(c, 0.0), 0.5); return pow(c.r, 1.5) * 1.5; }
@@ -744,7 +746,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// ores we know glow as Reimagined's (imOre); one we don't (modded) by its own colours (imEmission)
 	uint oreT = (cls == IM_MAT_ORE || cls == IM_MAT_NETHER_ORE) ? (mat >> 4) & 15u : 0u;
 	float3 oreCm = float3(1.0);
-	float oreE = oreT != 0u ? imOre(oreT, tex, oreCm) : 0.0;
+	float oreE = oreT != 0u ? imOre(oreT, tex, oreCm, cls == IM_MAT_NETHER_ORE) : 0.0;
 	if (cls == IM_MAT_GLOW_GEM) {
 		// Reimagined's crying obsidian: only its purple veins (blue far over green) glow, the brightest far past white; its red
 		// pushed up a little so they read violet
