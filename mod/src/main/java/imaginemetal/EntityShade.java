@@ -82,13 +82,14 @@ public final class EntityShade {
 		try {
 			Matcher m = FS_MAIN.matcher(fs);
 			if (!m.find() || !fs.contains("out.fragColor")) return null;
-			String f = fs.substring(0, m.end()) + ", constant float4& imOn [[buffer(25)]], constant ImFrame& imf [[buffer(30)]]" + fs.substring(m.end());
-			f = beforeLastReturn(f, "    if (imOn.y > 1.5) { float h = fract(imf.world.w * 0.15); out.fragColor.xyz = saturate(abs(fmod(h * 6.0 + float3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0); }\n"
-				+ "    else if (imOn.y > 0.5) out.fragColor.xyz = float3(1.0);");
+			// (only the flag buffer, nothing of ours compiled in with it: with our lighting code and the frame's buffer added the
+			// outline no longer drew at all)
+			String f = fs.substring(0, m.end()) + ", constant float4& imOn [[buffer(25)]]" + fs.substring(m.end());
+			f = beforeLastReturn(f, "    if (imOn.y > 1.5) out.fragColor = float4(1.6, 1.6, 1.6, max(out.fragColor.w, 0.85));\n"
+				+ "    else if (imOn.y > 0.5) out.fragColor = float4(1.0, 1.0, 1.0, max(out.fragColor.w, 0.7));");
 			if (f == null) return null;
-			if (lighting == null) lighting = Engine.resource("/imaginemetal/shaders/lighting.metal");
 			System.out.println("[Imagine Metal] outline: " + name);
-			return new String[] {vs, lighting + "\n" + f};
+			return new String[] {vs, f};
 		} catch (Throwable t) {
 			return null;
 		}
@@ -99,6 +100,8 @@ public final class EntityShade {
 	 * level's pass (HDR), past white so the bloom lifts a haze of light off it.
 	 */
 	private static String[] endPortal(String name, String vs, String fs) {
+		// (Minecraft's own End portal surface again: ours, a cyan over it, looked worse than vanilla's; the rays stay, bloom.metal)
+		if (fs != null) return null;
 		try {
 			Matcher m = FS_MAIN.matcher(fs);
 			if (!m.find() || !fs.contains("out.fragColor")) return null;

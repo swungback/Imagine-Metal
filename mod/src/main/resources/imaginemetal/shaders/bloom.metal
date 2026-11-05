@@ -582,18 +582,19 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 		float j = fract(52.9829189 * fract(dot(in.pos.xy, float2(0.06711056, 0.00583715))) + 0.61803399 * float(f.flags.w & 1023));
 		float stepL = len / 10.0;
 		float3 acc = float3(0.0);
-		int3 top = int3(f.lightSize.xyz) - 1;
+		// (read filtered between the blocks' centres: read block by block, the fog showed the grid, solid cubes of glow with
+		// clear ones between)
+		constexpr sampler lfs(filter::linear, address::clamp_to_zero);
+		float3 inv = 1.0 / f.lightSize.xyz;
 		for (int i = 0; i < 10; i++) {
 			float3 q = dir * (stepL * (float(i) + j)) - f.lightVol.xyz;
-			int3 v = int3(floor(q));
-			if (any(v < 0) || any(v > top)) continue;
-			float4 l = lvol.read(uint3(v));
+			float4 l = lvol.sample(lfs, q * inv);
 			if (l.a <= 0.0) continue;
-			// (by the light level squared, three times stronger than at first: at its fourth power and 0.012 it was too faint to see)
 			float a2 = l.a * l.a;
-			acc += l.rgb / max(max(max(l.r, l.g), l.b), 1e-3) * (a2 * (0.35 + 0.65 * a2));
+			acc += l.rgb / max(max(max(l.r, l.g), l.b), 1e-3) * (a2 * a2);
 		}
-		c += acc * (stepL * 0.036) * (1.0 - 0.6 * smoothstep(0.4, 1.2, imbLuma(c)));  // (less over what's already bright: daylight)
+		// (a soft glow round the lights: at three times this it filled whole rooms and caverns)
+		c += acc * (stepL * 0.016) * (1.0 - 0.6 * smoothstep(0.4, 1.2, imbLuma(c)));
 	}
 	if (fx.z > 0.5) {
 		float d = depth.read(uint2(clamp(in.uv, 0.0, 0.9999) * float2(depth.get_width(), depth.get_height())));

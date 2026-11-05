@@ -83,7 +83,7 @@ public final class ImagineFrame {
 	private static final float[] MOON = {0.12f, 0.11f, 0.20f};
 	private static final float[] NIGHT_SKY = {0.036f, 0.039f, 0.085f};
 	private static final float[] TORCH = {1.45f, 0.50f, 0.12f};  // (Reimagined's hue, a little brighter: its torch rooms are lit further)
-	private static final float[] CAVE = {0.0055f, 0.0060f, 0.0085f};
+	private static final float[] CAVE = {0.0115f, 0.0125f, 0.0175f};  // (twice what it was: deep caves were pitch black, nothing to see by)
 	private static final float[] END_LIGHT = {0.52f, 0.40f, 0.74f};
 	private static final float[] END_SKY = {0.095f, 0.068f, 0.15f};
 	/** where the End's black hole hangs (Settings.endStyle 1): low in the sky, so the islands throw long shadows */

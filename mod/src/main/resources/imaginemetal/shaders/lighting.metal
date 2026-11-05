@@ -173,7 +173,8 @@ static inline float3 imTonemap(float3 x, float4 t) {
 static inline float3 imGrade(float3 c, constant ImFrame &f) {
 	float l = imLuma(c);
 	float sat = max(max(c.r, c.g), c.b) - min(min(c.r, c.g), c.b);
-	return mix(float3(l), c, f.grade.x + f.grade.y * (1.0 - sat));
+	// (and a little more colour where it's muted, Reimagined's vibrance: the picture read bland, washed out)
+	return mix(float3(l), c, f.grade.x + f.grade.y * (1.0 - sat) + 0.12 * (1.0 - saturate(sat * 2.5)));
 }
 
 // light (linear, before the tone curve) as the terrain's own light ends up: exposure, the tone curve, the grade (linear after)
@@ -637,7 +638,7 @@ static float imContactShadow(float3 p, float3 n, constant ImFrame &f, depth2d<fl
 		float4 sp = f.histClipInv * float4(ndc, d, 1.0);
 		float diff = length(r) - length(sp.xyz / sp.w);
 		// (just behind a surface the screen shows: something is between here and the sun; far behind is only passing behind it)
-		if (diff > 0.03 + length(r) * 0.003 && diff < 0.9) {
+		if (diff > 0.12 + length(r) * 0.005 && diff < 0.9) {
 			occ = 1.0 - float(i) / 12.0;
 			break;
 		}
@@ -728,10 +729,12 @@ static float imOre(uint t, float3 c, thread float3 &cm, bool nether) {
 			if (c.r > c.b * 3.0) return c.g * 1.5;
 			break;
 		case 14u:  // crimson stem and hyphae: the orange veins (Reimagined: red over blue past 2.5)
-			if (c.r > 2.5 * c.b) { cm = float3(1.0, 0.5, 0.5); return c.r * c.r * 6.5; }
+			// (half as strong: the veins glowed so hard the stems looked pasted in)
+			if (c.r > 2.5 * c.b && c.r > 0.45) { cm = float3(1.0, 0.5, 0.5); return c.r * c.r * 3.2; }
 			break;
 		case 15u:  // warped stem and hyphae: the teal veins
-			if (c.r < 0.37 * c.b || c.r + c.g * 3.0 < 3.4 * c.b) { float g = c.g + 0.2 * c.b; return g * g * 4.5 + 0.15; }
+			// (only the bright veins, and softer: the whole dark bark glowed too, flat and pasted-looking)
+			if ((c.r < 0.37 * c.b || c.r + c.g * 3.0 < 3.4 * c.b) && c.g > 0.5) { float g = c.g + 0.2 * c.b; return g * g * 2.2; }
 			break;
 		default:
 			break;
@@ -916,7 +919,9 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	float open = smoothstep(0.45, 0.9, sky);
 	float sun = mix(open, sm.x, sm.y) * (f.water.z > 0.5 && f.flags.x == 0 ? 0.3 + 0.7 * smoothstep(0.0, 0.6, sky) : smoothstep(0.0, 0.07, sky));
 	// mobs' and items' shadows (they aren't in the shadow map): a short trace toward the sun through the last frame's depth
-	if (f.toggles.z > 0.5 && sun > 0.02 && f.histShift.w > 0.5 && kind == 0u) sun *= imContactShadow(p, n, f, hd, imDither(pixel, f));
+	// (a fixed step pattern, no per-pixel jitter: the jitter, against the last frame's depth of grass and petals, was a crawling
+	// grain over the ground)
+	if (f.toggles.z > 0.5 && sun > 0.02 && f.histShift.w > 0.5 && kind == 0u) sun *= imContactShadow(p, n, f, hd, 0.5);
 	// caustics (eyes under water: what you see is under it too): the waves above focus the sunlight into a moving net of bright
 	// lines on everything it reaches, from two drifting noises' crossings, along the light's direction
 	if (f.water.z > 0.5 && f.flags.x == 0 && sun > 0.0) {
