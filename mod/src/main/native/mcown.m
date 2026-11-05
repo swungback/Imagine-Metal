@@ -8,7 +8,7 @@
 // (Imagine Metal) the shader engine's per-frame values (imaginemetal.ImagineFrame, terrain.metal / lighting.metal ImFrame,
 // 240 bytes), bound at fragment buffer 30 on every terrain draw. All zero until the engine's first frame: imShade then falls
 // back to a plain light-level look (ImFrame.flags.z == 0).
-static uint8_t imFrame[896];
+static uint8_t imFrame[912];
 // (Imagine Metal) the shadow map and its compare sampler (imshadow.m), bound at fragment texture 20 / sampler 13 once it exists;
 // own_fs only samples it when ImFrame.shadow.y says this frame's map is valid
 static id<MTLTexture> imLightTex;

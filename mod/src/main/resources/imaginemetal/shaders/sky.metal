@@ -286,10 +286,16 @@ static float4 imSkyPixel(ImSkyOut in, constant ImFrame &f, constant float4x4 &ro
 	float4 q = rot * float4(in.ndc.x, -in.ndc.y, 0.5, 1.0);
 	float3 d = normalize(q.xyz / q.w);
 	// (through the same exposure, tone curve and grade as the terrain, as Reimagined's sky goes through its tonemap with the rest)
+	// the End's flashes: a burst of violet light somewhere in the sky, a bright core in a wide glow, washing the whole sky faintly
+	float3 flash = float3(0.0);
+	if (f.flags.x == 2 && f.endFlash.w > 0.0) {
+		float fd = saturate(dot(d, f.endFlash.xyz));
+		flash = float3(0.75, 0.45, 1.0) * f.endFlash.w * (pow(fd, 300.0) * 6.0 + pow(fd, 12.0) * 0.6 + 0.05);
+	}
 	if (f.flags.x == 2 && f.nether.x > 0.5) {
 		float3 hdr;
 		float3 bh = imBlackHoleSky(d, f, hdr);
-		return float4(pow(imPresent(bh, f), 1.0 / 2.2) + hdr, 1.0);
+		return float4(pow(imPresent(bh + flash, f), 1.0 / 2.2) + hdr, 1.0);
 	}
 	if (f.flags.x == 2) {
 		// the End (Reimagined's): a deep violet sky full of tiny stars, thickest toward the horizon, both above and below
@@ -315,7 +321,7 @@ static float4 imSkyPixel(ImSkyOut in, constant ImFrame &f, constant float4x4 &ro
 		float neb = smoothstep(0.42, 0.85, nb) * (1.0 - au * 0.6);
 		float tone = imValueNoise(nq * 0.15 + 11.0);
 		float3 nebCol = mix(float3(0.42, 0.12, 0.45), float3(0.12, 0.3, 0.42), tone) * neb * 0.32;
-		return float4(pow(imPresent(base + nebCol + stars, f), 1.0 / 2.2), 1.0);
+		return float4(pow(imPresent(base + nebCol + stars + flash, f), 1.0 / 2.2), 1.0);
 	}
 	float3 sky = imSkyColor(d, f, true);
 	uint st = uint(f.auroraLight.w + 0.5);

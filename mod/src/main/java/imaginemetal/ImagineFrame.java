@@ -14,7 +14,7 @@ import org.joml.Vector4f;
 import org.lwjgl.system.MemoryUtil;
 
 /**
- * The lighting's per-frame values (lighting.metal ImFrame, 896 bytes): where the sun or moon is, the colours of its light, of
+ * The lighting's per-frame values (lighting.metal ImFrame, 912 bytes): where the sun or moon is, the colours of its light, of
  * the sky's light and of torches for this time of day and weather, the cave floor, the tone curve. Made once per frame at
  * LevelRenderer.render's start (LevelRendererMixin) and handed to the backend, which binds it on every terrain draw.
  *
@@ -22,7 +22,7 @@ import org.lwjgl.system.MemoryUtil;
  * a deep orange golden hour, blue-violet nights), tuned for our pipeline.
  */
 public final class ImagineFrame {
-	static final int SIZE = 896;
+	static final int SIZE = 912;
 	private static final ByteBuffer BUF = MemoryUtil.memAlloc(SIZE).order(ByteOrder.LITTLE_ENDIAN);
 	private static final long ADDRESS = MemoryUtil.memAddress(BUF);
 	private static int frame;
@@ -141,6 +141,17 @@ public final class ImagineFrame {
 		GameRenderState game = mc.gameRenderer.gameRenderState();
 		LevelRenderState state = game.levelRenderState;
 		SkyRenderState sky = state.skyRenderState;
+		// the End's flashes (Minecraft's: a burst of light somewhere in the sky now and then): where, and how strong right now
+		try {
+			endFlash = sky.endFlashIntensity;
+			org.joml.Vector3f fd = new org.joml.Vector3f(0f, 1f, 0f).rotateX((float) Math.toRadians(-90f - sky.endFlashXAngle))
+				.rotateY((float) Math.toRadians(180f - sky.endFlashYAngle));
+			endFlashDir[0] = fd.x;
+			endFlashDir[1] = fd.y;
+			endFlashDir[2] = fd.z;
+		} catch (Throwable ignored) {
+			endFlash = 0f;
+		}
 		float partial = state.worldPartialTicks;
 		float rain = level != null ? level.getRainLevel(partial) : 0f;
 		float thunder = level != null ? level.getThunderLevel(partial) : 0f;
@@ -295,7 +306,7 @@ public final class ImagineFrame {
 			normalize(lightDir);
 			for (int i = 0; i < 3; i++) {
 				light[i] = END_LIGHT[i];
-				up[i] = END_SKY[i];
+				up[i] = END_SKY[i] + new float[] {0.75f, 0.45f, 1f}[i] * 0.35f * endFlash;  // (the End's flashes light the islands a moment)
 			}
 		}
 		Shadows.prepare(lightDir, dim);
@@ -492,10 +503,13 @@ public final class ImagineFrame {
 		else put(0f, 0f, 0f, tSec);
 		put(Settings.coated ? 1f : 0f, Settings.lightFog && Settings.coloredLight ? 1f : 0f, Settings.mobShadows && Settings.shadows ? 1f : 0f,
 			Settings.waterFx && Settings.waterStyle > 0 && Reflections.underReady ? 1f : 0f);
+		put(endFlashDir[0], endFlashDir[1], endFlashDir[2], dim == 2 ? endFlash : 0f);
 		if (BUF.position() != SIZE) throw new IllegalStateException("ImFrame is " + BUF.position() + " bytes, not " + SIZE);
 	}
 
 	private static java.lang.reflect.Method FLASH;
+	private static float endFlash;
+	private static final float[] endFlashDir = {0f, 1f, 0f};
 
 	private static void put(float x, float y, float z, float w) {
 		BUF.putFloat(x).putFloat(y).putFloat(z).putFloat(w);

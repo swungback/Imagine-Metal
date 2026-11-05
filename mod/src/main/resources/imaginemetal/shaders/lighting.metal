@@ -64,6 +64,7 @@ struct ImFrame {
 	float4 extra;        // x 1 = portal effects, y 1 = sunlight coloured by stained glass, z 1 = an End portal near (endPortal), w 1 = night nebula
 	float4 endPortal;    // the End portal's rays (bloom.metal): xyz its middle, camera-relative; w the time (s)
 	float4 toggles;      // x 1 = coated textures, y 1 = coloured light fog (bloom.metal), z 1 = mob shadows, w 1 = water refraction and foam
+	float4 endFlash;     // the End's flashes: xyz toward the flash, w its strength now (0 none)
 };
 
 static inline float imSqrt2(float x) { x = 1.0 - x; x *= x; x *= x; return 1.0 - x; }
