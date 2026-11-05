@@ -22,6 +22,7 @@ import org.lwjgl.system.MemoryUtil;
  * time; then it's refilled from those, and each recompiled section inside it is rewritten in place.
  */
 public final class LightVolume {
+	private static int skipTick;
 	/** The grid's size in voxels: 8 x 4 x 8 sections. */
 	public static final int SX = 128, SY = 64, SZ = 128;
 
@@ -240,6 +241,9 @@ public final class LightVolume {
 				while (budget-- > 0 && (k = DIRTY.poll()) != null) rewrite(k);
 			}
 			boolean reset = !have || Math.abs(dx) >= SX || Math.abs(dy) >= SY || Math.abs(dz) >= SZ;
+			// (a spread step every other frame while the box stays put: the light still reaches its full extent in a fraction of a
+			// second, and every skipped step saves the compute pass and the break it makes in the frame's render passes)
+			if (!reset && dx == 0 && dy == 0 && dz == 0 && (++skipTick & 1) == 0) return;
 			ImNative.lightStep(MetalBridge.enc(encoder), state, dx, dy, dz, reset);
 			lastX = ox;
 			lastY = oy;

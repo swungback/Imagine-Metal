@@ -54,7 +54,7 @@ def patch_fs(fs):
     f = before_last_return(f, '    if (imOn.x > 0.5 && imOn.x < 1.5) out.fragColor.xyz = imShadeEntity(out.fragColor.xyz, in.imPos, in.imNrm, in.imLm, imf,'
         ' imShadowMap, imShadowCmp, imLightVol, imLightSampler, 0.0);\n'
         '    else if (imOn.x > 1.5 && in.imHand > 0.5) out.fragColor.xyz = imShadeEntity(out.fragColor.xyz, float3(0.0, -0.4, 0.001),'
-        ' float3(0.0), in.imLm, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, 1.0);')
+        ' float3(0.0), in.imLm, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, 3.0);')
     if f is None: return None
     return lighting + '\n// ---- Minecraft\'s shader (SPIRV-Cross), patched ----\n' + f
 

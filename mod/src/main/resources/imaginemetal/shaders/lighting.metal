@@ -1196,7 +1196,9 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 // combined as the terrain combines them, through the same tone curve. Returns display-encoded.
 static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, constant ImFrame &f, depth2d_array<float> smap, sampler cmp,
 	texture3d<float> lvol, sampler lsamp, float kind) {
-	bool item = kind > 0.5 && kind < 1.5;
+	// (kind: 0 a mob, 1 an item, 2 armour, 3 the first-person hand and what it holds)
+	bool hand = kind > 2.5;
+	bool item = (kind > 0.5 && kind < 1.5) || hand;
 	if (f.flags.z == 0 || f.flags.y != 0) return col;
 	if (f.flags.x == 2) light.y = 1.0;
 	float3 base = pow(max(col, 0.0), 2.2);
@@ -1243,7 +1245,13 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 	// lit evenly from every side read flat, cut-outs)
 	float face = particle ? 1.0 : (n.y >= 0.0 ? 1.0 : 1.0 + 0.4 * n.y) * (1.0 + 0.05 * abs(n.z) - 0.12 * abs(n.x));
 	float3 radiance = base * lit * face * f.minLight.w;
-	if (kind > 1.5 && !particle) {
+	// (the hand holding a light: lit by it on top of the day, so a torch in the hand shows on the arm even in sunlight; in the
+	// light's colour)
+	if (hand && f.held.w > 0.0) {
+		float3 hh = f.held.rgb / max(max(max(f.held.r, f.held.g), f.held.b), 1e-3);
+		radiance += base * hh * (0.55 * f.held.w * f.minLight.w);
+	}
+	if (kind > 1.5 && kind < 2.5 && !particle) {
 		// armour (Reimagined gives it a metal's smoothness by the texture's brightness): a sharp sun highlight and the sky's light
 		// mirrored, stronger at a grazing angle, both tinted by the metal's own colour; dull cloth and leather barely
 		float3 V = -normalize(p);
