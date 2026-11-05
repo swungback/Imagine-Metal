@@ -2436,7 +2436,7 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 			float nu = dot(in.imPos / max(dist, 1e-3), normalize(imf.lightDir.xyz));
 			float hg = 0.0795775 * (1.0 - 0.49) / pow(1.0 + 0.49 - 1.4 * nu, 1.5);
 			imFog = max(1.0 - exp(-min(dist, 512.0) * 0.0028), imFog);
-			imFogColor = pow(imPresent(float3(0.55, 0.5, 0.42) * (0.01 + 0.9 * hg), imf), 1.0 / 2.2);
+			imFogColor = pow(imPresent(float3(0.54, 0.49, 0.48) * (0.01 + 0.9 * hg), imf), 1.0 / 2.2);  // (IterationT's EndFog: the 6000 K light's white)
 		}
 	} else if (imf.water.z > 0.5 && imf.flags.x == 0 && imf.water.x > 0.5) {
 		// under water (Reimagined's): the biome's water fog colour, pushed toward its blue-green, thickening with the square of

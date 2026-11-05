@@ -87,7 +87,7 @@ public final class ImagineFrame {
 	private static final float[] END_LIGHT = {0.52f, 0.40f, 0.74f};
 	private static final float[] END_SKY = {0.095f, 0.068f, 0.15f};
 	/** where the End's black hole hangs (Settings.endStyle 1): low in the sky, so the islands throw long shadows */
-	private static final float[] BLACK_HOLE = {0.70f, 0.26f, -0.67f};
+	private static final float[] BLACK_HOLE = {0.8565f, 0.2764f, 0.4359f};  // (IterationT's End light: its shadowModelViewInverseEnd[2])
 	/** The moon's light by phase (vanilla's index: 0 full ... 4 new). */
 	private static final float[] MOON_PHASE = {1f, 0.8f, 0.6f, 0.4f, 0.25f, 0.4f, 0.6f, 0.8f};
 
@@ -307,12 +307,15 @@ public final class ImagineFrame {
 			lightDir[1] = BLACK_HOLE[1];
 			lightDir[2] = BLACK_HOLE[2];
 			normalize(lightDir);
-			// (IterationT's End: the islands bright in a warm white light, the shadows nearly black)
-			// (whiter and brighter, and the shade less black: the islands read white-lit, as IterationT's)
-			float[] bl = {2.15f, 2.0f, 1.8f}, sk = {0.065f, 0.065f, 0.075f};
+			// (IterationT's End (world1/composite.fsh): a 6000 K white light, the shade a sixtieth of it, both dimmed while its
+			// ringed planet passes in front of the black hole (planetShadow, the same 15-minute circle the sky draws))
+			double es = (System.nanoTime() / 1e9) % 100000.0 % 3600.0;
+			double tf = ((es * (1.0 / 60.0 / 15.0) + 0.282) % 1.0) * Math.PI * 2.0;
+			float ps = (1f - smoothstep(0.35f, 0.62f, (float) tf)) + smoothstep(1.6f, 1.87f, (float) tf);
+			float[] bb = {1.088f, 0.979f, 0.953f};
 			for (int i = 0; i < 3; i++) {
-				light[i] = bl[i];
-				up[i] = sk[i];
+				light[i] = bb[i] * 2.2f * ps * ps;
+				up[i] = bb[i] * 2.2f * (0.005f / 0.3f) * 2f * (ps * ps * 0.93f + 0.07f);
 			}
 		} else {
 			// the End: a lavender light from above, a violet sky
