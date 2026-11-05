@@ -472,7 +472,7 @@ public final class ImagineFrame {
 		// (in the End, x the sky's style)
 		if (dim == 2) put(Settings.endStyle, 0f, 0f, endFog ? -Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f : 0f);
 		else put(netherFog[0], netherFog[1], netherFog[2], netherHaze ? farM : 0f);
-		put(Settings.portals ? 1f : 0f, Settings.glassSun && Settings.coloredLight ? 1f : 0f, 0f, 0f);
+		put(Settings.portals ? 1f : 0f, Settings.glassSun && Settings.coloredLight && LightVolume.glassInGrid() ? 1f : 0f, 0f, 0f);
 		// (the End portal's rays: its middle, camera-relative; w the time (1 + seconds), 0 none)
 		float[] pc = Settings.portals ? LightVolume.portalCentre(cam.x, cam.y, cam.z) : null;
 		if (pc != null) put(pc[0], pc[1], pc[2], 1f + (float) ((System.nanoTime() / 1e9) % 1000.0));

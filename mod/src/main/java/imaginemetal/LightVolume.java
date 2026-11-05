@@ -39,6 +39,20 @@ public final class LightVolume {
 		int sx, sy, sz;
 		boolean placed;
 		final java.util.ArrayList<int[]> portals = new java.util.ArrayList<>();
+		boolean glass;
+	}
+
+	/** Sections with stained glass in them (keys): the coloured sunlight is only traced when one is in the grid. */
+	private static final java.util.Set<Long> GLASS = ConcurrentHashMap.newKeySet();
+
+	/** Whether any section in this frame's grid has stained glass (ImagineFrame: the coloured sunlight's switch). */
+	static boolean glassInGrid() {
+		int x0 = ox >> 4, y0 = oy >> 4, z0 = oz >> 4;
+		for (long k : GLASS) {
+			int sx = (int) (k >> 42), sy = (int) (k << 22 >> 44), sz = (int) (k << 42 >> 42);
+			if (sx >= x0 && sy >= y0 && sz >= z0 && sx < x0 + SX / 16 && sy < y0 + SY / 16 && sz < z0 + SZ / 16) return true;
+		}
+		return false;
 	}
 
 	/** End portal blocks by section (world block coordinates), for the End portal's rays (portalCentre). */
@@ -93,12 +107,15 @@ public final class LightVolume {
 			c.placed = false;
 			c.active = true;
 			c.portals.clear();
+			c.glass = false;
 			return;
 		}
 		if (!c.active) return;
 		c.active = false;
 		if (!c.placed) return;
 		long k = key(c.sx, c.sy, c.sz);
+		if (c.glass) GLASS.add(k);
+		else GLASS.remove(k);
 		if (c.portals.isEmpty()) PORTALS.remove(k);
 		else PORTALS.put(k, c.portals.toArray(new int[0][]));
 		SECTIONS.put(k, new SectionLight(c.opaque.clone(), java.util.Arrays.copyOf(c.sources, c.count)));
@@ -130,6 +147,7 @@ public final class LightVolume {
 			// (stained glass: light passing through takes its colour)
 			c.sources[c.count++] = i;
 			c.sources[c.count++] = glass | 64 << 24;
+			c.glass = true;
 		} else if (light == 0 && c.count + 2 <= c.sources.length) {
 			// (Reimagined's extra lights: glowing ores, the redstone and lapis blocks)
 			float[] e = LightColors.extra(state);
