@@ -35,6 +35,7 @@ public final class EntityShade {
 		// wireframe, nor the order-independent transparency's own passes, whose blending and outputs are their own)
 		String n = name.toLowerCase(java.util.Locale.ROOT);
 		if (n.contains("glint")) return glint(name, vs, fs);
+		if (n.equals("minecraft:pipeline/lines") || n.endsWith("pipeline/lines")) return outline(name, vs, fs);
 		if (Settings.portals && (n.contains("end_portal") || n.contains("end_gateway"))) return endPortal(name, vs, fs);
 		for (String skip : SKIP) if (n.contains(skip)) return null;
 		boolean wanted = false;
@@ -71,6 +72,23 @@ public final class EntityShade {
 			if (f == null) return null;
 			System.out.println("[Imagine Metal] glint glow: " + name);
 			return new String[] {vs, f};
+		} catch (Throwable t) {
+			return null;
+		}
+	}
+
+	/** The block outline (Minecraft's lines): its colour by the "Selection outline" setting (imOn.y: 0 Minecraft's, 1 white, 2 rainbow). */
+	private static String[] outline(String name, String vs, String fs) {
+		try {
+			Matcher m = FS_MAIN.matcher(fs);
+			if (!m.find() || !fs.contains("out.fragColor")) return null;
+			String f = fs.substring(0, m.end()) + ", constant float4& imOn [[buffer(25)]], constant ImFrame& imf [[buffer(30)]]" + fs.substring(m.end());
+			f = beforeLastReturn(f, "    if (imOn.y > 1.5) { float h = fract(imf.world.w * 0.15); out.fragColor.xyz = saturate(abs(fmod(h * 6.0 + float3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0); }\n"
+				+ "    else if (imOn.y > 0.5) out.fragColor.xyz = float3(1.0);");
+			if (f == null) return null;
+			if (lighting == null) lighting = Engine.resource("/imaginemetal/shaders/lighting.metal");
+			System.out.println("[Imagine Metal] outline: " + name);
+			return new String[] {vs, lighting + "\n" + f};
 		} catch (Throwable t) {
 			return null;
 		}
@@ -169,7 +187,7 @@ public final class EntityShade {
 				var symbol = MetalBridge.library().find("mc_im_entity_bind").orElseThrow();
 				bind = Linker.nativeLinker().downcallHandle(symbol, FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT), Linker.Option.critical(false));
 			}
-			bind.invokeExact(enc, !Settings.entityLight ? 0 : level ? 1 : 2);
+			bind.invokeExact(enc, (!Settings.entityLight ? 0 : level ? 1 : 2) | Settings.outline << 4);
 		} catch (Throwable t) {
 			bindFailed = true;
 			System.out.println("[Imagine Metal] entity light off: " + t);

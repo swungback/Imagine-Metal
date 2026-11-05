@@ -2180,7 +2180,7 @@ id<MTLLibrary> mco_library(Own *w) {
 void mc_im_entity_bind(Enc *enc, int on) {
 	id<MTLRenderCommandEncoder> r = enc->render;
 	if (!r) return;
-	float flag[4] = {(float) on, 0.0f, 0.0f, 0.0f};  // (0 Minecraft's light, 1 the level's, 2 outside it: the hand only)
+	float flag[4] = {(float) (on & 15), (float) (on >> 4), 0.0f, 0.0f};  // (y: the selection outline's style)  // (0 Minecraft's light, 1 the level's, 2 outside it: the hand only)
 	[r setVertexBytes:flag length:sizeof flag atIndex:25];
 	[r setFragmentBytes:flag length:sizeof flag atIndex:25];
 	[r setFragmentBytes:imFrame length:sizeof imFrame atIndex:30];

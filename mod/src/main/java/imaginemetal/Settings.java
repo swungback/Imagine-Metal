@@ -49,6 +49,7 @@ public final class Settings {
 	public static volatile boolean lightFog = Engine.flag("imaginemetal.lightFog", true);
 	public static volatile boolean mobShadows = Engine.flag("imaginemetal.mobShadows", true);
 	public static volatile boolean waterFx = Engine.flag("imaginemetal.waterFx", true);
+	public static volatile int outline = (int) Config.number("imaginemetal.outline", 0, 0, 2);
 	public static volatile boolean netherStorm = Engine.flag("imaginemetal.netherStorm", true);
 	public static volatile boolean bloomFog = Engine.flag("imaginemetal.bloomFog", true);
 	public static volatile boolean shadowFarAlternate = Engine.flag("imaginemetal.shadowFarAlternate", true);
@@ -107,6 +108,7 @@ public final class Settings {
 		v.put("imaginemetal.lightFog", String.valueOf(lightFog));
 		v.put("imaginemetal.mobShadows", String.valueOf(mobShadows));
 		v.put("imaginemetal.waterFx", String.valueOf(waterFx));
+		v.put("imaginemetal.outline", String.valueOf(outline));
 		v.put("imaginemetal.netherStorm", String.valueOf(netherStorm));
 		v.put("imaginemetal.taa", String.valueOf(taa));
 		v.put("imaginemetal.intenseDeepDark", String.valueOf(intenseDeepDark));

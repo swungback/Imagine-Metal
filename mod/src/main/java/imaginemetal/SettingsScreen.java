@@ -117,6 +117,8 @@ public final class SettingsScreen extends OptionsSubScreen {
 						v -> String.format(java.util.Locale.ROOT, "%.2f", v), "How strong the glow is."));
 				this.list.addBig(toggle("Bloom fog", Settings.bloomFog, v -> Settings.bloomFog = v,
 					"Reimagined's soft depth: in rain, at night, in caves and under water, distant things dissolve into a gentle glow."));
+				this.list.addBig(cycle("Selection outline", new String[] {"Minecraft's", "White", "Rainbow"}, Settings.outline, v -> Settings.outline = v,
+					"The colour of the outline around the block you're looking at."));
 				this.list.addBig(toggle("TAA (anti-aliasing)", Settings.taa, v -> Settings.taa = v,
 					"Smooth block edges and less grain in the light shafts, shadows and reflections, averaged over a few frames."));
 				this.list.addSmall(toggle("Ambient occlusion", Settings.ssao, v -> Settings.ssao = v,
