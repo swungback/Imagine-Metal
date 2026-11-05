@@ -12,6 +12,7 @@ void mc_im_ssr_bind(id<MTLTexture> color, id<MTLTexture> depth, id<MTLSamplerSta
 typedef struct {
 	id<MTLDevice> device;
 	id<MTLTexture> color, depth;
+	id<MTLTexture> under, underDepth;  // (the picture and depth before the translucent pass: refraction and foam under water)
 	id<MTLSamplerState> linear;
 } ImSsr;
 
@@ -79,5 +80,48 @@ int im_ssr_capture(Enc *enc, ImSsr *s, id<MTLTexture> color, id<MTLTexture> dept
 		[b endEncoding];
 	}
 	mc_im_ssr_bind(s->color, s->depth, s->linear);
+	return 0;
+}
+
+void mc_im_under_bind(id<MTLTexture> color, id<MTLTexture> depth);  // mcown.m
+
+// Before the translucent pass (no pass open on the encoder): the opaque picture and its depth, for water's refraction and its foam
+// along the shore. Returns 0 (copied or skipped), 1 with err.
+int im_under_capture(Enc *enc, ImSsr *s, id<MTLTexture> color, id<MTLTexture> depth, char *err, int errCap) {
+	if (!s || !color || !depth || enc->render) return 0;
+	@autoreleasepool {
+		if (!s->under || s->under.width != color.width || s->under.height != color.height || s->under.pixelFormat != color.pixelFormat) {
+			[s->under release];
+			MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:color.pixelFormat width:color.width
+				height:color.height mipmapped:NO];
+			td.storageMode = MTLStorageModePrivate;
+			td.usage = MTLTextureUsageShaderRead;
+			s->under = [s->device newTextureWithDescriptor:td];
+			s->under.label = @"Imagine Metal under the water";
+		}
+		if (!s->underDepth || s->underDepth.width != depth.width || s->underDepth.height != depth.height || s->underDepth.pixelFormat != depth.pixelFormat) {
+			[s->underDepth release];
+			MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:depth.pixelFormat width:depth.width
+				height:depth.height mipmapped:NO];
+			td.storageMode = MTLStorageModePrivate;
+			td.usage = MTLTextureUsageShaderRead;
+			s->underDepth = [s->device newTextureWithDescriptor:td];
+			s->underDepth.label = @"Imagine Metal under the water depth";
+		}
+		if (!s->under || !s->underDepth) {
+			snprintf(err, (size_t) errCap, "under-water textures could not be created");
+			return 1;
+		}
+		id<MTLCommandBuffer> cmd = mc_frame_cmd(enc);
+		id<MTLBlitCommandEncoder> b = [cmd blitCommandEncoder];
+		b.label = @"Imagine Metal under the water";
+		MTLOrigin o = {0, 0, 0};
+		[b copyFromTexture:color sourceSlice:0 sourceLevel:0 sourceOrigin:o sourceSize:MTLSizeMake(color.width, color.height, 1)
+			toTexture:s->under destinationSlice:0 destinationLevel:0 destinationOrigin:o];
+		[b copyFromTexture:depth sourceSlice:0 sourceLevel:0 sourceOrigin:o sourceSize:MTLSizeMake(depth.width, depth.height, 1)
+			toTexture:s->underDepth destinationSlice:0 destinationLevel:0 destinationOrigin:o];
+		[b endEncoding];
+	}
+	mc_im_under_bind(s->under, s->underDepth);
 	return 0;
 }

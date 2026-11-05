@@ -147,6 +147,8 @@ public final class SettingsScreen extends OptionsSubScreen {
 					v -> Settings.waterStyle = v, "Reimagined's water: its colour, clearer up close, reflections of the sky and the world. Waves add moving ripples."),
 					toggle("Glass reflections", Settings.glassReflections, v -> Settings.glassReflections = v,
 						"Stained glass, ice and other see-through blocks reflect the sky and the world."));
+				this.list.addBig(toggle("Water refraction and foam", Settings.waterFx, v -> Settings.waterFx = v,
+					"What's under the water wavers with its surface, and foam gathers where it meets the shore. Needs Reimagined water."));
 				this.list.addBig(toggle("Coated textures", Settings.coated, v -> Settings.coated = v,
 					"Reimagined's coated textures: each texture pixel a touch lighter or darker, so flat colours read as a material."));
 				this.list.addBig(toggle("Wet in the rain", Settings.wet, v -> Settings.wet = v,

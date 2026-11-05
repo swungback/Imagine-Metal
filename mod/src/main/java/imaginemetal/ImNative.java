@@ -45,6 +45,17 @@ final class ImNative {
 	private static final MethodHandle SSR_CAPTURE = fn("im_ssr_capture", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG,
 		JAVA_LONG, JAVA_INT), false);
 
+	private static final MethodHandle UNDER_CAPTURE = fn("im_under_capture", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG,
+		JAVA_LONG, JAVA_INT), false);
+
+	static int underCapture(long enc, long state, long color, long depth, long err, int errCap) {
+		try {
+			return (int) UNDER_CAPTURE.invokeExact(enc, state, color, depth, err, errCap);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
 	private static MethodHandle fn(String name, FunctionDescriptor d, boolean critical) {
 		var symbol = MetalBridge.library().find(name).orElseThrow(() -> new IllegalStateException("missing native symbol " + name));
 		return critical ? Linker.nativeLinker().downcallHandle(symbol, d, Linker.Option.critical(false)) : Linker.nativeLinker().downcallHandle(symbol, d);

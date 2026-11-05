@@ -43,6 +43,34 @@ public final class Reflections {
 		return (Settings.pbr || Settings.waterStyle > 0 || Settings.glassReflections) && !failed && Engine.TERRAIN;
 	}
 
+	private static boolean underFailed;
+
+	/** Before the translucent pass: the opaque picture and depth, for water's refraction and shore foam (ImFrame.toggles.w). */
+	public static void captureUnder() {
+		if (state == 0 || underFailed || !Settings.waterFx || Settings.waterStyle == 0 || !Engine.TERRAIN) return;
+		try {
+			Object encoder = MetalBridge.encoder(((FrontendCommandEncoder) RenderSystem.getDevice().createCommandEncoder()).backend());
+			if (encoder == null) return;
+			var main = Minecraft.getInstance().gameRenderer.mainRenderTarget();
+			var color = main.getColorTexture();
+			var depth = main.getDepthTexture();
+			if (color == null || depth == null) return;
+			MetalBridge.flushClear(encoder, color);
+			MetalBridge.flushClear(encoder, depth);
+			try (MemoryStack stack = MemoryStack.stackPush()) {
+				long err = stack.ncalloc(1, 1024, 1);
+				if (ImNative.underCapture(MetalBridge.enc(encoder), state, MetalBridge.textureHandle(color), MetalBridge.textureHandle(depth), err, 1024) != 0)
+					throw new IllegalStateException(MemoryUtil.memUTF8(err));
+			}
+			underReady = true;
+		} catch (Throwable t) {
+			underFailed = true;
+			System.out.println("[Imagine Metal] water refraction off: " + t);
+		}
+	}
+
+	static volatile boolean underReady;
+
 	/** After the level's passes, before the bloom: the picture and depth become the next frame's history. */
 	public static void capture() {
 		if (!nowSet || !(Settings.pbr || Settings.waterStyle > 0 || Settings.glassReflections) || failed || !Engine.TERRAIN) {

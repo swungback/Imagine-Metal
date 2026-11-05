@@ -2289,7 +2289,7 @@ constant float CUTOUT_LIMIT [[function_constant(5)]];  // vanilla's ALPHA_CUTOUT
 static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, constant Fog &fog, texture2d<float> atlas, sampler atlasSampler
 #ifdef IM_SHADE
 	, constant ImFrame &imf, depth2d_array<float> imShadowMap, sampler imShadowCmp, texture3d<float> imLightVol, sampler imLightSampler, texture3d<float> imSeeds
-	, texture2d<float> imHistColor, depth2d<float> imHistDepth, sampler imHistSampler, thread float3 &imTint
+	, texture2d<float> imHistColor, depth2d<float> imHistDepth, sampler imHistSampler, thread float3 &imTint, thread float3 &imWaterN
 #endif
 	) {
 #ifdef OWN_TPROBE
@@ -2337,6 +2337,12 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 		bool sl;
 		float3 fnT = imFaceNormal(in.imPos, sl);
 		if (imKind == 1u) {
+			// (refraction: what's under the water shifted by a slow wobble of the surface, own_fs_tr; top faces only)
+			if (fnT.y > 0.5) {
+				float2 wq = (in.imPos.xz + imf.world.xz) * 0.9;
+				float wt = imf.world.w;
+				imWaterN = float3(imValueNoise(wq + float2(wt * 0.5, wt * 0.3)) - 0.5, imValueNoise(wq * 1.3 - float2(wt * 0.4, wt * 0.6) + 7.0) - 0.5, 1.0);
+			}
 			// Reimagined (water.glsl, its own style): the texture squared, tinted by the biome's water colour (its green kept up),
 			// a little warmer; nearly opaque where deep, clear up close, opaque at a grazing angle
 			float3 wc = getColor(in).rgb;
@@ -2444,9 +2450,9 @@ fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]],
 #endif
 	) {
 #ifdef IM_SHADE
-	float3 imTint = float3(1.0);
+	float3 imTint = float3(1.0), imWaterN = float3(0.0);
 	return ownFsBody(in, g, t, fog, atlas, atlasSampler, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imSeeds, imHistColor, imHistDepth,
-		imHistSampler, imTint);
+		imHistSampler, imTint, imWaterN);
 #else
 	return ownFsBody(in, g, t, fog, atlas, atlasSampler);
 #endif
@@ -2461,13 +2467,35 @@ fragment float4 own_fs_tr(VOut in [[stage_in]], float4 imDst [[color(0)]], const
 	, constant ImFrame &imf [[buffer(30)]], depth2d_array<float> imShadowMap [[texture(20)]], sampler imShadowCmp [[sampler(13)]]
 	, texture3d<float> imLightVol [[texture(21)]], sampler imLightSampler [[sampler(12)]], texture3d<float> imSeeds [[texture(24)]]
 	, texture2d<float> imHistColor [[texture(22)]], depth2d<float> imHistDepth [[texture(23)]], sampler imHistSampler [[sampler(11)]]
+	, texture2d<float> imUnder [[texture(25)]], depth2d<float> imUnderDepth [[texture(26)]]
 	) {
-	float3 imTint = float3(1.0);
+	float3 imTint = float3(1.0), imWaterN = float3(0.0);
 	float4 c = ownFsBody(in, g, t, fog, atlas, atlasSampler, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imSeeds, imHistColor, imHistDepth,
-		imHistSampler, imTint);
+		imHistSampler, imTint, imWaterN);
 	float a = saturate(c.a);
-	float3 behind = pow(max(imDst.rgb, 0.0), 2.2) * imTint;
+	float3 dst = imDst.rgb;
+	float foam = 0.0;
+	if (imWaterN.z > 0.5 && imf.toggles.w > 0.5) {
+		// water over what was drawn before it (the copy taken before this pass): how deep it is here, from that depth; what's under
+		// it shifted by the surface's wobble, more where it's deeper (never toward something in front of the water); and foam
+		// where it's only a sliver deep, along the shore
+		float2 sz = float2(imUnder.get_width(), imUnder.get_height());
+		float2 uv0 = in.pos.xy / sz;
+		float du0 = imUnderDepth.read(uint2(min(in.pos.xy, sz - 1.0)));
+		float4 sp = imf.histClipInv * float4(uv0 * 2.0 - 1.0, max(du0, 1e-6), 1.0);
+		float3 under = sp.xyz / sp.w - imf.histShift.xyz;
+		float dist = length(in.imPos);
+		float thick = du0 <= 1e-6 ? 64.0 : max(length(under) - dist, 0.0);
+		float2 uv1 = uv0 + imWaterN.xy * (0.05 * saturate(thick * 0.6) / max(1.0, dist * 0.08));
+		float du1 = imUnderDepth.read(uint2(clamp(uv1 * sz, float2(0.0), sz - 1.0)));
+		if (du1 < in.pos.z) dst = imUnder.sample(imHistSampler, uv1).rgb;
+		float edge = 1.0 - smoothstep(0.02, 0.45, thick);
+		float fn = imValueNoise((in.imPos.xz + imf.world.xz) * 3.0 + imf.world.w * 0.4);
+		foam = edge * smoothstep(0.25, 0.6, fn + edge * 0.35) * (1.0 - smoothstep(32.0, 64.0, dist));
+	}
+	float3 behind = pow(max(dst, 0.0), 2.2) * imTint;
 	float3 col = mix(behind, pow(max(c.rgb, 0.0), 2.2), a);
+	if (foam > 0.0) col = mix(col, pow(saturate(c.rgb * 1.6 + 0.35), 2.2), foam * 0.75);
 	return float4(pow(col, 1.0 / 2.2), a + imDst.a * (1.0 - a));
 }
 #endif

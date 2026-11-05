@@ -79,6 +79,7 @@ public final class Config {
 		imaginemetal.coated=true
 		imaginemetal.lightFog=true
 		imaginemetal.mobShadows=true
+		imaginemetal.waterFx=true
 		imaginemetal.netherStorm=true
 		# TAA: smooth edges and less grain (the terrain sampled at a new sub-pixel spot each frame, averaged over frames).
 		imaginemetal.taa=true

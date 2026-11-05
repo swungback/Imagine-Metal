@@ -56,6 +56,11 @@ abstract class OwnLevelRendererMixin {
 		sections.renderGroup(group, renderPass, sampler, atlas, wireframe);
 	}
 
+	@Inject(method = "executeClassicTransparency", at = @At("HEAD"))
+	private void imaginemetal$under(CallbackInfo ci) {
+		imaginemetal.Reflections.captureUnder();  // (Imagine Metal: what's under the water, before it's drawn)
+	}
+
 	@Redirect(method = "executeClassicTransparency", at = @At(value = "INVOKE",
 		target = "Lnet/minecraft/client/renderer/chunk/ChunkSectionsToRender;renderGroup(Lnet/minecraft/client/renderer/chunk/ChunkSectionLayerGroup;Lcom/mojang/renderpearl/api/commands/RenderPass;Lcom/mojang/renderpearl/api/textures/GpuSampler;Lcom/mojang/renderpearl/api/textures/GpuTextureView;Z)V"))
 	private void mcopt$ownTranslucent(ChunkSectionsToRender sections, ChunkSectionLayerGroup group, RenderPass renderPass, GpuSampler sampler, GpuTextureView atlas,

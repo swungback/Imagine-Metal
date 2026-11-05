@@ -13,7 +13,11 @@ static uint8_t imFrame[896];
 // own_fs only samples it when ImFrame.shadow.y says this frame's map is valid
 static id<MTLTexture> imLightTex;
 static id<MTLSamplerState> imLightSampler;
-static id<MTLTexture> imSeedTex;
+static id<MTLTexture> imSeedTex, imUnderTex, imUnderDepthTex;
+void mc_im_under_bind(id<MTLTexture> color, id<MTLTexture> depth) {
+	imUnderTex = color;
+	imUnderDepthTex = depth;
+}
 void mc_im_light_bind(id<MTLTexture> volume, id<MTLSamplerState> sampler, id<MTLTexture> seeds) {
 	imSeedTex = seeds;
 	imLightTex = volume;
@@ -873,6 +877,10 @@ drawCall:
 		[r setFragmentTexture:imLightTex atIndex:21];
 		[r setFragmentSamplerState:imLightSampler atIndex:12];
 		if (imSeedTex) [r setFragmentTexture:imSeedTex atIndex:24];
+	}
+	if (imUnderTex) {
+		[r setFragmentTexture:imUnderTex atIndex:25];
+		[r setFragmentTexture:imUnderDepthTex atIndex:26];
 	}
 	if (imShadowTex) {
 		[r setFragmentTexture:imShadowTex atIndex:20];
