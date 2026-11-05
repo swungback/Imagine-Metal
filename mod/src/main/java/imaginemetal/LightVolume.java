@@ -82,13 +82,17 @@ public final class LightVolume {
 		if (state.isAir()) return;
 		int i = (y & 15) << 8 | (z & 15) << 4 | x & 15;
 		if (state.isSolidRender()) c.opaque[i >> 6] |= 1L << (i & 63);
-		int light = state.getLightEmission();
+		int light = state.getLightEmission(), glass;
 		if (light > 0 && c.count + 2 <= c.sources.length) {
 			float[] col = LightColors.of(state);
 			int r = Math.round(col[0] * 255f), g = Math.round(col[1] * 255f), b = Math.round(col[2] * 255f);
 			c.sources[c.count++] = i;
 			// 4 levels stronger than Minecraft's: coloured lights read clearly (a redstone torch lights like an 11)
 			c.sources[c.count++] = r | g << 8 | b << 16 | Math.min(light + 4, 15) << 24;
+		} else if (light == 0 && c.count + 2 <= c.sources.length && (glass = LightColors.glass(state)) != 0) {
+			// (stained glass: light passing through takes its colour)
+			c.sources[c.count++] = i;
+			c.sources[c.count++] = glass | 64 << 24;
 		} else if (light == 0 && c.count + 2 <= c.sources.length) {
 			// (Reimagined's extra lights: glowing ores, the redstone and lapis blocks)
 			float[] e = LightColors.extra(state);
@@ -205,7 +209,7 @@ public final class LightVolume {
 			}
 		}
 		// (sections far behind are dropped, so the map doesn't grow without end)
-		if (SECTIONS.size() > 4096) {
+		if (SECTIONS.size() > 24000) {  // (generous: a section dropped here only comes back when it recompiles)
 			int mx = ox >> 4, my = oy >> 4, mz = oz >> 4;
 			SECTIONS.keySet().removeIf(k -> {
 				int sx = (int) (k << 0 >> 42), sy = (int) (k << 22 >> 44), sz = (int) (k << 42 >> 42);
@@ -256,7 +260,7 @@ public final class LightVolume {
 			MemoryUtil.memPutByte(a + 1, (byte) (rgb >> 8 & 255));
 			MemoryUtil.memPutByte(a + 2, (byte) (rgb >> 16 & 255));
 			// alpha: bit 7 stops light (kept from the opacity pass), bits 0-3 the light level
-			MemoryUtil.memPutByte(a + 3, (byte) (MemoryUtil.memGetByte(a + 3) & 128 | rgb >>> 24 & 15));
+			MemoryUtil.memPutByte(a + 3, (byte) (MemoryUtil.memGetByte(a + 3) & 128 | rgb >>> 24 & 79));  // (79: bit 6 and the level)
 		}
 	}
 }

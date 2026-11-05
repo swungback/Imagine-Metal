@@ -1,7 +1,7 @@
 // Imagine Metal: the coloured light grid (imlight.m, imaginemetal.LightVolume).
 //
 // A box of voxels around the player, one per block. seeds (RGBA8): per voxel the colour of the light the block gives off (rgb,
-// brightest channel 1) and in a: bit 7 set if the block stops light, bits 0-3 its light level. Light spreads as Minecraft's own
+// brightest channel 1) and in a: bit 7 set if the block stops light, bit 6 stained glass (rgb its colour), bits 0-3 its light level. Light spreads as Minecraft's own
 // does: one block a frame, one level weaker per block, stopped by solid blocks, so it reaches exactly as far as normal block light
 // and bends around corners the same way. Where lights meet, their colours mix by how strong each one is there (squared, so the
 // nearer, stronger light leads). Stored: rgb the mixed colour, a the strength (level / 15). The terrain takes the hue from it;
@@ -41,5 +41,11 @@ kernel void im_light_step(texture3d<float, access::read> seeds [[texture(0)]], t
 		weight += a * a;
 	}
 	float3 hue = weight > 0.0 ? colour / weight : float3(0.0);
+	// stained glass (bit 6, rgb its colour): the light passing through takes its colour, as through a coloured filter
+	if ((bits & 64u) != 0u && level == 0.0) {
+		hue *= s.rgb;
+		float m = max(max(hue.r, hue.g), hue.b);
+		hue = m > 1e-4 ? hue / m : hue;
+	}
 	next.write(half4(half3(hue), half(strength)), id);
 }

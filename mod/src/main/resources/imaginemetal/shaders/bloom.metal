@@ -349,8 +349,8 @@ static float4 imbShaftsNow(ImBloomOut in, depth2d<float> depth, depth2d_array<fl
 	constant ImBloomParams &p, constant ImVlFrame &f) {
 	float2 size = float2(depth.get_width(), depth.get_height());
 	float d = depth.read(uint2(clamp(in.uv, 0.0, 0.9999) * size));
-	bool sky = d >= 0.99999;
-	float4 w = p.clipInv * float4(in.uv * 2.0 - 1.0, sky ? 0.9999 : d, 1.0);
+	bool sky = d <= 0.00001;  // (the game's depth is reversed Z: 0 is the far plane, the sky)
+	float4 w = p.clipInv * float4(in.uv * 2.0 - 1.0, sky ? 0.0001 : d, 1.0);
 	float3 P = w.xyz / w.w;
 	float len = length(P);
 	float3 dir = P / max(len, 1e-4);
@@ -442,7 +442,7 @@ fragment float4 im_bloom_shafts(ImBloomOut in [[stage_in]], depth2d<float> depth
 		float len = res.g;
 		float2 size = float2(depth.get_width(), depth.get_height());
 		float d = depth.read(uint2(clamp(in.uv, 0.0, 0.9999) * size));
-		float4 w = p.clipInv * float4(in.uv * 2.0 - 1.0, d >= 0.99999 ? 0.9999 : d, 1.0);
+		float4 w = p.clipInv * float4(in.uv * 2.0 - 1.0, d <= 0.00001 ? 0.0001 : d, 1.0);
 		float3 P = w.xyz / w.w;
 		float4 c = p.prevClip * float4(P, 1.0);
 		if (c.w > 0.05) {
@@ -474,7 +474,7 @@ fragment float4 im_bloom_ao(ImBloomOut in [[stage_in]], depth2d<float> depth [[t
 	float2 uv = in.uv, t = 2.0 / size;
 	float d;
 	float3 P = imbPos(depth, uv, size, p, d);
-	if (d >= 0.99999 || length(P) > 128.0) return float4(1.0);  // (the sky; and past 128 blocks the occlusion has faded out)
+	if (d <= 0.00001 || length(P) > 128.0) return float4(1.0);  // (the sky; and past 128 blocks the occlusion has faded out)
 	float dd;
 	float3 px = imbPos(depth, uv + float2(t.x, 0.0), size, p, dd) - P, nx = P - imbPos(depth, uv - float2(t.x, 0.0), size, p, dd);
 	float3 py = imbPos(depth, uv + float2(0.0, t.y), size, p, dd) - P, ny = P - imbPos(depth, uv - float2(0.0, t.y), size, p, dd);
@@ -524,12 +524,12 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 	if (p.grade.w > 0.0) {
 		// Reimagined's rainbow (lib/atmospherics/rainbow.glsl, after rain): a ring opposite the sun, over the sky and far land
 		float d = depth.read(uint2(clamp(in.uv, 0.0, 0.9999) * float2(depth.get_width(), depth.get_height())));
-		float4 w = p.clipInv * float4(in.uv * 2.0 - 1.0, d >= 0.99999 ? 0.9999 : d, 1.0);
+		float4 w = p.clipInv * float4(in.uv * 2.0 - 1.0, d <= 0.00001 ? 0.0001 : d, 1.0);
 		float3 P = w.xyz / w.w;
 		float len = length(P);
 		float3 dir = P / max(len, 1e-4);
 		float rl = 0.9 * 256.0;
-		float far = d >= 0.99999 ? 1.0 : saturate(len / rl);
+		float far = d <= 0.00001 ? 1.0 : saturate(len / rl);
 		float vl = dot(dir, f.lightDir.xyz);
 		float rc = saturate(1.0 - (vl + 0.75) / 0.0625);
 		float rf = rc * (1.0 - rc) * 3.7;
@@ -556,7 +556,7 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 		// something is the more it dissolves into a soft glow of what's around it, the soft, hazy depth of its rainy and underwater
 		// shots. Its strength comes from Bloom (rain, night, cave, water); the glow is the picture's own blurred copy.
 		float d = depth.read(uint2(clamp(in.uv, 0.0, 0.9999) * float2(depth.get_width(), depth.get_height())));
-		if (d < 0.99999) {
+		if (d > 0.00001) {
 			float4 w = p.clipInv * float4(in.uv * 2.0 - 1.0, d, 1.0);
 			float dist = length(w.xyz / w.w);
 			float bf;
@@ -592,7 +592,7 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 		float myLen = -1.0;
 		if (p.texel.z > 0.5) {  // (the resolve's texel.z: 1 = the depth is bound)
 			float dd = depth.read(uint2(clamp(in.uv, 0.0, 0.9999) * float2(depth.get_width(), depth.get_height())));
-			float4 ww = p.clipInv * float4(in.uv * 2.0 - 1.0, dd >= 0.99999 ? 0.9999 : dd, 1.0);
+			float4 ww = p.clipInv * float4(in.uv * 2.0 - 1.0, dd <= 0.00001 ? 0.0001 : dd, 1.0);
 			myLen = length(ww.xyz / ww.w);
 		}
 		float sh = 0.0, sb = 0.0, sw = 0.0;
@@ -682,7 +682,7 @@ fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur 
 			mx = max(mx, v);
 			m1 += v;
 			m2 += v * v;
-			dmin = min(dmin, depth.read(q));
+			dmin = max(dmin, depth.read(q));  // (reversed Z: the nearest is the largest)
 		}
 	// (variance clipping, tighter than the min/max box: less ghosting)
 	m1 /= 9.0;
@@ -691,7 +691,7 @@ fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur 
 	mn = max(mn, m1 - 1.25 * sd);
 	mx = min(mx, m1 + 1.25 * sd);
 	float2 uv = in.uv - p.taa.xy;  // (this pixel without the jitter)
-	float4 w = p.clipInv * float4(uv * 2.0 - 1.0, dmin >= 0.99999 ? 0.9999 : dmin, 1.0);
+	float4 w = p.clipInv * float4(uv * 2.0 - 1.0, dmin <= 0.00001 ? 0.0001 : dmin, 1.0);
 	float3 P = w.xyz / w.w;
 	float4 pc = p.prevClip * float4(P, 1.0);
 	float3 res = c, shown = c;

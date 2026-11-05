@@ -860,6 +860,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			float nlt = saturate(dot(N, Lt));
 			float hl2 = imHighlight(N, V, Lt, nlt, surf.g) * surf.hl * mix(0.3, 1.0, max(surf.metal, smoothstep(0.04, 0.2, surf.f0)));
 			if (cls == IM_MAT_FOLIAGE) hl2 *= 0.3;
+			if (cls == IM_MAT_GEM) hl2 *= 0.35;  // (obsidian beside a torch washed out lavender: a glint, not a glaze)
 			radiance += torch * (hl2 * 0.35) * tint * f.minLight.w;
 		}
 	}
@@ -946,7 +947,9 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			float rd = length(p);
 			float4 hit = f.histShift.w > 0.5 && rd < 96.0 ? imReflect(p, n, R, lod, dither, f, hc, hd, hs, true) : float4(0.0);
 			if (hit.a > 0.0) hit.a *= 1.0 - smoothstep(64.0, 96.0, rd);
-			float open = smoothstep(0.6, 1.0, sky);
+			// (from 0.3 to 0.85: sky light is interpolated per triangle, and over 0.6..1 the two triangles of one face read
+			// differently: obsidian and polished blocks showed a diagonal seam, one half reflecting more sky than the other)
+			float open = smoothstep(0.3, 0.85, sky);
 			float3 skyR = float3(0.0);
 			if (open * smoothstep(-0.1, 0.2, R.y) > 0.0)
 				skyR = (f.flags.x == 0 ? imPresent(imSkyColor(R, f, false), f) : imPresent(f.ambientUp.rgb * 2.0, f)) * (open * open)
@@ -955,7 +958,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			if (hit.a < 0.0) fm = 0.0;
 			// (texture kept: Reimagined keeps 70 % of the surface under its reflection)
 			refl = mix(refl, max(c, refl), 0.7);
-			if (surf.metal < 0.5) fm *= 0.75;  // (a dark gem or obsidian stays dark: its reflection a sheen over it)
+			if (surf.metal < 0.5) fm *= cls == IM_MAT_GEM ? 0.5 : 0.75;  // (a dark gem or obsidian stays dark: its reflection a sheen over it)
 			refl *= mix(float3(1.0), base / max(max(max(base.r, base.g), base.b), 0.02), surf.metal);
 			c = mix(c, refl, saturate(fm));
 		}
@@ -974,7 +977,9 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			float dist = length(p);
 			float4 hit = f.histShift.w > 0.5 && dist < 64.0 ? imReflect(p, n, R, kind == 1u ? 0.0 : 1.5, dither, f, hc, hd, hs, false) : float4(0.0);
 			hit.a = hit.a > 0.0 ? hit.a * (1.0 - smoothstep(40.0, 64.0, dist)) : hit.a;
-			float open = smoothstep(0.6, 1.0, sky);
+			// (from 0.3 to 0.85: sky light is interpolated per triangle, and over 0.6..1 the two triangles of one face read
+			// differently: obsidian and polished blocks showed a diagonal seam, one half reflecting more sky than the other)
+			float open = smoothstep(0.3, 0.85, sky);
 			float3 skyR = float3(0.0);
 			if (open * smoothstep(-0.1, 0.2, R.y) > 0.0)
 				skyR = (f.flags.x == 0 ? imPresent(imSkyColor(R, f, false), f) : imPresent(f.ambientUp.rgb * 2.0, f)) * (open * open)
@@ -1010,7 +1015,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 // sky) 0..1. Sun with the shadow maps, the sky's light from above, block light in the grid's colour, the floor, the held light,
 // combined as the terrain combines them, through the same tone curve. Returns display-encoded.
 static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, constant ImFrame &f, depth2d_array<float> smap, sampler cmp,
-	texture3d<float> lvol, sampler lsamp) {
+	texture3d<float> lvol, sampler lsamp, bool item) {
 	if (f.flags.z == 0 || f.flags.y != 0) return col;
 	if (f.flags.x == 2) light.y = 1.0;
 	float3 base = pow(max(col, 0.0), 2.2);
@@ -1055,5 +1060,13 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 	}
 	float3 radiance = base * lit * f.minLight.w;
 	float3 c = imGrade(imTonemap(radiance, f.tonemap), f);
+	// items in the world that give off light (a lava bucket's lava, a torch's flame, glowstone dust, blaze rods): their hot,
+	// saturated warm pixels glow past white, so the bloom haloes them and they aren't dark in a cave
+	if (item) {
+		float hi = max(max(base.r, base.g), base.b), lo = min(min(base.r, base.g), base.b);
+		float warm = step(base.b, base.g) * step(base.g, base.r);
+		float e = warm * smoothstep(0.55, 0.85, hi) * smoothstep(0.45, 0.75, (hi - lo) / max(hi, 1e-3));
+		c += base * (1.6 * e);
+	}
 	return pow(max(c, 0.0), 1.0 / 2.2);
 }

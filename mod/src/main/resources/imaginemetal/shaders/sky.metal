@@ -277,7 +277,7 @@ fragment float4 im_sky_fs(ImSkyOut in [[stage_in]], constant ImFrame &f [[buffer
 fragment float4 im_sky_end_fs(ImSkyOut in [[stage_in]], constant ImFrame &f [[buffer(0)]], constant float4x4 &rot [[buffer(1)]],
 	depth2d<float> depth [[texture(2)]]) {
 	uint2 px = min(uint2(in.pos.xy), uint2(depth.get_width() - 1, depth.get_height() - 1));
-	if (depth.read(px) < 0.99999) discard_fragment();
+	if (depth.read(px) > 0.00001) discard_fragment();  // (the game's depth is reversed: 0 is the far plane, the sky)
 	return imSkyPixel(in, f, rot);
 }
 

@@ -370,7 +370,9 @@ public final class ImagineFrame {
 			eyeNow = level.getBrightness(net.minecraft.world.level.LightLayer.SKY, eye) / 15f;
 		}
 		eyeSky += (eyeNow - eyeSky) * (1f - (float) Math.exp(-dt / 1.2f));
-		cave = dim == 0 ? 1f - smoothstep(0.25f, 0.75f, eyeSky) : 0f;
+		// (an open cave, where the sky's light still reaches the player, isn't a cave: counted as one, the whole picture was darkened
+		// for it and the daylight coming in, and every light, sank into the dark)
+		cave = dim == 0 ? 1f - smoothstep(0.08f, 0.4f, eyeSky) : 0f;
 		// something overhead (leaves, a cave roof, an arch: the sky light where the player stands below full): Reimagined's
 		// scene-aware light shafts, eased in and out over a couple of seconds
 		shaftCover += ((eyeNow < 0.97f ? 1f : 0f) - shaftCover) * (1f - (float) Math.exp(-dt / 2f));

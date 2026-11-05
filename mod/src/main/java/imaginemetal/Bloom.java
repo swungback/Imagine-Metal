@@ -31,7 +31,7 @@ public final class Bloom {
 	private static float toe() {
 		float cave = ImagineFrame.cave, night = ImagineFrame.night;
 		float dd = Settings.intenseDeepDark ? Haze.deepDark : 0f;
-		return 0.4f * cave + 0.3f * night * (1f - cave) + 0.35f * dd;
+		return 0.3f * cave + 0.3f * night * (1f - cave) + 0.35f * dd;
 	}
 
 	/**

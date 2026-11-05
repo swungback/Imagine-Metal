@@ -34,6 +34,7 @@ public final class EntityShade {
 		// (only Minecraft's entity, item and particle pipelines: not the terrain's (ours draws it), text, rain, leads, beams, the
 		// wireframe, nor the order-independent transparency's own passes, whose blending and outputs are their own)
 		String n = name.toLowerCase(java.util.Locale.ROOT);
+		if (n.contains("glint")) return glint(name, vs, fs);
 		for (String skip : SKIP) if (n.contains(skip)) return null;
 		boolean wanted = false;
 		for (String want : WANT) if (n.contains(want)) wanted = true;
@@ -44,7 +45,7 @@ public final class EntityShade {
 			if (!lm && !particle) return null;
 			if (!fs.contains("out.fragColor") || !vs.contains("in.Position")) return null;
 			String v = patchVs(vs, particle);
-			String f = v == null ? null : patchFs(fs);
+			String f = v == null ? null : patchFs(fs, n.contains("item"));
 			if (v == null || f == null) {
 				System.out.println("[Imagine Metal] entity light: " + name + " left as Minecraft's (its shader isn't the shape expected)");
 				return null;
@@ -57,9 +58,26 @@ public final class EntityShade {
 		}
 	}
 
+	/**
+	 * The enchantment glint: brighter, and in the level's pass (HDR) past white, so the bloom gives enchanted items a faint glow.
+	 */
+	private static String[] glint(String name, String vs, String fs) {
+		try {
+			Matcher m = FS_MAIN.matcher(fs);
+			if (!m.find() || !fs.contains("out.fragColor")) return null;
+			String f = fs.substring(0, m.end()) + ", constant float4& imOn [[buffer(25)]]" + fs.substring(m.end());
+			f = beforeLastReturn(f, "    out.fragColor.xyz *= imOn.x > 0.5 ? 2.6 : 1.5;");
+			if (f == null) return null;
+			System.out.println("[Imagine Metal] glint glow: " + name);
+			return new String[] {vs, f};
+		} catch (Throwable t) {
+			return null;
+		}
+	}
+
 	private static final String[] WANT = {"pipeline/entity", "pipeline/armor", "pipeline/item", "particle", "banner_pattern", "pipeline/solid_block",
 		"pipeline/cutout_block", "pipeline/translucent_block"};
-	private static final String[] SKIP = {"oit_", "terrain", "text", "wireframe", "weather", "leash", "beam", "breeze", "lines", "gui"};
+	private static final String[] SKIP = {"oit_", "terrain", "text", "wireframe", "weather", "leash", "beam", "breeze", "lines", "gui", "eyes"};
 
 	private static final Pattern VS_MAIN = Pattern.compile("vertex\\s+main0_out\\s+main0\\s*\\(\\s*main0_in\\s+in\\s*\\[\\[stage_in\\]\\]");
 	private static final Pattern FS_MAIN = Pattern.compile("fragment\\s+main0_out\\s+main0\\s*\\(\\s*main0_in\\s+in\\s*\\[\\[stage_in\\]\\]");
@@ -99,7 +117,7 @@ public final class EntityShade {
 		return beforeLastReturn(v, c.toString());
 	}
 
-	private static String patchFs(String fs) {
+	private static String patchFs(String fs, boolean item) {
 		Matcher m = FS_MAIN.matcher(fs);
 		if (!m.find()) return null;
 		String f = fs.substring(0, m.end()) + ", constant float4& imOn [[buffer(25)]], constant ImFrame& imf [[buffer(30)]]"
@@ -108,7 +126,7 @@ public final class EntityShade {
 		f = addMembers(f, "main0_in", "    float3 imPos [[user(locn20)]];\n    float3 imNrm [[user(locn21)]];\n    float2 imLm [[user(locn22)]];");
 		if (f == null) return null;
 		f = beforeLastReturn(f, "    if (imOn.x > 0.5) out.fragColor.xyz = imShadeEntity(out.fragColor.xyz, in.imPos, in.imNrm, in.imLm, imf, imShadowMap,"
-			+ " imShadowCmp, imLightVol, imLightSampler);");
+			+ " imShadowCmp, imLightVol, imLightSampler, " + (item ? "true" : "false") + ");");
 		if (f == null) return null;
 		if (lighting == null) lighting = Engine.resource("/imaginemetal/shaders/lighting.metal");
 		return lighting + "\n// ---- Minecraft's shader (SPIRV-Cross), patched ----\n" + f;

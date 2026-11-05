@@ -106,4 +106,31 @@ public final class LightColors {
 		for (Object[] e : TABLE) if (name.contains((String) e[0])) return (float[]) e[1];
 		return FLAME;
 	}
+
+	private static final String[] DYES = {"white", "orange", "magenta", "light_blue", "yellow", "lime", "pink", "gray", "light_gray", "cyan",
+		"purple", "blue", "brown", "green", "red", "black"};
+	// (each dye's glass colour, brightest channel 255: what light coming through it turns)
+	private static final int[] DYE_RGB = {0xF0F0F0, 0xFF8A2E, 0xE04CFF, 0x66BFFF, 0xFFE83A, 0x9CFF2E, 0xFF8FC0, 0x8C8C8C, 0xC8C8C8, 0x2EC8D8,
+		0x9A3AFF, 0x3A5AFF, 0xB0703C, 0x5AA02E, 0xFF2A2A, 0x3A3A3A};
+	private static final java.util.concurrent.ConcurrentHashMap<net.minecraft.world.level.block.Block, Integer> GLASS = new java.util.concurrent.ConcurrentHashMap<>();
+
+	/** A stained glass block's or pane's colour as 0xBBGGRR (0: not stained glass), for the coloured light grid. */
+	static int glass(net.minecraft.world.level.block.state.BlockState state) {
+		return GLASS.computeIfAbsent(state.getBlock(), b -> {
+			String n = b.toString().toLowerCase(java.util.Locale.ROOT);  // ("block{minecraft:red_stained_glass}")
+			int colon = n.indexOf(':'), end = n.indexOf('}', colon + 1);
+			n = colon >= 0 ? n.substring(colon + 1, end > colon ? end : n.length()) : n;
+			if (n.equals("tinted_glass")) return 0x3C3050;
+			if (!n.contains("stained_glass")) return 0;
+			int best = -1, len = -1;
+			for (int k = 0; k < DYES.length; k++)
+				if (n.startsWith(DYES[k] + "_") && DYES[k].length() > len) {
+					best = k;
+					len = DYES[k].length();
+				}
+			if (best < 0) return 0;
+			int rgb = DYE_RGB[best];
+			return (rgb >> 16 & 255) | (rgb >> 8 & 255) << 8 | (rgb & 255) << 16;
+		});
+	}
 }
