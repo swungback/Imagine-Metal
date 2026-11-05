@@ -30,11 +30,12 @@ public final class EntityShade {
 
 	/** The patched {vertex, fragment} sources, or null to keep both as they are. */
 	public static String[] patch(String name, String vs, String fs) {
-		if (!Settings.entityLight || !Engine.TERRAIN) return null;
+		if (!Engine.TERRAIN) return null;
 		// (only Minecraft's entity, item and particle pipelines: not the terrain's (ours draws it), text, rain, leads, beams, the
 		// wireframe, nor the order-independent transparency's own passes, whose blending and outputs are their own)
 		String n = name.toLowerCase(java.util.Locale.ROOT);
 		if (n.contains("glint")) return glint(name, vs, fs);
+		if (Settings.portals && (n.contains("end_portal") || n.contains("end_gateway"))) return endPortal(name, vs, fs);
 		for (String skip : SKIP) if (n.contains(skip)) return null;
 		boolean wanted = false;
 		for (String want : WANT) if (n.contains(want)) wanted = true;
@@ -69,6 +70,26 @@ public final class EntityShade {
 			f = beforeLastReturn(f, "    out.fragColor.xyz *= imOn.x > 0.5 ? 2.6 : 1.5;");
 			if (f == null) return null;
 			System.out.println("[Imagine Metal] glint glow: " + name);
+			return new String[] {vs, f};
+		} catch (Throwable t) {
+			return null;
+		}
+	}
+
+	/**
+	 * The End portal and gateway (Euphoria Patches' look): Minecraft's own layered star field, turned a glowing cyan and, in the
+	 * level's pass (HDR), past white so the bloom lifts a haze of light off it.
+	 */
+	private static String[] endPortal(String name, String vs, String fs) {
+		try {
+			Matcher m = FS_MAIN.matcher(fs);
+			if (!m.find() || !fs.contains("out.fragColor")) return null;
+			String f = fs.substring(0, m.end()) + ", constant float4& imOn [[buffer(25)]]" + fs.substring(m.end());
+			f = beforeLastReturn(f, "    { float3 ec = out.fragColor.xyz; float el = max(max(ec.x, ec.y), ec.z);\n"
+				+ "      ec = mix(float3(el) * float3(0.35, 1.0, 0.95), ec, 0.35) + float3(0.0, 0.035, 0.04);\n"
+				+ "      out.fragColor.xyz = ec * (imOn.x > 0.5 ? 2.2 : 1.2); }");
+			if (f == null) return null;
+			System.out.println("[Imagine Metal] end portal glow: " + name);
 			return new String[] {vs, f};
 		} catch (Throwable t) {
 			return null;
@@ -140,7 +161,7 @@ public final class EntityShade {
 				var symbol = MetalBridge.library().find("mc_im_entity_bind").orElseThrow();
 				bind = Linker.nativeLinker().downcallHandle(symbol, FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT), Linker.Option.critical(false));
 			}
-			bind.invokeExact(enc, level ? 1 : 0);
+			bind.invokeExact(enc, level && Settings.entityLight ? 1 : 0);
 		} catch (Throwable t) {
 			bindFailed = true;
 			System.out.println("[Imagine Metal] entity light off: " + t);

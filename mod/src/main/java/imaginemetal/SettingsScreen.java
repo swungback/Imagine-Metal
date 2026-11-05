@@ -21,7 +21,8 @@ public final class SettingsScreen extends OptionsSubScreen {
 
 	/** The pages: the main one lists the others. */
 	public enum Page {
-		MAIN("Imagine Metal"), LIGHT("Light and shadows"), SKY("Sky and weather"), AURORA("Aurora"), SURFACES("Surfaces"), ADVANCED("Advanced");
+		MAIN("Imagine Metal"), LIGHT("Light and shadows"), SKY("Sky and weather"), WORLDS("Nether and End"), AURORA("Aurora"), SURFACES("Surfaces"),
+		CAMERA("Camera and glow"), ADVANCED("Advanced");
 
 		final String title;
 
@@ -55,7 +56,8 @@ public final class SettingsScreen extends OptionsSubScreen {
 		switch (this.page) {
 			case MAIN -> {
 				this.list.addSmall(open(Page.LIGHT), open(Page.SKY));
-				this.list.addSmall(open(Page.SURFACES), open(Page.AURORA));
+				this.list.addSmall(open(Page.SURFACES), open(Page.CAMERA));
+				this.list.addSmall(open(Page.WORLDS), open(Page.AURORA));
 				this.list.addBig(open(Page.ADVANCED));
 			}
 			case LIGHT -> {
@@ -70,12 +72,10 @@ public final class SettingsScreen extends OptionsSubScreen {
 					"Light sources light the world in their own colours: soul fire blue, redstone red, lava orange."),
 					toggle("Held light", Settings.heldLight, v -> Settings.heldLight = v,
 						"A torch, lantern or any other light in your hand lights up what's around you."));
-				this.list.addBig(slider("Night brightness", 0.25f, 2f, 0.05f, Settings.nightBrightness, v -> Settings.nightBrightness = v, SettingsScreen::pct,
+				this.list.addSmall(toggle("Mobs and items lit", Settings.entityLight, v -> Settings.entityLight = v,
+					"Mobs, dropped items and particles lit by the sun, the shadows and coloured light like the blocks around them. Off: Minecraft's own lighting on them."),
+					slider("Night brightness", 0.25f, 2f, 0.05f, Settings.nightBrightness, v -> Settings.nightBrightness = v, SettingsScreen::pct,
 					"How bright moonlit nights are. 100% is ours."));
-				this.list.addHeader(Component.literal("Glow"));
-				this.list.addSmall(toggle("Bloom", Settings.bloom, v -> Settings.bloom = v, "The soft glow around bright things."),
-					slider("Bloom strength", 0, 2, 0.05f, Settings.bloomStrength, v -> Settings.bloomStrength = v,
-						v -> String.format(java.util.Locale.ROOT, "%.2f", v), "How strong the glow is."));
 			}
 			case SKY -> {
 				this.list.addSmall(toggle("Sky and haze", Settings.sky, v -> Settings.sky = v,
@@ -84,9 +84,6 @@ public final class SettingsScreen extends OptionsSubScreen {
 						"How thick the air is: distant land turning blue, mist in the valleys at dawn and dusk, each biome's own air. 100% is Photon's."));
 				this.list.addSmall(toggle("Clouds", Settings.clouds, v -> Settings.clouds = v,
 					"Our clouds: Minecraft's cloud shapes as soft, rounded blocks, lit by the sun, coloured by the sky. Off: Minecraft's. (Minecraft's Clouds video setting must be on.)"),
-					open(Page.AURORA));
-				this.list.addSmall(toggle("Bloom fog", Settings.bloomFog, v -> Settings.bloomFog = v,
-					"Reimagined's soft depth: in rain, at night, in caves and under water, distant things dissolve into a gentle glow."),
 					toggle("Rainbows", Settings.rainbows, v -> Settings.rainbows = v, "A rainbow opposite the sun as the rain clears."));
 				this.list.addSmall(toggle("Light shafts", Settings.shafts, v -> Settings.shafts = v,
 					"Beams of sunlight around leaves, mountains and cave mouths when you look toward the sun; in the End, its violet beams rising out of the void."),
@@ -95,13 +92,29 @@ public final class SettingsScreen extends OptionsSubScreen {
 				this.list.addSmall(cycle("Stars", new String[] {"Minecraft's", "Reimagined, twinkling"}, Settings.stars, v -> Settings.stars = v,
 					"Reimagined's star field, each star twinkling on its own."),
 					toggle("Shooting stars", Settings.shootingStars, v -> Settings.shootingStars = v, "Now and then a shooting star on a clear night."));
+			}
+			case WORLDS -> {
 				this.list.addSmall(cycle("End sky", new String[] {"Reimagined", "Black hole"}, Settings.endStyle, v -> Settings.endStyle = v,
 					"Reimagined: a violet sky with beams of light rising from the void. Black hole: a black sky full of stars and a blazing black hole low over the islands, lighting them white and throwing long shadows."),
-					null);
+					toggle("Portal effects", Settings.portals, v -> Settings.portals = v,
+						"The nether portal's glowing swirls with depth behind them, the End portal's cyan glow."));
 				this.list.addSmall(toggle("Nether haze", Settings.netherFog, v -> Settings.netherFog = v,
 					"Reimagined's Nether: each biome its own glowing haze, orange in the wastes, teal in soul sand valleys, ash grey in the deltas, red in the crimson forest, violet in the warped one."),
 					toggle("Nether storm", Settings.netherStorm, v -> Settings.netherStorm = v,
 						"Slow drifting clouds of the Nether's haze through its caverns (Reimagined's Nether storm)."));
+			}
+			case CAMERA -> {
+				this.list.addSmall(toggle("Bloom", Settings.bloom, v -> Settings.bloom = v, "The soft glow around bright things."),
+					slider("Bloom strength", 0, 2, 0.05f, Settings.bloomStrength, v -> Settings.bloomStrength = v,
+						v -> String.format(java.util.Locale.ROOT, "%.2f", v), "How strong the glow is."));
+				this.list.addBig(toggle("Bloom fog", Settings.bloomFog, v -> Settings.bloomFog = v,
+					"Reimagined's soft depth: in rain, at night, in caves and under water, distant things dissolve into a gentle glow."));
+				this.list.addBig(toggle("TAA (anti-aliasing)", Settings.taa, v -> Settings.taa = v,
+					"Smooth block edges and less grain in the light shafts, shadows and reflections, averaged over a few frames."));
+				this.list.addSmall(toggle("Ambient occlusion", Settings.ssao, v -> Settings.ssao = v,
+					"Corners, the ground under ledges and the gaps between blocks a little darker, so shapes read better."),
+					slider("AO strength", 0, 1, 0.05f, Settings.ssaoStrength, v -> Settings.ssaoStrength = v, SettingsScreen::pct,
+						"How dark the ambient occlusion gets."));
 			}
 			case AURORA -> {
 				this.list.addSmall(toggle("Aurora", Settings.aurora, v -> Settings.aurora = v, "Northern lights at night."),
@@ -128,12 +141,6 @@ public final class SettingsScreen extends OptionsSubScreen {
 						"Stained glass, ice and other see-through blocks reflect the sky and the world."));
 				this.list.addBig(toggle("Wet in the rain", Settings.wet, v -> Settings.wet = v,
 					"In the rain everything under the sky gets darker and glossy, with puddles on top of blocks. Needs PBR."));
-				this.list.addBig(toggle("TAA (anti-aliasing)", Settings.taa, v -> Settings.taa = v,
-					"Smooth block edges and less grain in the light shafts, shadows and reflections, averaged over a few frames."));
-				this.list.addSmall(toggle("Ambient occlusion", Settings.ssao, v -> Settings.ssao = v,
-					"Corners, the ground under ledges and the gaps between blocks a little darker, so shapes read better."),
-					slider("AO strength", 0, 1, 0.05f, Settings.ssaoStrength, v -> Settings.ssaoStrength = v, SettingsScreen::pct,
-						"How dark the ambient occlusion gets."));
 				this.list.addSmall(toggle("PBR", Settings.pbr, v -> Settings.pbr = v,
 					"Sun highlights on every block by its texture, and reflections traced on screen: metal, gems and polished stone clearly, rough blocks at low angles."),
 					slider("Generated normals", 0, 4, 0.25f, Settings.normals, v -> Settings.normals = v, v -> v == 0 ? "Off" : pct(v),

@@ -2326,12 +2326,14 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 #ifdef IM_SHADE
 	// (the translucent pass: water by its sprites, Reimagined's colour and see-through; the rest, stained glass, ice, slime..., glass)
 	uint imKind = 0u;
+	bool imPortal = false;
 	if (CUTOUT && CUTOUT_LIMIT < 0.2) {
 		float2 u = in.texCoord0;
 		bool still = all(u >= imf.waterStill.xy) && all(u <= imf.waterStill.zw);
 		bool flow = all(u >= imf.waterFlow.xy) && all(u <= imf.waterFlow.zw);
 		bool portal = all(u >= imf.portalRect.xy) && all(u <= imf.portalRect.zw);
 		imKind = still || flow ? (imf.water.x > 0.5 ? 1u : 0u) : portal || imf.water.y < 0.5 ? 0u : 2u;
+		imPortal = portal;
 		bool sl;
 		float3 fnT = imFaceNormal(in.imPos, sl);
 		if (imKind == 1u) {
@@ -2379,6 +2381,7 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 	}
 	color.rgb = imShade(color.rgb, texel.rgb, in.imPos, in.imLight, in.imMat | (imKind << 8), in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler,
 		in.texCoord0, in.imRect, atlas, imHistColor, imHistDepth, imHistSampler); // (Imagine Metal)
+	if (imPortal && imf.extra.x > 0.5 && imf.portalRect.z > imf.portalRect.x) color = imPortalLook(in.texCoord0, in.imPos, texel, atlas, imf);
 	float3 imFogColor = fog.FogColor.rgb;
 	float imFog = fogValue * fog.FogColor.a;
 	if (imf.sunDir.w > 0.5) {

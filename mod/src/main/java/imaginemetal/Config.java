@@ -73,6 +73,7 @@ public final class Config {
 		# Mobs, chests and signs, dropped items and particles lit as the land is: the sun and its shadows, the sky, coloured torch
 		# light (takes effect after a restart).
 		imaginemetal.entityLight=true
+		imaginemetal.portals=true
 		imaginemetal.netherStorm=true
 		# TAA: smooth edges and less grain (the terrain sampled at a new sub-pixel spot each frame, averaged over frames).
 		imaginemetal.taa=true

@@ -14,7 +14,7 @@ import org.joml.Vector4f;
 import org.lwjgl.system.MemoryUtil;
 
 /**
- * The lighting's per-frame values (lighting.metal ImFrame, 848 bytes): where the sun or moon is, the colours of its light, of
+ * The lighting's per-frame values (lighting.metal ImFrame, 864 bytes): where the sun or moon is, the colours of its light, of
  * the sky's light and of torches for this time of day and weather, the cave floor, the tone curve. Made once per frame at
  * LevelRenderer.render's start (LevelRendererMixin) and handed to the backend, which binds it on every terrain draw.
  *
@@ -22,7 +22,7 @@ import org.lwjgl.system.MemoryUtil;
  * a deep orange golden hour, blue-violet nights), tuned for our pipeline.
  */
 public final class ImagineFrame {
-	static final int SIZE = 848;
+	static final int SIZE = 864;
 	private static final ByteBuffer BUF = MemoryUtil.memAlloc(SIZE).order(ByteOrder.LITTLE_ENDIAN);
 	private static final long ADDRESS = MemoryUtil.memAddress(BUF);
 	private static int frame;
@@ -472,6 +472,7 @@ public final class ImagineFrame {
 		// (in the End, x the sky's style)
 		if (dim == 2) put(Settings.endStyle, 0f, 0f, endFog ? -Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f : 0f);
 		else put(netherFog[0], netherFog[1], netherFog[2], netherHaze ? farM : 0f);
+		put(Settings.portals ? 1f : 0f, 0f, 0f, 0f);
 		if (BUF.position() != SIZE) throw new IllegalStateException("ImFrame is " + BUF.position() + " bytes, not " + SIZE);
 	}
 

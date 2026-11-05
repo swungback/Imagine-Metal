@@ -61,6 +61,7 @@ struct ImFrame {
 	                     // w how wet the world is (rain, eased; 0 in dry biomes or with the setting off)
 	float4 taa;          // TAA: xy this frame's sub-pixel jitter (Minecraft's clip units, y up), z 1 = on
 	float4 nether;       // the Nether's haze (Reimagined's netherColor as the terrain shows it, linear), w its full distance (0: not ours)
+	float4 extra;        // x 1 = portal effects
 };
 
 static inline float imSqrt2(float x) { x = 1.0 - x; x *= x; x *= x; return 1.0 - x; }
@@ -898,6 +899,16 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		return pow(gm > 1e-4 ? gl.rgb / gm * saturate(gl.a * 1.5) : float3(0.0), 1.0 / 2.2) * 0.9 + base * 0.1;
 	}
 	float emit = oreT != 0u ? 0.0 : imEmission(cls, tex);
+	if (cls == IM_MAT_LAVA) {
+		// lava's slow currents (after Reimagined's lava noise): two layers of noise drifting against each other across the surface,
+		// hotter where they meet, so a lava lake churns instead of only playing its texture's loop
+		float3 lw = p + f.world.xyz;
+		float2 lq = (abs(n.y) > 0.5 ? lw.xz : abs(n.x) > 0.5 ? lw.zy : lw.xy) * 0.35;
+		float lt = f.world.w * 0.06;
+		float l1 = imValueNoise(lq + float2(lt, lt * 0.7)), l2 = imValueNoise(lq * 1.7 - float2(lt * 0.8, lt * 1.3));
+		float churn = 1.0 - abs(l1 - l2) * 2.0;
+		emit *= 0.72 + 0.55 * churn * churn;
+	}
 	if (cls == IM_MAT_SCULK && emit > 0.0) {
 		// sculk's specks pulse (after Euphoria Patches): each speck its own slow breathing, from its block and its place in the
 		// texture, so a field of sculk twinkles instead of glowing flat
@@ -1069,4 +1080,40 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 		c += base * (1.6 * e);
 	}
 	return pow(max(c, 0.0), 1.0 / 2.2);
+}
+
+// The nether portal as Reimagined's special portal: only its bright swirls glow (crisp, past white so they bloom), the rest a deep
+// see-through violet, and the swirls repeated in layers behind the surface, offset by the view (parallax), fainter and bluer the
+// deeper, so the portal reads as a window into depth rather than a flat sheet.
+static float4 imPortalLook(float2 u, float3 p, float4 texel, texture2d<float> atlas, constant ImFrame &f) {
+	float2 r0 = f.portalRect.xy, rs = f.portalRect.zw - f.portalRect.xy;
+	bool sl;
+	float3 n = imFaceNormal(p, sl);
+	float3 dp1 = dfdx(p), dp2 = dfdy(p);
+	float2 duv1 = dfdx(u), duv2 = dfdy(u);
+	float3 dp2perp = cross(dp2, n), dp1perp = cross(n, dp1);
+	float3 T = dp2perp * duv1.x + dp1perp * duv2.x, B = dp2perp * duv1.y + dp1perp * duv2.y;
+	// (the gradients of u and v along the face: T, B over the face's area in screen terms)
+	float det = dot(n, cross(dp1, dp2));
+	det = abs(det) < 1e-14 ? 1e-14 : det;
+	T /= det;
+	B /= det;
+	float3 V = normalize(p);
+	float into = max(abs(dot(V, n)), 0.25);
+	constexpr sampler ns(filter::nearest, address::clamp_to_edge);
+	float l0 = imLuma(texel.rgb);
+	float g0 = smoothstep(0.5, 0.8, l0);
+	float3 col = texel.rgb * texel.rgb * 0.18 + texel.rgb * g0 * 2.4;
+	float a = mix(0.62, 1.0, g0);
+	for (int k = 1; k <= 3; k++) {
+		float depth = 0.22 * float(k);
+		float2 du = float2(dot(V, T), dot(V, B)) * (depth / into);
+		float2 lu = fract((u + du - r0) / rs);
+		float3 s = atlas.sample(ns, r0 + lu * rs, level(0.0)).rgb;
+		float g = smoothstep(0.55, 0.85, imLuma(s));
+		float fade = 0.55 / float(k);
+		col += s * g * fade * float3(0.75, 0.7, 1.15);
+		a = max(a, 0.62 + 0.25 * g * fade);
+	}
+	return float4(col, a);
 }

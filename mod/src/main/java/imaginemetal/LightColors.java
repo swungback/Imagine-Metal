@@ -22,7 +22,7 @@ public final class LightColors {
 		{"beacon", new float[] {0.10f, 0.42f, 1.00f}},
 		{"end_rod", new float[] {0.90f, 0.85f, 1.00f}},
 		{"end_gateway", new float[] {0.60f, 0.40f, 1.00f}},
-		{"end_portal", new float[] {0.40f, 0.70f, 0.60f}},
+		{"end_portal", new float[] {0.25f, 0.90f, 0.85f}},  // (a cyan glow over the room, as Euphoria's)
 		{"nether_portal", new float[] {0.60f, 0.20f, 1.00f}},
 		{"crying_obsidian", new float[] {0.60f, 0.20f, 1.00f}},
 		{"respawn_anchor", new float[] {0.60f, 0.25f, 1.00f}},
