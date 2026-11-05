@@ -765,7 +765,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	if (f.toggles.x > 0.5 && kind == 0u && cls != IM_MAT_EMITTER && cls != IM_MAT_LAVA && cls != IM_MAT_FLAME) {
 		float2 tx = floor(uv * float2(atlas.get_width(), atlas.get_height()));
 		float hn = fract(sin(dot(tx, float2(12.9898, 78.233))) * 43758.5453);
-		albedo *= 1.0 + (hn - 0.5) * 0.14;
+		albedo *= 1.0 + (hn - 0.5) * 0.32;
 	}
 	ImSurf surf = pbr ? imSurface(cls, albedo, tex) : ImSurf{0.0, 0.0, 0.0, 0.04, 0.0};
 	// (obsidian and crying obsidian: dark gems, kept to a sheen; diamond, emerald, amethyst: bright ones, kept shiny)
@@ -1015,11 +1015,13 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			float dither = imDither(pixel, f);
 			// (traced within 96 blocks, fading out from 64: farther, a reflection is a few pixels and the sky stands in)
 			float rd = length(p);
-			float4 hit = f.histShift.w > 0.5 && rd < 96.0 ? imReflect(p, n, R, lod, dither, f, hc, hd, hs, true) : float4(0.0);
+			// (only smooth surfaces trace: on rough ones the blurred, jittered trace never settled and laid a fine diagonal static over
+			// every polished wall and floor; they take the sky's light and their own colour instead, as Reimagined's rough ones do)
+			float4 hit = f.histShift.w > 0.5 && rd < 96.0 && surf.d >= 0.6 ? imReflect(p, n, R, lod, dither, f, hc, hd, hs, true) : float4(0.0);
 			if (hit.a > 0.0) hit.a *= 1.0 - smoothstep(64.0, 96.0, rd);
 			// (from 0.3 to 0.85: sky light is interpolated per triangle, and over 0.6..1 the two triangles of one face read
 			// differently: obsidian and polished blocks showed a diagonal seam, one half reflecting more sky than the other)
-			float open = smoothstep(0.3, 0.85, sky);
+			float open = smoothstep(0.75, 0.97, sky);  // (nearly open sky only: partial sky light differs per triangle, a diagonal seam indoors)
 			float3 skyR = float3(0.0);
 			if (open * smoothstep(-0.1, 0.2, R.y) > 0.0)
 				skyR = (f.flags.x == 0 ? imPresent(imSkyColor(R, f, false), f) : imPresent(f.ambientUp.rgb * 2.0, f)) * (open * open)
@@ -1050,7 +1052,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			hit.a = hit.a > 0.0 ? hit.a * (1.0 - smoothstep(40.0, 64.0, dist)) : hit.a;
 			// (from 0.3 to 0.85: sky light is interpolated per triangle, and over 0.6..1 the two triangles of one face read
 			// differently: obsidian and polished blocks showed a diagonal seam, one half reflecting more sky than the other)
-			float open = smoothstep(0.3, 0.85, sky);
+			float open = smoothstep(0.75, 0.97, sky);  // (nearly open sky only: partial sky light differs per triangle, a diagonal seam indoors)
 			float3 skyR = float3(0.0);
 			if (open * smoothstep(-0.1, 0.2, R.y) > 0.0)
 				skyR = (f.flags.x == 0 ? imPresent(imSkyColor(R, f, false), f) : imPresent(f.ambientUp.rgb * 2.0, f)) * (open * open)
