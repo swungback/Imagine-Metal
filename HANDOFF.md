@@ -11,6 +11,12 @@ Where things stand, for picking the work up in a new conversation.
   are chat lines in the log (`[CHAT] <herningstang> ...`) just before each screenshot.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
 
+## 20:14 test of 2411150: leaves flickered with holes (sky through them, 20.14.32) and the pass timing read 200-600 ms per tag
+- Fixed in 20823cd (deployed): VOut.pos [[position, invariant]] (preserveInvariance only covers outputs marked invariant; the
+  pre-pass and the EQUAL colour pass link different fragment stages, so their vertex stages rounded differently). Timing: a slot's
+  samples older than the GPU clock when it was taken are stale (stages that didn't run keep old values) and are skipped.
+- If leaves still flicker: -Dmcopt.own.prepass=false in instance.cfg JvmArgs turns the pre-pass off.
+
 ## Pushed 2026-11-10 night (jar 2411150 deployed to the instance; needs a restart; not yet confirmed in game)
 - FINDING: the cutout depth pre-pass was never on in game. OwnTerrain.PREPASS only reaches the base path's drawList; the indie
   profile draws through the frag path (OwnFrag, uocc + splitNear 216 + testLate), which had no pre-pass at all. So the 18:58
