@@ -63,7 +63,26 @@ Where things stand, for picking the work up in a new conversation.
 - FPS: water/glass reflection trace 11 steps x1.75 (was 18 x1.4); light fog 7 steps; shafts 12/8 steps (was 15/10).
 - Shafts: shadow maps faded into each other at their edges (the moon's band).
 
-## Still open after this round
+## Second round 2026-11-10 16:25-17:00 (Jack's 16:28-16:48 notes; jar a2/latest deployed, needs a restart to test)
+- Confirmed working by Jack in game: outline, torches visible, water drawn, light fog "way better", sunset "better".
+- Water: told by its tint too (Streams' flowing water sprites aren't Minecraft's: were drawn as glass, grey); Reimagined colour
+  turquoise; seabed through water brighter; refraction 0.02; foam only on shallow open shores, faint.
+- Night sky line: the nebula's atan2 seam at due west (sky.metal), not the shafts.
+- Translucent-layer flames glow (texel rule in ownFsBody). Lights glow only in their lit parts (copper bulb frame).
+- Dropped items glow only for flame colours (red mushroom lit up). Lava redder, hot spots harder.
+- Hand: no vibrance, block light half neutral (netherite sword maroon/purple).
+- Caves: toe 0.42, AO x(1 + 0.6 cave), cave bloom fog darkened. Jungle shade olive not teal.
+- Vines sway again (wave code 3 -> corner pattern 0101, small across the wall).
+- Small ground plants (wave code 1) don't cast sun shadows: their sharp pale offset shadows were the "ghost copies".
+- Armour as a metal (less diffuse, mirrored light weighted by texel luma squared); mobs/armour generated bumps from texture
+  derivatives; mobs a soft sheen; mobs under water get our water fog.
+- Clouds "gone": options.txt has renderClouds:"false" (Distant Horizons turned vanilla clouds off on 11-09). Jack to turn
+  Clouds back on in Video Settings.
+- FPS: still 35-80. Needs the in-game Benchmark (Settings > Advanced) by the sea and in a jungle to see per-feature costs.
+- Open: "compat with texture packs generated pbr" (unclear: ask), mobs look weird under water (check after fog change),
+  "waves look off / too symmetrical" (water style 1 ripple from the texture), sun drawn as a hollow square (not reported).
+
+## Still open after the first round
 - Moon "line there??" (15.09.24): a faint vertical band from the moon straight down the sky, sharp left edge. Probable cause
   fixed: the shafts switched hard between the near map, the far map and the eye's brightness at each map's edge, and a map's
   edge is a plane along the light, a line through the moon on screen. Now faded (bloom.metal imbShaftsNow). Confirm in game;
