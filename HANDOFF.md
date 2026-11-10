@@ -23,6 +23,12 @@ Where things stand, for picking the work up in a new conversation.
 - Decision (told Jack): cheaper exact cuts first, deferred later only if terrain stays > ~11 ms. Done in d810a0d:
   coloured light = 2 hardware samples of filter-weighted copies (light.metal filt/open, textures 29/30, imBlockLightF; entities
   keep the 8-read imBlockLight); generated normals share the centre-texel read (1-3 reads, exact).
+- Mob shadows look broken (Jack 21:15, and 19.04.47 "floating 3d shadow built up of disconnected blocks": a grey translucent
+  stepped patch by a rabbit over sand and a grass block's side). Vanilla entity shadows are off (options.txt entityShadows:false),
+  so it's our contact trace (lighting.metal imContactShadow): 8 fixed steps 0.2 block apart through LAST frame's depth, so the
+  mob's silhouette lands once per step (stacked copies on whatever surfaces are there) and trails a moving mob by a frame.
+  Plan: draw entities into the sun's shadow maps (as Iris/Reimagined do; last frame's entity geometry is fine) and delete the
+  screen trace: right shapes, soft like the rest, and the trace's ~1.8 ms off terrain. Until then: mob shadows off in settings.
 - Next candidates: contact (mob) shadows only near entities (needs entity spheres in ImFrame); far cascade every other frame
   (keep its world-space matrix, re-derive camera-relative); then the deferred split if needed.
 
