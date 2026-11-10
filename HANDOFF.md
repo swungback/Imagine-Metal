@@ -1,4 +1,4 @@
-# Imagine Metal: handoff (2026-11-10, ~22:00)
+# Imagine Metal: handoff (2026-11-11, ~00:30)
 
 Where things stand, for picking the work up in a new conversation.
 
@@ -11,7 +11,26 @@ Where things stand, for picking the work up in a new conversation.
   are chat lines in the log (`[CHAT] <herningstang> ...`) just before each screenshot.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
 
-## START HERE: shadow maps made cheaper (fe99d1a, CI green, jar deployed to the instance 22:20; not yet tested in game)
+## START HERE: Jack's 22:34 test of the shadow-map change, and what it says about the frame (2026-11-11 00:30)
+- It worked on the GPU: "shadow maps" 3.0-5.9 ms -> 1.2-1.7 ms (3.1-3.5 while flying fast through the jungle); far cascade
+  drawn on 20 of 507 frames hovering, ~130 of 480 flying. Jungle spot after /tp: 46-48 fps (was 39-43), GPU 21-24 ms,
+  terrain 13.6-14.9. Forest: 55-64 fps, GPU 18-20, terrain 10-12.5. No benchmark run yet on this build.
+- BUG he reported: "shadows popping in a bit" (screenshots 2026-11-10_22.34.36 and .39, hovering ~25 blocks up over a
+  birch/spruce forest, looking down ~45 degrees). In .36 the right half of the ground has tree shadows and the left half none,
+  with a straight cut through one birch's shadow; 3 s later (.39, moved and turned a little) all shadows are there.
+  Two readings fit and I could NOT tell them apart: (a) the near view cull (Shadows.viewCull) leaves out casters for part of the
+  screen in some views (its maths checks out in simulation, so the suspect is its inputs: ImagineFrame.camProj / camView may not
+  be what I assumed); (b) the far map was empty there and the cut is the near cascade's edge (no mechanism found: it's redrawn
+  at least every second). Acted on (a): shadowNearViewCull is now OFF by default (benchmark step turns it on to measure it).
+  If the popping is still there on the next build it's the far cache: then look at shadowFarCache instead. To debug (a) properly:
+  draw the cull rectangle / the near map on screen, don't reason about it again.
+- Jack: render distance 8 doesn't raise the fps, 43 only costs ~13 fps. So the frame is per-pixel cost (terrain's fragment
+  shader, 10-19 ms at 1440x900), not geometry or distance. NEXT is therefore old step 3, before the mob shadows: make terrain
+  cheaper per pixel (imAirFog 4.2 ms, generated normals 3.5, PBR 3.0 in the 21:29 benchmark), or shade fewer pixels (there is
+  no render scale yet: rendering below native and letting the TAA upscale would cut every per-pixel cost at once; mcopt's
+  docs/dev/TAAU.md in GaelQuinta's repo is the reference), or the deferred split. Ask Jack before a render scale: it changes the look.
+
+## Shadow maps made cheaper (fe99d1a; near view cull since turned off, see above)
 - Step 1 of the 21:29 list, Java only (Shadows.java, OwnTerrain.setSlot/beginFrame0, Settings, Benchmark); no shader or native
   change.
 - Far cascade kept (Settings.shadowFarCache, -Dimaginemetal.shadowFarCache=false): drawn again only when (a) its own light step

@@ -55,7 +55,7 @@ public final class Benchmark {
 		steps.add(new Step("shadows off", () -> Settings.shadows = false));
 		steps.add(new Step("shadow range 96", () -> Settings.shadowRange = Math.min(Settings.shadowRange, 96f)));
 		steps.add(new Step("far shadow map redrawn every other frame (cache off)", () -> Settings.shadowFarCache = false));
-		steps.add(new Step("near shadow casters not culled to the view", () -> Settings.shadowNearViewCull = false));
+		steps.add(new Step("near shadow casters culled to the view (experimental, off)", () -> Settings.shadowNearViewCull = true));
 		steps.add(new Step("ambient occlusion off", () -> Settings.ssao = false));
 		steps.add(new Step("light shafts off", () -> Settings.shafts = false));
 		steps.add(new Step("PBR (reflections, highlights) off", () -> Settings.pbr = false));
