@@ -19,6 +19,7 @@ public final class Live {
 	private static boolean keyWas;
 	private static java.lang.reflect.Method handleMethod;
 	private static boolean handleFailed;
+	private static java.lang.reflect.Method getKey;
 
 	/** Fields that only take effect after a restart (or a chunk rebuild): never switched live. */
 	private static final java.util.Set<String> FIXED = java.util.Set.of("retina", "terrain", "shadowRes", "waving", "debug");
@@ -110,7 +111,7 @@ public final class Live {
 	}
 
 	/** Every frame: F8 (in game, no screen open) toggles. */
-	static void poll() {
+	public static void poll() {
 		Minecraft mc = Minecraft.getInstance();
 		boolean down = false;
 		if (mc.gui.screen() == null && !handleFailed) {
@@ -134,7 +135,12 @@ public final class Live {
 					}
 				}
 				long h = (long) handleMethod.invoke(w);
-				down = org.lwjgl.glfw.GLFW.glfwGetKey(h, org.lwjgl.glfw.GLFW.GLFW_KEY_F8) == org.lwjgl.glfw.GLFW.GLFW_PRESS;
+				// (GLFW by reflection: it isn't on the compile classpath of this Minecraft; without it, the pause menu button only)
+				if (getKey == null) {
+					Class<?> glfw = Class.forName("org.lwjgl.glfw.GLFW");
+					getKey = glfw.getMethod("glfwGetKey", long.class, int.class);
+				}
+				down = (int) getKey.invoke(null, h, 297) == 1;  // (GLFW_KEY_F8, GLFW_PRESS)
 			} catch (Throwable t) {
 				handleFailed = true;
 				System.out.println("[Imagine Metal] F8 toggle unavailable: " + t);
