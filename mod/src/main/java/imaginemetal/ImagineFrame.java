@@ -124,6 +124,7 @@ public final class ImagineFrame {
 		Sky.active = false;
 		Clouds.frameStart();
 		mcopt.metal.own.OwnTerrain.leafPrepass = Settings.leafPrepass;
+		ShadeFeatures.update();
 		if (failed || !Engine.TERRAIN) return;
 		try {
 			long t0 = Perf.start();

@@ -42,6 +42,8 @@ final class ImNative {
 	private static final MethodHandle TIME_ENABLE = fn("im_time_enable", FunctionDescriptor.ofVoid(JAVA_INT), false);
 	private static final MethodHandle TIME_TAG = fn("im_time_tag", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_INT, JAVA_INT), false);
 	private static final MethodHandle TIME_READ = fn("im_time_read", FunctionDescriptor.ofVoid(JAVA_LONG), false);
+	// the terrain's shading features as function constants (mcown.m, ShadeFeatures)
+	private static final MethodHandle SHADE_FEATURES = fn("mco_im_features", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_INT), false);
 	private static final MethodHandle SKY_TEXTURES = fn("im_sky_textures", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_INT,
 		JAVA_LONG, JAVA_INT, JAVA_INT), false);
 
@@ -210,6 +212,14 @@ final class ImNative {
 	static int skyDraw(long enc, long state, long target, long frame, int frameBytes, long rot, int mode, long err, int errCap) {
 		try {
 			return (int) SKY_DRAW.invokeExact(enc, state, target, frame, frameBytes, rot, mode, err, errCap);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
+	static int shadeFeatures(long own, int mask, long err, int errCap) {
+		try {
+			return (int) SHADE_FEATURES.invokeExact(own, mask, err, errCap);
 		} catch (Throwable t) {
 			throw new IllegalStateException(t);
 		}

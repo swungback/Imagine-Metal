@@ -67,15 +67,28 @@ void mc_im_frame(const void *bytes, int length) {
 	if (length > 0) memcpy(imFrame, bytes, (size_t) length);
 }
 
-#define OWN_MAX_LAYOUTS 64
+#define OWN_MAX_LAYOUTS 160  // (Imagine Metal: kept per shading feature set too)
 
 typedef struct {
 	MTLPixelFormat colors[MAX_COLORS];
 	MTLPixelFormat depth;
 	int colorCount;
 	int cutout;
+	uint32_t feat;  // (Imagine Metal) the shading features it was made with (ownFeat)
 	id<MTLRenderPipelineState> pso;
 } OwnLayout;
+
+// (Imagine Metal) the terrain's shading features (lighting.metal's function constants 40-53, bit i = constant 40 + i), set from Java
+// (imaginemetal.ShadeFeatures via mco_im_features): every fragment stage is specialized with them, so what's off isn't compiled in.
+// Pipelines are kept per set, so switching a feature back is instant after its first time.
+static uint32_t ownFeat = 0xffffffffu;
+#define OWN_FEAT_COUNT 14
+static void ownFeatConstants(MTLFunctionConstantValues *cv, uint32_t feat) {
+	for (int i = 0; i < OWN_FEAT_COUNT; i++) {
+		bool on = (feat >> i) & 1u;
+		[cv setConstantValue:&on type:MTLDataTypeBool atIndex:(NSUInteger) (40 + i)];
+	}
+}
 
 typedef struct {
 	Ctx *ctx;
@@ -197,6 +210,46 @@ static void ownErr(NSError *e, const char *what, char *err, int cap) {
 	if (err && cap > 0) snprintf(err, cap, "%s: %s", what, e ? e.description.UTF8String : "unknown error");
 }
 
+// The plain fragment stages (solid, cutout, translucent, and the computed-level ones), specialized with the shading features now
+// (ownFeat); the old ones released. 0 (err set) if one can't be made.
+static int ownMakeFs(Own *w, char *err, int errCap) {
+	id<MTLLibrary> lib = w->library;
+	id<MTLFunction> made[5] = {nil, nil, nil, nil, nil}, tr = nil;
+	for (int c = 0; c < 5; c++) {
+		MTLFunctionConstantValues *cv = [[MTLFunctionConstantValues new] autorelease];
+		bool cut = c == 1 || c == 2 || c == 4;
+		float limit = c == 2 ? 0.1f : 0.5f;  // vanilla's ALPHA_CUTOUT of translucent and cutout terrain
+		bool lvl = c >= 3;
+		[cv setConstantValue:&cut type:MTLDataTypeBool atIndex:0];
+		[cv setConstantValue:&limit type:MTLDataTypeFloat atIndex:5];
+		[cv setConstantValue:&lvl type:MTLDataTypeBool atIndex:6];
+		ownFeatConstants(cv, ownFeat);
+		NSError *e = nil;
+		made[c] = [lib newFunctionWithName:@"own_fs" constantValues:cv error:&e];
+		if (!made[c]) {
+			ownErr(e, "own_fs", err, errCap);
+			for (int k = 0; k < c; k++) [made[k] release];
+			return 0;
+		}
+		// (Imagine Metal: its own translucent stage, blending by itself; own_fs where the library has none)
+		if (c == 2) tr = [lib newFunctionWithName:@"own_fs_tr" constantValues:cv error:nil];
+	}
+	id<MTLFunction> old[6] = {w->fsSolid, w->fsCutout, w->fsTranslucent, w->fsSolidLevel, w->fsCutoutLevel, nil};
+	w->fsSolid = made[0];
+	w->fsCutout = made[1];
+	if (tr) {
+		w->fsTranslucent = tr;
+		old[5] = nil;
+		[made[2] release];
+	} else {
+		w->fsTranslucent = made[2];
+	}
+	w->fsSolidLevel = made[3];
+	w->fsCutoutLevel = made[4];
+	for (int k = 0; k < 5; k++) [old[k] release];
+	return 1;
+}
+
 Own *mco_new(Ctx *ctx, const char *source, int compact, int fat, int cpuClip, char *err, int errCap) {
 	@autoreleasepool {
 		MTLCompileOptions *o = [[MTLCompileOptions new] autorelease];
@@ -254,29 +307,7 @@ Own *mco_new(Ctx *ctx, const char *source, int compact, int fat, int cpuClip, ch
 			w->vsModes[vsMode] = [lib newFunctionWithName:@"own_vs" constantValues:vcv error:&e];
 		}
 		w->vs = w->vsModes[0];
-		for (int c = 0; c < 5; c++) {
-			MTLFunctionConstantValues *cv = [[MTLFunctionConstantValues new] autorelease];
-			bool cut = c == 1 || c == 2 || c == 4;
-			float limit = c == 2 ? 0.1f : 0.5f;  // vanilla's ALPHA_CUTOUT of translucent and cutout terrain
-			bool lvl = c >= 3;
-			[cv setConstantValue:&cut type:MTLDataTypeBool atIndex:0];
-			[cv setConstantValue:&limit type:MTLDataTypeFloat atIndex:5];
-			[cv setConstantValue:&lvl type:MTLDataTypeBool atIndex:6];
-			id<MTLFunction> fs = [lib newFunctionWithName:@"own_fs" constantValues:cv error:&e];
-			if (!fs) {
-				ownErr(e, "own_fs", err, errCap);
-				return NULL;
-			}
-			if (c == 4) w->fsCutoutLevel = fs;
-			else if (c == 3) w->fsSolidLevel = fs;
-			else if (c == 2) {
-				// (Imagine Metal: its own translucent stage, blending by itself; own_fs where the library has none)
-				id<MTLFunction> tr = [lib newFunctionWithName:@"own_fs_tr" constantValues:cv error:nil];
-				w->fsTranslucent = tr ? tr : fs;
-			}
-			else if (cut) w->fsCutout = fs;
-			else w->fsSolid = fs;
-		}
+		if (!ownMakeFs(w, err, errCap)) return NULL;
 		// (own_fs_flat reads the frag variants' optional constants, so it is made as a specialized function, with none set)
 		w->fsFlat = [lib newFunctionWithName:@"own_fs_flat" constantValues:[[MTLFunctionConstantValues new] autorelease] error:&e];
 		if (!w->vs || !w->vsTranslucent || !w->vsQuads) {
@@ -352,6 +383,25 @@ static int opCount[OP_SLOTS], opFrames;
 static MTLTimestamp opCpu0, opGpu0;
 static const char *opNames[OP_SLOTS] = {"cull", "quads A (list build)", "quads B pyramid", "prefilter", "solid occ", "quads B test",
 	"uocc pyramid", "uocc test", "uocc finish", "uocc split"};  // (6-8: -Dmcopt.own.frag.uoccEnc's encoders; 9: the split's one encoder)
+
+// (Imagine Metal) the shading features from now on (ownFeat): the plain fragment stages made again with them; the pipelines follow on
+// their next draw (kept per feature set). 1 changed, 0 the same, -1 err set (the old set kept).
+int mco_im_features(Own *w, uint32_t feat, char *err, int errCap) {
+	if (feat == ownFeat) return 0;
+	if (!w) {  // (before the terrain exists: its stages will be made with these)
+		ownFeat = feat;
+		return 1;
+	}
+	uint32_t was = ownFeat;
+	ownFeat = feat;
+	@autoreleasepool {
+		if (!ownMakeFs(w, err, errCap)) {
+			ownFeat = was;
+			return -1;
+		}
+	}
+	return 1;
+}
 
 void mco_set_gputime(int on) {
 	opOn = on;
@@ -583,8 +633,8 @@ static id<MTLFunction> ownStage(Own *w, int kind, int vertex, char *err, int err
 		: frag == 7 ? @"own_fs_pos"
 		: frag == 6 ? @"own_fs_alpha"
 		: frag == 2 ? @"own_fs_flat" : frag == 3 && w->fsTranslucent && [w->fsTranslucent.name isEqualToString:@"own_fs_tr"] ? @"own_fs_tr" : @"own_fs";
-	NSString *key = [NSString stringWithFormat:@"%@ %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d%@", name, vertex ? vsMode | translucent << 2 | quads << 3 : frag, half, lean, nonidx,
-		rev, tight, posonly, occA, occB, (kind >> 29) & 1, oracle, fogvert, fogvertAll, fogvertT, qflat, group ? @" g" : @""];
+	NSString *key = [NSString stringWithFormat:@"%@ %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d%@ f%x", name, vertex ? vsMode | translucent << 2 | quads << 3 : frag, half, lean, nonidx,
+		rev, tight, posonly, occA, occB, (kind >> 29) & 1, oracle, fogvert, fogvertAll, fogvertT, qflat, group ? @" g" : @"", vertex ? 0u : ownFeat];
 	id<MTLFunction> fn = w->functions[key];
 	if (fn) return fn;
 	MTLFunctionConstantValues *cv = [[MTLFunctionConstantValues new] autorelease];
@@ -617,6 +667,7 @@ static id<MTLFunction> ownStage(Own *w, int kind, int vertex, char *err, int err
 		[cv setConstantValue:&cut type:MTLDataTypeBool atIndex:0];
 		[cv setConstantValue:&limit type:MTLDataTypeFloat atIndex:5];
 		[cv setConstantValue:&lvl type:MTLDataTypeBool atIndex:6];
+		ownFeatConstants(cv, ownFeat);  // (Imagine Metal: the shading features on now)
 	}
 	NSError *e = nil;
 	fn = [w->library newFunctionWithName:name constantValues:cv error:&e];
@@ -641,7 +692,7 @@ static NSString *ownLayerName(int kind) {
 static id<MTLRenderPipelineState> ownPipeline(Own *w, Enc *enc, int cutout, char *err, int errCap) {
 	for (int i = 0; i < w->layoutCount; i++) {
 		OwnLayout *k = &w->layouts[i];
-		if (k->colorCount != enc->colorCount || k->cutout != cutout) continue;
+		if (k->colorCount != enc->colorCount || k->cutout != cutout || k->feat != ownFeat) continue;
 		if ((enc->depth ? enc->depth.pixelFormat : MTLPixelFormatInvalid) != k->depth) continue;
 		int same = 1;
 		for (int c = 0; c < enc->colorCount; c++)
@@ -718,6 +769,7 @@ static id<MTLRenderPipelineState> ownPipeline(Own *w, Enc *enc, int cutout, char
 		for (int c = 0; c < enc->colorCount; c++) k->colors[c] = enc->colors[c] ? enc->colors[c].pixelFormat : MTLPixelFormatInvalid;
 		k->depth = pd.depthAttachmentPixelFormat;
 		k->cutout = cutout;
+		k->feat = ownFeat;
 		k->pso = pso;
 		return pso;
 	}

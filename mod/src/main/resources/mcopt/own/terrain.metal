@@ -2455,7 +2455,7 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 	}
 	color.rgb = imShade(color.rgb, texel.rgb, in.imPos, imLightQ, in.imMat | (imKind << 8), in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imSeeds, imPbrN, imPbrS,
 		in.texCoord0, in.imRect, atlas, imHistColor, imHistDepth, imHistSampler, imUnderDepth); // (Imagine Metal)
-	if (imPortal && imf.extra.x > 0.5 && imf.portalRect.z > imf.portalRect.x) color = imPortalLook(in.texCoord0, in.imPos, texel, atlas, imf);
+	if (IM_FC_PORTALS && imPortal && imf.extra.x > 0.5 && imf.portalRect.z > imf.portalRect.x) color = imPortalLook(in.texCoord0, in.imPos, texel, atlas, imf);
 	// (the translucent pass has no material bytes, so a flame drawn in it (a resource pack's 3D torch, the copper torch: sprites with
 	// soft edges land in that layer) didn't glow: its opaque, hot, saturated texels glow as a flame's do; glass is see-through)
 	if (CUTOUT && CUTOUT_LIMIT < 0.2 && imKind != 1u && !imPortal && texel.a > 0.97) {

@@ -818,6 +818,38 @@ static float imOre(uint t, float3 c, thread float3 &cm, bool nether) {
 	return 0.0;
 }
 
+// The terrain's features as function constants (40-53, set by mcown.m from imaginemetal.ShadeFeatures): a feature that is off isn't
+// compiled into the terrain's fragment stages at all, so it costs nothing (registers, texture reads), not just a skipped branch.
+// Each still keeps its runtime switch in the frame (so on = exactly the old shader); a stage made without them has them all on.
+constant bool imFcShadows_ [[function_constant(40)]];
+constant bool imFcPbr_ [[function_constant(41)]];
+constant bool imFcNormals_ [[function_constant(42)]];
+constant bool imFcPbrPack_ [[function_constant(43)]];
+constant bool imFcParallax_ [[function_constant(44)]];
+constant bool imFcCoated_ [[function_constant(45)]];
+constant bool imFcMobShadows_ [[function_constant(46)]];
+constant bool imFcGlassSun_ [[function_constant(47)]];
+constant bool imFcColorLight_ [[function_constant(48)]];
+constant bool imFcHeld_ [[function_constant(49)]];
+constant bool imFcSky_ [[function_constant(50)]];
+constant bool imFcWet_ [[function_constant(51)]];
+constant bool imFcGlassRefl_ [[function_constant(52)]];
+constant bool imFcPortals_ [[function_constant(53)]];
+constant bool IM_FC_SHADOWS = is_function_constant_defined(imFcShadows_) ? imFcShadows_ : true;
+constant bool IM_FC_PBR = is_function_constant_defined(imFcPbr_) ? imFcPbr_ : true;
+constant bool IM_FC_NORMALS = is_function_constant_defined(imFcNormals_) ? imFcNormals_ : true;
+constant bool IM_FC_PBRPACK = is_function_constant_defined(imFcPbrPack_) ? imFcPbrPack_ : true;
+constant bool IM_FC_PARALLAX = is_function_constant_defined(imFcParallax_) ? imFcParallax_ : true;
+constant bool IM_FC_COATED = is_function_constant_defined(imFcCoated_) ? imFcCoated_ : true;
+constant bool IM_FC_MOBSHADOWS = is_function_constant_defined(imFcMobShadows_) ? imFcMobShadows_ : true;
+constant bool IM_FC_GLASSSUN = is_function_constant_defined(imFcGlassSun_) ? imFcGlassSun_ : true;
+constant bool IM_FC_COLORLIGHT = is_function_constant_defined(imFcColorLight_) ? imFcColorLight_ : true;
+constant bool IM_FC_HELD = is_function_constant_defined(imFcHeld_) ? imFcHeld_ : true;
+constant bool IM_FC_SKY = is_function_constant_defined(imFcSky_) ? imFcSky_ : true;
+constant bool IM_FC_WET = is_function_constant_defined(imFcWet_) ? imFcWet_ : true;
+constant bool IM_FC_GLASSREFL = is_function_constant_defined(imFcGlassRefl_) ? imFcGlassRefl_ : true;
+constant bool IM_FC_PORTALS = is_function_constant_defined(imFcPortals_) ? imFcPortals_ : true;
+
 static inline float imDither(float2 pixel, constant ImFrame &f) {
 	float d = fract(dot(pixel, float2(0.06711056, 0.00583715)) * 52.9829189);
 	return f.taa.z > 0.5 ? fract(d + 0.61803399 * float(f.flags.w & 63)) : d;
@@ -848,7 +880,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	uint cls = mat & 15u;
 	uint kind = mat >> 8;  // (the translucent pass: 1 water, 2 glass and other see-through blocks)
 	float3 N = n;
-	if (f.lightSize.w > 0.0 && cls != IM_MAT_LAVA && !slanted && kind == 0u) {
+	if (IM_FC_NORMALS && f.lightSize.w > 0.0 && cls != IM_MAT_LAVA && !slanted && kind == 0u) {
 		float3 tn = imGenNormal(atlas, uv, rect, f.lightSize.w, tpp, tex);
 		if (tn.z < 0.9999) {
 			float3 dp2perp = cross(dp2, n), dp1perp = cross(n, dp1);
@@ -862,7 +894,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// glow; in place of ours where the pack has a map
 	float4 pS = float4(0.0);
 	bool packed = false;
-	if (f.pbrPack.x > 0.5 && kind == 0u && !slanted) {
+	if (IM_FC_PBRPACK && f.pbrPack.x > 0.5 && kind == 0u && !slanted) {
 		constexpr sampler ps(filter::nearest, address::clamp_to_edge);
 		float3 dp2perp = cross(dp2, n), dp1perp = cross(n, dp1);
 		float3 T = dp2perp * duv1.x + dp1perp * duv2.x;
@@ -871,7 +903,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		float3 Tn = T * im, Bn = B * im;
 		float2 puv = uv;
 		float4 pn = pbrN.sample(ps, uv, level(0.0));
-		if (f.pbrPack.y > 0.5 && pn.a < 0.999 && length(p) < 24.0) {
+		if (IM_FC_PARALLAX && f.pbrPack.y > 0.5 && pn.a < 0.999 && length(p) < 24.0) {
 			// (parallax: the surface's height pushes the texture along the view, four steps into it)
 			float3 Vv = -normalize(p);
 			float3 vt = float3(dot(Vv, normalize(Tn)), dot(Vv, normalize(Bn)), max(dot(Vv, n), 0.25));
@@ -940,9 +972,9 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		albedo = max(al + (albedo - al) * 1.3, 0.0) * 0.93;
 	}
 	float3 base = pow(max(albedo, 0.0), 2.2);
-	bool pbr = f.shadow.w > 0.5 && f.flags.y == 0;
+	bool pbr = IM_FC_PBR && f.shadow.w > 0.5 && f.flags.y == 0;
 	// Reimagined's coated textures: each texel a touch lighter or darker than its neighbours, so flat colours read as a material
-	if (f.toggles.x > 0.5 && kind == 0u && cls != IM_MAT_EMITTER && cls != IM_MAT_LAVA && cls != IM_MAT_FLAME) {
+	if (IM_FC_COATED && f.toggles.x > 0.5 && kind == 0u && cls != IM_MAT_EMITTER && cls != IM_MAT_LAVA && cls != IM_MAT_FLAME) {
 		float2 tx = floor(uv * float2(atlas.get_width(), atlas.get_height()));
 		float hn = fract(sin(dot(tx, float2(12.9898, 78.233))) * 43758.5453);
 		albedo *= 1.0 + (hn - 0.5) * 0.32;
@@ -963,7 +995,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// rain puddles (Reimagined's, RAIN_PUDDLES 1): on tops of blocks under the open sky, away from torches; their shape from three
 	// sizes of noise over the world (in the texture's pixels), so they lie in wide organic pools that grow as the rain goes on;
 	// a puddle is a flat mirror. The rest of the world only gets a little glossier.
-	if (pbr && f.water.w > 0.0 && kind == 0u && cls != IM_MAT_LAVA && cls != IM_MAT_EMITTER && cls != IM_MAT_FOLIAGE && cls != IM_MAT_SAND) {
+	if (pbr && IM_FC_WET && f.water.w > 0.0 && kind == 0u && cls != IM_MAT_LAVA && cls != IM_MAT_EMITTER && cls != IM_MAT_FOLIAGE && cls != IM_MAT_SAND) {
 		float pmix = saturate(light.y * 32.0 - 31.0) * saturate((1.0 - 1.15 * light.x) * 10.0);
 		float up = max(n.y - 0.5, 0.0) * 2.0;
 		pmix *= up * up;
@@ -998,7 +1030,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	if (leafy) wrap = slanted ? max(wrap, saturate(f.lightDir.y) * 0.9 + 0.1) : mix(wrap, 1.0, 0.35);
 	// sunlight: the shadow map where it reaches; the sky light stands in beyond it. Underground (no sky light at all) the sun is
 	// off regardless, so a cave never catches sunlight through an imprecision of the map.
-	float2 sm = imShadow(p, n, pixel, f, smap, cmp);
+	float2 sm = IM_FC_SHADOWS ? imShadow(p, n, pixel, f, smap, cmp) : float2(1.0, 0.0);
 	float open = smoothstep(0.45, 0.9, sky);
 	float sun = mix(open, sm.x, sm.y);
 	// (under water the light is scattered: shadows there are soft and shallow, not the hard dark shapes cast on dry land)
@@ -1009,7 +1041,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// grain over the ground)
 	// (the trace reads the depth from before the water was drawn when there is one: the water's surface over shallows isn't
 	// something between the seabed and the sun)
-	if (f.toggles.z > 0.5 && sun > 0.02 && f.histShift.w > 0.5 && kind == 0u) sun *= f.pbrPack.z > 0.5 ? imContactShadow(p, n, f, ud, 0.5, smap) : imContactShadow(p, n, f, hd, 0.5, smap);
+	if (IM_FC_MOBSHADOWS && IM_FC_SHADOWS && f.toggles.z > 0.5 && sun > 0.02 && f.histShift.w > 0.5 && kind == 0u) sun *= f.pbrPack.z > 0.5 ? imContactShadow(p, n, f, ud, 0.5, smap) : imContactShadow(p, n, f, hd, 0.5, smap);
 	// caustics (eyes under water: what you see is under it too): the waves above focus the sunlight into a moving net of bright
 	// lines on everything it reaches, from two drifting noises' crossings, along the light's direction
 	if (f.water.z > 0.5 && f.flags.x == 0 && sun > 0.0) {
@@ -1031,7 +1063,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// look off"; there their shadows are softened toward the open sky)
 	if (cls == IM_MAT_FOLIAGE) sun = mix(sun, max(sun, open), 0.45 * smoothstep(26.0, 40.0, length(p)));
 	float3 direct = f.lightColor.rgb * (wrap * sun * (1.0 - 0.35 * lowSun));
-	if (sun > 0.002 && f.extra.y > 0.5) direct *= imGlassTint(p, n, f, seeds);
+	if (IM_FC_GLASSSUN && IM_FC_COLORLIGHT && sun > 0.002 && f.extra.y > 0.5) direct *= imGlassTint(p, n, f, seeds);
 	// (and glow when the light is behind them: Reimagined's subsurface highlight, looking toward the sun through grass and leaves,
 	// their backlit edges lit up gold; added on top of the surface, as its highlight is)
 	float3 sssGlow = float3(0.0);
@@ -1052,13 +1084,13 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 
 	// torches: warm, weaker in full daylight
 	// (no block light and full daylight: the grid's eight reads skipped, most of an open landscape by day)
-	float4 bl = block < 0.01 && sky > 0.97 && f.blockColor.w > 0.5 ? float4(f.blockColor.rgb, 0.0) : imBlockLight(p, n, f, lvol, lsamp);
+	float4 bl = !IM_FC_COLORLIGHT || (block < 0.01 && sky > 0.97 && f.blockColor.w > 0.5) ? float4(f.blockColor.rgb, 0.0) : imBlockLight(p, n, f, lvol, lsamp);
 	float3 torch = bl.rgb * imBlockCurve(max(block, bl.a)) * (1.0 - 0.25 * f.blockColor.w * smoothstep(0.5, 1.0, sky));
 	// (a light's own faces sit in its brightest light: the whole block lit up, a copper bulb's frame and a jack o'lantern's skin
 	// as bright as their glowing parts. Only the parts that glow should: its own light on it much less)
 	if (cls == IM_MAT_EMITTER || cls == IM_MAT_FLAME || cls == IM_MAT_DIM) torch *= 0.3;
 	// the light in the player's hands: a level falling one a block from the eye, as a placed light would, softer at the edge
-	if (f.held.w > 0.0) {
+	if (IM_FC_HELD && f.held.w > 0.0) {
 		// (as placed coloured lights are: 4 levels stronger, the colour's saturation pushed 1.6x, as bright as the torch colour)
 		float hl = saturate(min(f.held.w + 4.0 / 15.0, 1.0) - length(p) / 15.0);
 		if (hl > 0.0) {
@@ -1132,7 +1164,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		}
 		// (the light in the hand: its highlight on whatever glossy surface faces the eye, as a torch held up to obsidian or
 		// polished stone glints; it lit them before but never shone on them)
-		if (f.held.w > 0.0) {
+		if (IM_FC_HELD && f.held.w > 0.0) {
 			float hlv = saturate(min(f.held.w + 4.0 / 15.0, 1.0) - length(p) / 15.0);
 			if (hlv > 0.0) {
 				float3 hcol = f.held.rgb / max(max(max(f.held.r, f.held.g), f.held.b), 1e-3) * max(max(f.blockColor.r, f.blockColor.g), f.blockColor.b);
@@ -1161,10 +1193,10 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	}
 
 	// the air between the eye and the surface (Photon's air fog)
-	float3 airT;
-	float3 airS = f.flags.y == 0 ? imAirFog(p, sky, f, airT) : float3(0.0);
+	float3 airT = float3(1.0);
+	float3 airS = float3(0.0);
+	if (IM_FC_SKY && f.flags.y == 0) airS = imAirFog(p, sky, f, airT);
 	if (f.flags.y == 0) radiance = radiance * airT + airS * f.minLight.w;
-	else airT = float3(1.0);
 
 	if (f.flags.y == 1) return float3(light, 0.0);          // debug: light levels
 	if (f.flags.y == 2) return N * 0.5 + 0.5;               // debug: normals (with the generated ones)
@@ -1263,7 +1295,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	}
 	// water and glass (Reimagined's: a share by the angle, 15 % head-on; water less on its sides and from below; glass none right
 	// up close): what the last frame's picture shows along the reflected ray, the sky where nothing is in the way
-	if (kind != 0u && f.flags.y == 0 && (kind == 2u ? f.water.y > 0.5 : f.water.x > 0.5 && f.water.z < 0.5)) {
+	if (kind != 0u && f.flags.y == 0 && (kind == 2u ? IM_FC_GLASSREFL && f.water.y > 0.5 : f.water.x > 0.5 && f.water.z < 0.5)) {
 		float fresnel = 1.0 - saturate(dot(N, V));
 		float rm = kind == 1u ? (0.5 + 0.5 * saturate(n.y)) * (f.water.z > 0.5 ? 0.5 : 1.0) : 1.0 - smoothstep(1.8, 0.3, length(p));
 		float fm = (fresnel * fresnel * fresnel * 0.85 + 0.15) * rm;
