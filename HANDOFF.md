@@ -1,4 +1,4 @@
-# Imagine Metal: handoff (2026-11-10, evening)
+# Imagine Metal: handoff (2026-11-10, night)
 
 Where things stand, for picking the work up in a new conversation.
 
@@ -10,6 +10,41 @@ Where things stand, for picking the work up in a new conversation.
 - Jack's settings: `config/imaginemetal.properties` in that instance. Screenshots and `logs/latest.log` there too. His notes
   are chat lines in the log (`[CHAT] <herningstang> ...`) just before each screenshot.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
+
+## Pushed 2026-11-10 night (jar 2411150 deployed to the instance; needs a restart; not yet confirmed in game)
+- FINDING: the cutout depth pre-pass was never on in game. OwnTerrain.PREPASS only reaches the base path's drawList; the indie
+  profile draws through the frag path (OwnFrag, uocc + splitNear 216 + testLate), which had no pre-pass at all. So the 18:58
+  benchmark ran with every jungle leaf layer shaded in full (alpha test defeats Apple's hidden surface removal).
+  Now: OwnFrag.preMode / cutoutLayer: phase A's cutout depth (kind 6, own_fs_alpha, bias 1) after the unit test and before the
+  far solid, then the cutout colour with depth EQUAL + the same bias; phase B the same (pre-pass, solid, colour). The near solid
+  (before the test) is unchanged, and so are the a2Exact table draws. Live switch OwnTerrain.leafPrepass (Settings.leafPrepass,
+  not saved, benchmark step "leaf depth pre-pass off"); -Dmcopt.own.prepass=false starts with it off. If leaves vanish or get
+  holes: EQUAL mismatch, look here first.
+- Per-pass GPU timing (native imtime.m, Java PassTimes): every 6th frame every encoder gets stage-boundary timestamps (sample
+  buffer attachment 1; mcopt's trace keeps 0), booked under a tag. Our passes tag themselves (shadow, light grid, sky, clouds,
+  shafts, ao, bloom, resolve, taa, reflection copies, present, culling = pre buffer); the game's are tagged from
+  LevelRendererMixin (sky lambda, executeSolid = terrain, PreparedFrame.executeSolid = entities, executeClassicTransparency =
+  translucent, executeOutline = overlay, after the main lambda = weather/particles, render RETURN = hand+gui). On a sampled frame
+  the main pass is cut at each tag change (mc_render_split + MetalBridge.restorePass). Perf prints a second line every 10 s:
+  "[Imagine Metal] perf: gpu X ms (...): terrain a, shadow maps b, ...". The benchmark logs "benchmark passes:" per step and
+  ends with the everything-on pass breakdown in chat. -Dimaginemetal.passTimes=false turns it off. The old "gpu" number
+  (command buffer start..end, 60-87 ms at 28 fps) is gone from the line.
+- Terrain shading features as function constants (lighting.metal imFc*, 40-53; mcown.m ownFeat / mco_im_features / ownMakeFs;
+  Java ShadeFeatures, every frame from Settings): shadows, pbr, normals, pbr pack, parallax, coated, mob shadows, glass sun,
+  coloured light, held light, sky/air, wet, glass reflections, portals. Off = not compiled into own_fs / own_fs_tr; each keeps
+  its runtime test too, so "on" is exactly the old shader. Pipelines are kept per set (OWN_MAX_LAYOUTS 160): first use of a set
+  compiles (a hitch), later switches are instant. -Dimaginemetal.shadeFeatures=false keeps all compiled in. With Jack's
+  everything-on settings this saves nothing by itself; it makes "off" free and the benchmark's per-feature numbers honest.
+- NOT done: the deferred G-buffer rewrite. Decide it from the new per-pass numbers: if terrain is still most of the frame after
+  the pre-pass, split imShade into a surface part (normals, pbr pack, parallax, coated, material) and a lighting part; G-buffer
+  pass = surface part (cheap, helper lanes cheap), full-screen lighting pass = lighting part, translucent keeps calling both.
+  The terrain draws inside the game's single main RenderPass (executeSolid + transparency share it): the G-buffer needs the
+  main encoder ended after terrain (mc_render_split-style), its own attachments + the main depth, a lighting pass into the main
+  colour, then the main pass reopened (MetalBridge.restorePass) for entities/translucent.
+- Jack's 19:03-19:09 notes (not looked into yet): "ghost grass again" (19.03.51: sharp detached shadows of tall grass on sand),
+  "weird shadow" (19.03.54), "floating 3d shadow built up of disconnected blocks" (19.04.47: a grey translucent block-shaped
+  patch over a grass block's side, near a rabbit), "completely dark under certain point in water" (19.07.06), "am i supposed to
+  only see this far out" (19.08.18), "rain could look better (the particles themselves)".
 
 ## Pushed 2026-11-10 (from Jack's 11-05 and 11-06..08 notes; not yet confirmed in game)
 - Terrain alpha from the texture alone (vertex alpha x the fade mix hid the portal and copper torch, glass showed only tint).
@@ -115,8 +150,8 @@ Where things stand, for picking the work up in a new conversation.
 - Far canopy: foliage receivers past 26-40 blocks get shadows softened toward the sky (far map blotches).
 
 ## Perf diagnosis 2026-11-10 evening (Jack's 18:58 jungle benchmark, ~1099 107 -56, render distance 16, 1440x900)
-- Shaders off (live) 108 fps / 9.2 ms; everything on 29 fps / 35 ms: ~26 ms a frame is ours. The cutout depth pre-pass was
-  already on in that jar (ffc606f) and didn't fix it. Jack: over 100 fps with shadows "when the mod was more basic".
+- Shaders off (live) 108 fps / 9.2 ms; everything on 29 fps / 35 ms: ~26 ms a frame is ours. (It was believed the cutout depth
+  pre-pass was on in that jar; it wasn't: see "night" above.) Jack: over 100 fps with shadows "when the mod was more basic".
 - Per feature, after allowing for drift (aurora, stars and nether storm "saved" 3.5 ms each by day in a jungle: the one
   reference at the start was stale): shadows ~4-7 ms, our sky and air ~3-6, haze ~1-5, everything else 2 ms or less. No single
   feature explains 26 ms. Reading: the cost is the structure. imShade is a ~700-line uber-shader run inside the terrain (and
