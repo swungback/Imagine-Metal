@@ -2570,9 +2570,11 @@ fragment float4 own_fs_tr(VOut in [[stage_in]], float4 imDst [[color(0)]], const
 		float3 wc = getColor(in).rgb;
 		wc.g = max(wc.g, 0.39);
 		float3 wn = wc / max(max(wc.r, max(wc.g, wc.b)), 1e-3);
-		float3 absorb = (1.0 - wn) * 0.42 + 0.035;
+		// (clearer: at 0.42 and 0.16 water ten blocks deep was two thirds its own colour and the seabed's red gone, read as not
+		// see-through)
+		float3 absorb = (1.0 - wn) * 0.26 + 0.02;
 		behind = pow(max(dst, 0.0), 2.2) * exp(-absorb * thick);
-		float vol = (1.0 - exp(-thick * 0.16)) * 0.82;
+		float vol = (1.0 - exp(-thick * 0.09)) * 0.72;
 		a = max(a, vol);
 	} else {
 		behind = pow(max(dst, 0.0), 2.2) * imTint;
