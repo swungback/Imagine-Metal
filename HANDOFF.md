@@ -30,6 +30,15 @@ Where things stand, for picking the work up in a new conversation.
 - Dawn mist halved, forward glow softer, soft ceiling on air glow (pink whiteout by the river at sunrise). Vignette 0.25.
 - Light fog a^6 (a ball round a light, not a column of air).
 
+- Later the same day: vibrance leaves near-grey alone (netherite sword read purple; it was unenchanted, not the glint);
+  refraction water clearer (absorb 0.26, volume 0.09 x 0.72).
+- 11-10 14:46 crash was ColorLight (colorlight-26.3 beta, NPE in its engine inside OwnFrapi meshing): Jack removed it. Keep it out.
+- mcopt far terrain exists (-Dmcopt.lod=true -Dmcopt.lod.radius=100, JVM args in instance.cfg JvmArgs; DH disabled). Not yet
+  wired to our lighting/haze/sky (mclod.m / columns.metal composite: CompFrame fogColor, skyLight, faceShade). Jack wants
+  DH-like far view with low real render distance; next step after he tries it: feed it imAirFog + day colours.
+- Test round 11-10 ~15:00: Jack screenshots with chat notes; read logs/latest.log [CHAT] lines.
+- Jack wants to be told when to start a new chat (save usage); hand off via this file.
+
 ## Still open
 - End portal vanishing when backing away; water refraction shifting the selection outline; "running water looks off";
   cave fog wanted ("no cave fog"); FPS over water.
