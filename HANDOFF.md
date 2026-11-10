@@ -1,4 +1,4 @@
-# Imagine Metal: handoff (2026-11-10, night)
+# Imagine Metal: handoff (2026-11-10, night, after the pass-timing rewrite)
 
 Where things stand, for picking the work up in a new conversation.
 
@@ -10,6 +10,25 @@ Where things stand, for picking the work up in a new conversation.
 - Jack's settings: `config/imaginemetal.properties` in that instance. Screenshots and `logs/latest.log` there too. His notes
   are chat lines in the log (`[CHAT] <herningstang> ...`) just before each screenshot.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
+
+## Pass timing rewritten 2026-11-10 ~21:00 (1d653de, deployed to the instance; needs a restart, then the benchmark in the jungle)
+- Two faults in the old numbers: (1) encoders overlap and wait behind each other, so first-to-last spans summed to ~2x the
+  frame; (2) the GPU runs frames into each other, so a sampled frame's first encoders waited behind the PREVIOUS frame's work:
+  the frame's own span was 45-76 ms at a 28-31 ms frame, 41.6 ms at 7.4 ms with shaders off (20:31 log).
+- Now (imtime.m): a sampled submit's encoders in GPU order (pre buffer, then main, each in encoding order); each booked from the
+  latest end before it to its own end; gaps with nothing running booked as idle. The frame before a sampled one is a "lead"
+  (timed, nothing booked, no pass cuts): the sampled submit starts counting where the lead's work ended. So passes + idle = span,
+  and the span should now be <= the frame time. The perf/benchmark line shows "passes X + idle Y" next to the total.
+- Also timed now: mcown's opCompute (uocc test), the pyramid base pass, mcmetal clears, the frag clear blit.
+- Benchmark step "(timing) terrain cut into its parts" (right after the first "everything on"): on sampled frames the terrain
+  encoder is cut between the leaf depth pre-pass (tag 19), the solid (terrain, 4) and the leaf colour (20) (OwnFrag.layer,
+  PassTimes.terrainPart). Each cut stores/reloads the attachments, so its total is a bit high; it's left out of the cost list.
+- Check before trusting: shaders-off step's "gpu" total must be <= 7.4 ms and terrain a few ms; everything-on total <= ~28 ms.
+  If the total is still over the frame, the lead isn't landing (slots busy?) or completion order isn't queue order.
+- Then decide step 2 (deferred G-buffer vs cheaper cuts) from: terrain solid vs leaf colour vs leaf depth, shadow maps, and the
+  fixed passes (sky, shafts, ao, resolve, taa). Note: solid own_fs has no discard (CUTOUT is a function constant), so Apple's
+  HSR already shades opaque terrain about once a pixel; with the leaf pre-pass the leaves are once a pixel too. A G-buffer only
+  pays if shading per pixel is still the bulk AND quad overshading / register pressure is the problem, not overdraw.
 
 ## 20:31 jungle benchmark on 20823cd (same spot, RD16, 1440x900): leaves no longer reported flickering
 - Everything on 35 fps / 28.4 ms (was 28.5 fps / 35 ms at 18:58). Shaders off (live) 136 fps / 7.4 ms: ~21 ms a frame is ours.
