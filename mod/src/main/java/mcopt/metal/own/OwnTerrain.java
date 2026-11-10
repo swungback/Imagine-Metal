@@ -1159,11 +1159,6 @@ public final class OwnTerrain {
 	/** (Imagine Metal) true from beginFrame's frame++ until this frame's section table has taken the changed slots. */
 	private boolean tableOpen;
 
-	/** (Imagine Metal) the frame number: shadowCull reads the section table of this frame. */
-	public long frameNumber() {
-		return this.frame;
-	}
-
 	private void beginFrame0() {
 		this.frame++;
 		this.tableOpen = true;
