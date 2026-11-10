@@ -17,13 +17,17 @@
 // latest end so far) to its own end: what it added to the frame. Those parts partition the submit's span (its first sample to its
 // last end) exactly, with the gaps where the GPU had nothing (an encoder starting after everything before it had ended) booked
 // apart as idle: tags + idle = span, by construction. Encoders not timed (debug-only ones) land in the next timed encoder.
+// The frame before a sampled one is timed too (a lead: nothing booked, no pass cut), only for where its GPU work ended: the GPU
+// runs frames into each other (the CPU is a few frames ahead), so a sampled frame's first encoders start long before they can
+// do anything, behind the previous frame's work (its span read 41.6 ms at a 7.4 ms frame). The sampled frame counts from where
+// the work before it ended; what an encoder did under the previous frame's work is that frame's, not booked.
 #import "mcmetal.h"
 #include <os/lock.h>
 #include <stdatomic.h>
 
 #define IMT_TAGS 24
 #define IMT_GROUPS 256
-#define IMT_SLOTS 4
+#define IMT_SLOTS 6
 #define IMT_EVERY 6
 
 static id<MTLCounterSampleBuffer> imtBuf[IMT_SLOTS];
@@ -35,6 +39,9 @@ static id imtPreCb;  // the pre command buffer now being recorded (unretained; m
 // didn't run), so anything older than this is stale (it made encoders look hundreds of ms long)
 static MTLTimestamp imtBase[IMT_SLOTS];
 static int imtSlot = -1;   // the slot this submit samples into (-1: this submit isn't sampled)
+static int imtLead;        // this submit is a lead (the frame before a sampled one): only its end is kept
+static unsigned char imtLeadOf[IMT_SLOTS];
+static _Atomic uint64_t imtPrevEnd;  // the GPU time the last timed submit's work ended (completion handlers, in queue order)
 static int imtCount;       // groups used in it
 static int imtOn;          // set by Java (Perf): sampling on
 static int imtTried, imtOk;
@@ -91,14 +98,14 @@ static int imtInit(Ctx *ctx) {
 
 void im_time_enable(int on) { imtOn = on; }
 
-int imt_sampling(void) { return imtSlot >= 0; }
+int imt_sampling(void) { return imtSlot >= 0 && !imtLead; }
 
 // The next group's first sample index (4 a group), booked under tag; -1 when this submit isn't sampled or the slot is full.
 // cb: the encoder's command buffer (nil: the main one); a pre one's encoders default to culling.
 static int imtGroup(int tag, id cb) {
 	if (imtSlot < 0) return -1;
 	if (imtCount >= IMT_GROUPS) {
-		imtDropped++;
+		if (!imtLead) imtDropped++;
 		return -1;
 	}
 	int g = imtCount++;
@@ -173,7 +180,7 @@ void imt_present(void) { imtPresented = 1; }
 int im_time_tag(Enc *enc, int tag, int inPass) {
 	if (tag < 0 || tag >= IMT_TAGS) return 0;
 	imtTag = tag;
-	if (imtSlot < 0 || !mc_render_is_open(enc) || imtRenderTag == tag || imtRenderTag < 0) return 0;
+	if (imtSlot < 0 || imtLead || !mc_render_is_open(enc) || imtRenderTag == tag || imtRenderTag < 0) return 0;
 	if (!inPass) {
 		mc_frame_cmd(enc);  // (ends the open encoders; the next pass opens its own)
 		imtRenderTag = -1;
@@ -191,9 +198,10 @@ void imt_commit(Enc *enc, id<MTLCommandBuffer> c) {
 	imtPreCb = nil;  // (committed just before: mcmetal.m mc_enc_commit; the next submit's pre is a new one)
 	imtTag = IMT_MISC;  // (the next submit's first passes: uploads, the lightmap, until the level's own say otherwise)
 	if (imtSlot >= 0) {
-		int slot = imtSlot, n = imtCount;
+		int slot = imtSlot, n = imtCount, lead = imtLeadOf[slot];
 		MTLTimestamp base = imtBase[slot];
 		imtSlot = -1;
+		imtLead = 0;
 		if (n == 0) {
 			atomic_store(&imtBusy[slot], 0);
 		} else {
@@ -205,6 +213,7 @@ void imt_commit(Enc *enc, id<MTLCommandBuffer> c) {
 				double sum[IMT_TAGS] = {0};
 				uint64_t first = 0, reach = 0, idle = 0;
 				int used = 0;
+				uint64_t prev = atomic_load(&imtPrevEnd);
 				@autoreleasepool {
 					NSData *data = [imtBuf[slot] resolveCounterRange:NSMakeRange(0, (NSUInteger) n * 4)];
 					const MTLCounterResultTimestamp *ts = data.length >= (NSUInteger) n * 4 * sizeof(MTLCounterResultTimestamp) ? data.bytes : NULL;
@@ -221,7 +230,11 @@ void imt_commit(Enc *enc, id<MTLCommandBuffer> c) {
 							}
 							if (b <= a || a == UINT64_MAX) continue;
 							if (b - a > (uint64_t) (1.0e6 / usPerTick)) continue;  // (over a second: not a real sample)
-							if (!used) first = reach = a;
+							if (!used) {
+								// (from where the work before this submit ended, if it was still running when this one's first encoder
+								// started: what ran under it is the earlier work's)
+								first = reach = prev > a && prev - a < (uint64_t) (1.0e6 / usPerTick) ? prev : a;
+							}
 							used++;
 							uint64_t from = reach;
 							if (a > reach) {  // (the GPU had nothing to do until this one started)
@@ -233,8 +246,13 @@ void imt_commit(Enc *enc, id<MTLCommandBuffer> c) {
 						}
 					}
 				}
+				if (used) {
+					uint64_t was = atomic_load(&imtPrevEnd);
+					while (reach > was && !atomic_compare_exchange_weak(&imtPrevEnd, &was, reach)) {
+					}
+				}
 				atomic_store(&imtBusy[slot], 0);
-				if (!used) return;
+				if (!used || lead) return;  // (a lead: only its end)
 				os_unfair_lock_lock(&imtLock);
 				for (int t = 0; t < IMT_TAGS; t++) imtSum[t] += sum[t];
 				imtSpan += (double) (reach - first) * usPerTick;
@@ -246,13 +264,17 @@ void imt_commit(Enc *enc, id<MTLCommandBuffer> c) {
 		}
 	}
 	if (presented) imtFrame++;
-	// the next submit: sampled when its frame is one of every IMT_EVERY (a frame's submits all sampled, the presenting one last)
-	if (imtOn && imtInit(enc->ctx) && imtFrame % IMT_EVERY == 0) {
+	// the next submit: sampled when its frame is one of every IMT_EVERY (a frame's submits all sampled, the presenting one last); the
+	// frame before it a lead
+	int phase = (int) (imtFrame % IMT_EVERY);
+	if (imtOn && (phase == 0 || phase == IMT_EVERY - 1) && imtInit(enc->ctx)) {
 		for (int i = 0; i < IMT_SLOTS; i++) {
 			int expect = 0;
 			if (atomic_compare_exchange_strong(&imtBusy[i], &expect, 1)) {
 				imtSlot = i;
 				imtCount = 0;
+				imtLead = phase != 0;
+				imtLeadOf[i] = (unsigned char) imtLead;
 				MTLTimestamp cpuNow;
 				[imtDevice sampleTimestamps:&cpuNow gpuTimestamp:&imtBase[i]];
 				break;
