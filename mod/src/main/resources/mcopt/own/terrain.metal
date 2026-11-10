@@ -2515,7 +2515,8 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 		// (the hue held at Reimagined's blue-green, only its brightness from Minecraft's colour: at dusk Minecraft mixes the sky's
 		// purple into it and under the sea turned a dull grey-violet)
 		float wl = dot(wfc, float3(0.2126, 0.7152, 0.0722));
-		wfc = mix(wfc, float3(0.16, 0.62, 0.95) * (wl / 0.5348), 0.75);
+		// (a vibrant tropical turquoise, brighter, not a cold deep blue: "not like a cold ocean")
+		wfc = mix(wfc, float3(0.08, 0.78, 0.82) * (wl / 0.5348) * 1.3, 0.8);
 		imFogColor = pow(imPresent(wfc, imf), 1.0 / 2.2);
 	}
 	imFog = 1.0 - (1.0 - imFog) * (1.0 - imFade);

@@ -1043,7 +1043,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	ambient += f.auroraLight.rgb * (skyF * (0.12 + 0.88 * saturate(N.y)));
 	// under water: light scattered through the water reaches everything in a blue-green glow (Reimagined's sea floor is never
 	// black, even in the shade of kelp); dim at night
-	if (f.water.z > 0.5 && f.flags.x == 0) ambient += float3(0.04, 0.09, 0.12) * mix(0.12, 1.0, f.nightMiddle.w);
+	if (f.water.z > 0.5 && f.flags.x == 0) ambient += float3(0.035, 0.12, 0.11) * mix(0.12, 1.0, f.nightMiddle.w);  // (turquoise, not cold blue)
 
 	// torches: warm, weaker in full daylight
 	// (no block light and full daylight: the grid's eight reads skipped, most of an open landscape by day)
@@ -1350,7 +1350,7 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 	// (what's in the hand has no normal and took the sky's full blue from straight above: a netherite sword's warm grey read
 	// purple. Its share of the sky light mostly neutral)
 	if (hand) ambient = mix(ambient, float3(imLuma(ambient)), 0.65);
-	if (f.water.z > 0.5 && f.flags.x == 0) ambient += float3(0.04, 0.09, 0.12) * mix(0.12, 1.0, f.nightMiddle.w);
+	if (f.water.z > 0.5 && f.flags.x == 0) ambient += float3(0.035, 0.12, 0.11) * mix(0.12, 1.0, f.nightMiddle.w);  // (turquoise, not cold blue)
 	float4 bl = imBlockLight(p, particle ? float3(0.0, 1.0, 0.0) : n, f, lvol, lsamp);
 	float3 torch = bl.rgb * imBlockCurve(max(block, bl.a)) * (1.0 - 0.25 * f.blockColor.w * smoothstep(0.5, 1.0, sky));
 	if (!particle && f.lightVol.w > 0.5) {
@@ -1431,7 +1431,7 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 		// stood out as dark blue cut-outs; ours laid over them as over the terrain)
 		float wd = length(p) / 48.0;
 		float wf = 1.0 - exp(-wd * wd);
-		float3 wfc = float3(0.16, 0.62, 0.95) * (0.05 + 0.13 * f.nightMiddle.w);
+		float3 wfc = float3(0.08, 0.78, 0.82) * (0.06 + 0.16 * f.nightMiddle.w);
 		radiance = mix(radiance * 1.25, wfc, wf);
 	}
 	// (the hand: no vibrance, its light's colour half kept: a netherite sword's warm grey went maroon by a torch and purple by the sky)
