@@ -174,7 +174,9 @@ static inline float3 imGrade(float3 c, constant ImFrame &f) {
 	float l = imLuma(c);
 	float sat = max(max(c.r, c.g), c.b) - min(min(c.r, c.g), c.b);
 	// (and a little more colour where it's muted, Reimagined's vibrance: the picture read bland, washed out)
-	return mix(float3(l), c, f.grade.x + f.grade.y * (1.0 - sat) + 0.12 * (1.0 - saturate(sat * 2.5)));
+	// (but not near-grey colours: the boost for muted ones turned netherite's faint purple tint, a sword in the hand, plainly purple)
+	float muted = smoothstep(0.03, 0.12, sat);
+	return mix(float3(l), c, f.grade.x + (f.grade.y * (1.0 - sat) + 0.12 * (1.0 - saturate(sat * 2.5))) * muted);
 }
 
 // light (linear, before the tone curve) as the terrain's own light ends up: exposure, the tone curve, the grade (linear after)
