@@ -279,11 +279,17 @@ static float imEmission(uint cls, float3 tex) {
 		// (hot cores: the brightest texels far past white, so the bloom haloes them, the darker ones lower so the texture reads)
 		// (only the bright parts far past white: the whole block glowing turned a jack o'lantern's pumpkin skin white too)
 		// (and not so far past white that its colour goes: a jack o'lantern's carved face read as a flat white glare, no detail)
-		case IM_MAT_EMITTER: return 1.9 * smoothstep(0.45, 0.98, l) * l + 0.22 * l;
+		// (only the parts that are the light: warm ones from mid brightness, cool or green ones only near white (a sea lantern,
+		// an end rod); a copper bulb's green frame glowed as much as its lit middle)
+		case IM_MAT_EMITTER: {
+			float warm = smoothstep(0.08, 0.25, tex.r - tex.b) * step(tex.g, tex.r + 0.02);
+			float part = max(warm * smoothstep(0.45, 0.9, l), smoothstep(0.78, 0.95, l));
+			return (1.9 * l * smoothstep(0.45, 0.98, l) + 0.25 * l) * part;
+		}
 		case IM_MAT_GLOW_GEM: return 0.0;  // (crying obsidian: its veins only, imShade)
 		// (Reimagined's: brighter where the texture is; its hot spots orange-yellow, not white: white specks over a lava lake read
 		// like a rash)
-		case IM_MAT_LAVA: return 1.15 + 1.5 * l * l;
+		case IM_MAT_LAVA: return 1.1 + 2.4 * l * l * l;  // (the hot spots harder: a tighter, brighter bloom close to them)
 		case IM_MAT_FLAME: return 4.0 * smoothstep(0.62, 0.92, hi) * smoothstep(0.15, 0.4, sat);
 		// ores: every pixel with clear colour against the grey stone around it (the whole speck, its coloured edge too; iron's pale
 		// specks count; a speck's near-grey highlights and coal's black specks don't), at a faint glow that keeps the texture's own
@@ -1263,7 +1269,8 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	if (cls == IM_MAT_LAVA) {
 		float ll = imLuma(tex);
 		// (more orange-red, the hottest a deep yellow-orange that never reaches white even past the screen's top)
-		float3 crust = float3(0.75, 0.11, 0.015), mid = float3(1.0, 0.3, 0.03), hot = float3(1.0, 0.52, 0.09);
+		// (a little redder again: "too orange")
+		float3 crust = float3(0.78, 0.075, 0.01), mid = float3(1.0, 0.22, 0.02), hot = float3(1.0, 0.42, 0.06);
 		ecol = mix(mix(crust, mid, smoothstep(0.2, 0.5, ll)), hot, smoothstep(0.55, 0.95, ll)) * (0.4 + 0.6 * ll);
 	}
 	if (cls == IM_MAT_EMITTER) {
@@ -1346,6 +1353,7 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 			torch = max(torch, hc * imBlockCurve(hl) * (1.0 - 0.25 * f.blockColor.w * smoothstep(0.5, 1.0, sky)));
 		}
 	}
+	if (hand) torch = mix(torch, float3(imLuma(torch)), 0.5);
 	float3 day = direct + ambient;
 	float3 lit = sqrt(day * day + torch * torch + f.minLight.rgb * f.minLight.rgb);
 	if (f.nightMiddle.w > 0.0 && f.flags.x == 0) {
@@ -1403,15 +1411,17 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 		float3 wfc = float3(0.16, 0.62, 0.95) * (0.05 + 0.13 * f.nightMiddle.w);
 		radiance = mix(radiance * 1.25, wfc, wf);
 	}
-	float3 c = imGrade(imTonemap(radiance, f.tonemap), f);
+	// (the hand: no vibrance, its light's colour half kept: a netherite sword's warm grey went maroon by a torch and purple by the sky)
+	float3 c = hand ? imTonemap(radiance, f.tonemap) : imGrade(imTonemap(radiance, f.tonemap), f);
 	// items in the world that give off light (a lava bucket's lava, a torch's flame, glowstone dust, blaze rods): their hot,
 	// saturated warm pixels glow past white, so the bloom haloes them and they aren't dark in a cave
 	if (item) {
 		float hi = max(max(base.r, base.g), base.b), lo = min(min(base.r, base.g), base.b);
 		// (warm, or the soul flame's cyan: green and blue well over red, and bright)
-		float warm = step(base.b, base.g) * step(base.g, base.r);
+		// (a flame's yellow-orange only, and bright: a red mushroom's cap and other warm items lit up as if they glowed)
+		float warm = step(base.b, base.g) * step(base.g, base.r) * smoothstep(0.3, 0.5, base.g / max(base.r, 1e-3));
 		float soul = step(base.r * 1.6, base.g) * step(base.r * 1.6, base.b) * smoothstep(0.7, 0.9, hi);
-		float e = max(warm, soul) * smoothstep(0.55, 0.85, hi) * smoothstep(0.45, 0.75, (hi - lo) / max(hi, 1e-3));
+		float e = max(warm, soul) * smoothstep(0.75, 0.92, hi) * smoothstep(0.45, 0.75, (hi - lo) / max(hi, 1e-3));
 		c += base * (1.6 * e);
 	}
 	return pow(max(c, 0.0), 1.0 / 2.2);

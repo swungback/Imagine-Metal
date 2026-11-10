@@ -496,7 +496,8 @@ static float4 imSkyPixel(ImSkyOut in, constant ImFrame &f, constant float4x4 &ro
 			if (vis > 0.0) {
 				float3 axis = normalize(float3(0.35, 0.25, 0.9));
 				float band = exp(-pow(dot(d, axis) * 3.2, 2.0));
-				float2 nq = float2(atan2(d.z, d.x), d.y) * float2(2.2, 4.0);
+				// (no atan2: its jump at due west drew a straight line from the horizon up the night sky, "line there??")
+				float2 nq = d.xz / (d.y + 0.35) * 2.2;
 				float nb = 0.0, amp = 0.5;
 				for (int i = 0; i < 4; i++) {
 					nb += amp * imValueNoise(nq);

@@ -31,7 +31,8 @@ public final class Bloom {
 	private static float toe() {
 		float cave = ImagineFrame.cave, night = ImagineFrame.night;
 		float dd = Settings.intenseDeepDark ? Haze.deepDark : 0f;
-		return 0.3f * cave + 0.3f * night * (1f - cave) + 0.35f * dd;
+		// (caves 0.42, was 0.3: a trial chamber lit by its bulbs read flat and vanilla-bright)
+		return 0.42f * cave + 0.3f * night * (1f - cave) + 0.35f * dd;
 	}
 
 	/**
@@ -174,7 +175,8 @@ public final class Bloom {
 				prevX = Reflections.camX;
 				prevY = Reflections.camY;
 				prevZ = Reflections.camZ;
-				ImNative.bloomAo(state, Settings.ssao && Reflections.valid ? Settings.ssaoStrength : 0f, clips);
+				// (stronger underground: block-lit rooms had no depth to their corners)
+				ImNative.bloomAo(state, Settings.ssao && Reflections.valid ? Math.min(Settings.ssaoStrength * (1f + 0.6f * ImagineFrame.cave), 1f) : 0f, clips);
 				float s = Settings.debug == 3 ? -Math.max(strength, 0.5f) : strength;
 				if (ImNative.bloomRender(MetalBridge.enc(encoder), state, MetalBridge.textureHandle(src), MetalBridge.textureHandle(dst), s,
 					hdr ? HDR_THRESHOLD : LDR_THRESHOLD, hdr ? HDR_KNEE : LDR_KNEE, (hdr ? HDR_HAZE : LDR_HAZE) * (1f - 0.75f * Math.max(ImagineFrame.cave, ImagineFrame.night * 0.6f)), toe(), err, 1024) != 0)
