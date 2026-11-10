@@ -38,6 +38,8 @@ public final class Settings {
 	public static volatile boolean wet = Engine.flag("imaginemetal.wet", true);
 	public static volatile boolean intenseDeepDark = Engine.flag("imaginemetal.intenseDeepDark", true);
 	public static volatile boolean taa = Engine.flag("imaginemetal.taa", true);
+	/** The cutout (leaves) depth pre-pass (mcopt OwnTerrain.leafPrepass): not saved; -Dmcopt.own.prepass=false starts with it off. */
+	public static volatile boolean leafPrepass = !"false".equalsIgnoreCase(System.getProperty("mcopt.own.prepass", "true"));
 	public static volatile boolean rainbows = Engine.flag("imaginemetal.rainbows", true);
 	public static volatile boolean netherFog = Engine.flag("imaginemetal.netherFog", true);
 	/** mobs, block entities, dropped items and particles lit as the terrain is (EntityShade; read when their shaders are made) */

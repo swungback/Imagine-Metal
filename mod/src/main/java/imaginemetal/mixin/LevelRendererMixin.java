@@ -7,6 +7,7 @@ import imaginemetal.Reflections;
 import imaginemetal.Hdr;
 import imaginemetal.ImagineFrame;
 import imaginemetal.LightVolume;
+import imaginemetal.PassTimes;
 import imaginemetal.Shadows;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
@@ -34,6 +35,47 @@ abstract class LevelRendererMixin {
 	@Inject(method = "render", at = @At("RETURN"))
 	private void imaginemetal$hdrEnd(CallbackInfo ci) {
 		Hdr.end();
+		PassTimes.tag(PassTimes.HUD);  // (the hand and the GUI come after the level)
+	}
+
+	// ---- the per-pass GPU timing (PassTimes): which of the level's steps the game's passes draw (require = 0: timing only) ----
+
+	@Inject(method = "lambda$addSkyPass$0", at = @At("HEAD"), require = 0)
+	private void imaginemetal$tagSky(CallbackInfo ci) {
+		PassTimes.tag(PassTimes.SKY);
+	}
+
+	@Inject(method = "executeSolid", at = @At("HEAD"), require = 0)
+	private void imaginemetal$tagTerrain(CallbackInfo ci) {
+		PassTimes.tag(PassTimes.TERRAIN);
+	}
+
+	@Inject(method = "executeSolid", at = @At(value = "INVOKE",
+		target = "Lnet/minecraft/client/renderer/feature/FeatureRenderDispatcher$PreparedFrame;executeSolid(Lcom/mojang/renderpearl/api/commands/RenderPass;)V"),
+		require = 0)
+	private void imaginemetal$tagEntities(CallbackInfo ci) {
+		PassTimes.tag(PassTimes.ENTITIES);
+	}
+
+	@Inject(method = "executeClassicTransparency", at = @At("HEAD"), require = 0)
+	private void imaginemetal$tagTranslucent(CallbackInfo ci) {
+		PassTimes.tag(PassTimes.TRANSLUCENT);
+	}
+
+	@Inject(method = "executeOit", at = @At("HEAD"), require = 0)
+	private void imaginemetal$tagOit(CallbackInfo ci) {
+		PassTimes.tag(PassTimes.TRANSLUCENT);
+	}
+
+	@Inject(method = "executeOutline", at = @At("HEAD"), require = 0)
+	private void imaginemetal$tagOverlay(CallbackInfo ci) {
+		PassTimes.tag(PassTimes.OVERLAY);
+	}
+
+	/** After the main pass: the frame graph's other passes (clouds, weather, the world border). */
+	@Inject(method = "lambda$addMainPass$0", at = @At("RETURN"), require = 0)
+	private void imaginemetal$tagAfterMain(CallbackInfo ci) {
+		PassTimes.tag(PassTimes.WEATHER);
 	}
 
 	/** The shadow map, after the frame's values and before the level's passes (the frame graph) draw anything. */

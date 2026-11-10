@@ -80,3 +80,15 @@ id<MTLCommandBuffer> mc_frame_cmd(Enc *enc);  // the frame's command buffer with
 void mc_render_resume(Enc *enc, id<MTLComputeCommandEncoder> compute);
 int mc_render_is_open(Enc *enc);
 void mc_render_reopen(Enc *enc);  // (Imagine Metal) after a blit ended the open pass
+
+// (Imagine Metal) the per-pass GPU timing (imtime.m). Tags, as imaginemetal.Perf names them.
+enum { IMT_MISC, IMT_SHADOW, IMT_LIGHT, IMT_SKY, IMT_TERRAIN, IMT_ENTITIES, IMT_TRANSLUCENT, IMT_OVERLAY, IMT_WEATHER, IMT_CAPTURE, IMT_SHAFTS,
+	IMT_AO, IMT_BLOOM, IMT_RESOLVE, IMT_TAA, IMT_HUD, IMT_PRESENT, IMT_CULL, IMT_CLOUDS };
+void imt_rp(MTLRenderPassDescriptor *rp, int tag);  // our own render passes: the descriptor's timestamps under tag (-1 the current one)
+void imt_open_render(MTLRenderPassDescriptor *rp);  // mcopt's render encoders (openRender)
+void imt_cpd(MTLComputePassDescriptor *d, int tag);
+id<MTLComputeCommandEncoder> imt_compute(id<MTLCommandBuffer> c, int tag, MTLDispatchType type);  // retained
+id<MTLBlitCommandEncoder> imt_blit(id<MTLCommandBuffer> c, int tag);  // retained
+void imt_present(void);
+void imt_commit(Enc *enc, id<MTLCommandBuffer> c);
+int mc_render_split(Enc *enc);

@@ -953,7 +953,7 @@ final class OwnFrag {
 				if (this.a1sDidSplit) split = true;
 			}
 			if (SPLIT_A || SPLIT_NEAR > 0) oSample = false;
-			else this.layer(c, 1, base | 1, d, arena, table, recs, u, atlas, sampler, light, lightSampler, this.lists, this.args);
+			else this.cutoutLayer(c, base | 1, d, arena, table, recs, u, atlas, sampler, light, lightSampler, this.lists, this.args);
 			// the oracle's phase A redraw before the split: the unit test between the phases rewrites phase A's arguments (its depth
 			// then lacks only phase B's quads, a handful in steady state)
 			if (oSample) {
@@ -983,22 +983,42 @@ final class OwnFrag {
 				// phase A's farther sections' solid units, then all of phase A's cutout units (both banks), in an encoder of their own;
 				// then phase B in another (it reads the test's arguments)
 				int bank = c.listCount(), ex = this.a2Exact ? K_EXACT : 0;
+				// (Imagine Metal: phase A's cutout depth first, both banks, so the far solid behind leaves fails its depth test and the
+				// cutout's colour below is shaded once a pixel; the table draws (ex) keep the plain order)
+				boolean pre = ex == 0 && prepassOn(c);
+				if (pre) {
+					this.preMode = 1;
+					this.layer(c, 1, base | 1, d, arena, table, recs, u, atlas, sampler, light, lightSampler, this.lists, this.args, 0);
+					this.layer(c, 1, base | 1, d, arena, table, recs, u, atlas, sampler, light, lightSampler, this.lists, this.args, bank);
+					this.preMode = 0;
+				}
 				this.layer(c, 0, base | ex, d, arena, table, recs, u, atlas, sampler, light, lightSampler, this.lists, this.args, bank);
 				if (ex != 0) this.bound = false;  // (after the table draws: bind everything again)
 				if (A2_ENC > 0 && split) this.a2Split();
+				if (pre) this.preMode = 2;
 				this.layer(c, 1, base | 1 | ex, d, arena, table, recs, u, atlas, sampler, light, lightSampler, this.lists, this.args, 0);
 				if (ex != 0) this.bound = false;
 				if (A2_ENC > 1 && split) this.a2Split();
 				this.layer(c, 1, base | 1 | ex, d, arena, table, recs, u, atlas, sampler, light, lightSampler, this.lists, this.args, bank);
+				this.preMode = 0;
 				if (ex != 0) this.bound = false;
 				this.afterLater(c, split, late, uoccMode, table, recs);
 			} else if (SPLIT_A) {
 				// phase A's cutout units after the test, in an encoder of their own, then phase B in another (it reads the test's arguments)
-				this.layer(c, 1, base | 1, d, arena, table, recs, u, atlas, sampler, light, lightSampler, this.lists, this.args);
+				this.cutoutLayer(c, base | 1, d, arena, table, recs, u, atlas, sampler, light, lightSampler, this.lists, this.args);
 				this.afterLater(c, split, late, uoccMode, table, recs);
 			}
+			// phase B (Imagine Metal: its cutout depth first, then its solid, then the cutout's colour against that depth)
+			boolean preB = prepassOn(c);
+			if (preB) {
+				this.preMode = 1;
+				this.layer(c, 1, base | 1, d, arena, table, recs, u, atlas, sampler, light, lightSampler, this.listsB, this.bArgs);
+				this.preMode = 0;
+			}
 			this.layer(c, 0, base, d, arena, table, recs, u, atlas, sampler, light, lightSampler, this.listsB, this.bArgs);
+			if (preB) this.preMode = 2;
 			this.layer(c, 1, base | 1, d, arena, table, recs, u, atlas, sampler, light, lightSampler, this.listsB, this.bArgs);
+			this.preMode = 0;
 			if (oSample) {
 				this.oracleLists(c, base, d, arena, table, recs, u, atlas, sampler, light, lightSampler, this.listsB, this.bArgs);
 				this.oracleEnd(c);
@@ -1092,6 +1112,30 @@ final class OwnFrag {
 		this.layer(c, layer, kind, d, arena, table, recs, u, atlas, sampler, light, lightSampler, lists, args, 0);
 	}
 
+	/** (Imagine Metal) the cutout depth pre-pass's state for layer(): 0 off, 1 drawing the pre-pass, 2 the colour after it. */
+	private int preMode;
+
+	/**
+	 * (Imagine Metal) whether the cutout layer gets its depth pre-pass this frame: OwnTerrain.leafPrepass (live; Imagine Metal's
+	 * benchmark switches it), not with the probes' or the oracle's variants, not with mesh shading (its own phases).
+	 */
+	private static boolean prepassOn(Config c) {
+		return OwnTerrain.leafPrepass && !c.mesh && !c.posonly && !c.occ && !ORACLE;
+	}
+
+	/** (Imagine Metal) one cutout layer: its depth pre-pass, then its colour against it (or plainly, without the pre-pass). */
+	private void cutoutLayer(Config c, int kind, long d, long arena, long table, long recs, long u, GpuTextureView atlas, GpuSampler sampler,
+		GpuTextureView light, GpuSampler lightSampler, long lists, long args) {
+		boolean pre = prepassOn(c) && (kind & K_EXACT) == 0;
+		if (pre) {
+			this.preMode = 1;
+			this.layer(c, 1, kind, d, arena, table, recs, u, atlas, sampler, light, lightSampler, lists, args);
+			this.preMode = 2;
+		}
+		this.layer(c, 1, kind, d, arena, table, recs, u, atlas, sampler, light, lightSampler, lists, args);
+		this.preMode = 0;
+	}
+
 	/** bank: an offset added to every list id (splitNear: c.listCount() for phase A's farther sections). */
 	private void layer(Config c, int layer, int kind, long d, long arena, long table, long recs, long u, GpuTextureView atlas, GpuSampler sampler,
 		GpuTextureView light, GpuSampler lightSampler, long lists, long args, int bank) {
@@ -1104,6 +1148,11 @@ final class OwnFrag {
 				MemoryUtil.memPutInt(d, (kind & K_EXACT) != 0 ? 0 : id * this.listCap);  // (a1Exact: the table's entries are absolute)
 				long argsOffset = c.mesh ? (lists(c) * 5L + id * 3L) * 4 : id * 20L;
 				int k = kind | (lean == 1 ? K_LEAN : 0);
+				// (Imagine Metal, the cutout depth pre-pass: preMode 1 the list's depth alone (own_fs_alpha, biased a unit nearer), 2 its
+				// colour against that depth (EQUAL, the same bias): each cutout pixel shaded once, not once per leaf over it. A list
+				// whose pre-pass couldn't be made is drawn as before, or it would be invisible)
+				if (this.preMode == 1) k = (k & ~15) | 6 | K_BIAS;
+				else if (this.preMode == 2 && !this.failed.contains((k & ~15) | 6 | K_BIAS)) k |= K_EQUAL | K_BIAS;
 				if (this.failed.contains(k)) continue;
 				try {
 					long ar = args;

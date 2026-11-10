@@ -101,7 +101,7 @@ void im_light_step(Enc *enc, ImLight *l, int shiftX, int shiftY, int shiftZ, int
 	id<MTLCommandBuffer> cmd = mc_frame_cmd(enc);
 	if (l->pending > 0) {
 		@autoreleasepool {
-			id<MTLBlitCommandEncoder> bl = [cmd blitCommandEncoder];
+			id<MTLBlitCommandEncoder> bl = [imt_blit(cmd, IMT_LIGHT) autorelease];
 			bl.label = @"Imagine Metal light seeds";
 			for (int i = 0; i < l->pending; i++) {
 				MTLRegion r = l->pendRegion[i];
@@ -117,7 +117,7 @@ void im_light_step(Enc *enc, ImLight *l, int shiftX, int shiftY, int shiftZ, int
 	@autoreleasepool {
 		// reset (the first step, a jump): the previous volume is read shifted wholly out of the box, so it counts as empty
 		if (reset) shiftX = l->sx * 4;
-		id<MTLComputeCommandEncoder> c = [cmd computeCommandEncoder];
+		id<MTLComputeCommandEncoder> c = [imt_compute(cmd, IMT_LIGHT, MTLDispatchTypeSerial) autorelease];
 		c.label = @"Imagine Metal light step";
 		int next = 1 - l->cur;
 		[c setComputePipelineState:l->step];

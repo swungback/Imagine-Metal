@@ -30,6 +30,9 @@ public final class Benchmark {
 	private static final List<Result> results = new ArrayList<>();
 	private static Map<Field, Object> saved;
 	private static boolean wasOff;
+	private static final double[] refPass = new double[PassTimes.TAGS];
+	private static double refPassFrame;
+	private static int refPassN;
 
 	private Benchmark() {
 	}
@@ -45,6 +48,7 @@ public final class Benchmark {
 		steps = new ArrayList<>();
 		steps.add(new Step("everything on", () -> {
 		}));
+		steps.add(new Step("leaf depth pre-pass off", () -> Settings.leafPrepass = false));
 		steps.add(new Step("shadows off", () -> Settings.shadows = false));
 		steps.add(new Step("shadow range 96", () -> Settings.shadowRange = Math.min(Settings.shadowRange, 96f)));
 		steps.add(new Step("ambient occlusion off", () -> Settings.ssao = false));
@@ -86,6 +90,9 @@ public final class Benchmark {
 		steps = ab;
 		index = -1;
 		results.clear();
+		java.util.Arrays.fill(refPass, 0.0);
+		refPassFrame = 0.0;
+		refPassN = 0;
 		say("Benchmark: stand still and don't touch anything, about " + Math.round(steps.size() * (SETTLE + MEASURE)) + " seconds...", true);
 		next();
 	}
@@ -111,6 +118,7 @@ public final class Benchmark {
 		if (frames < 0) {
 			frames = 0;
 			measureStart = now;
+			PassTimes.bench().clear();
 			return;
 		}
 		frames++;
@@ -120,6 +128,16 @@ public final class Benchmark {
 			Result r = new Result(steps.get(index).name(), fps, 1000.0 * m / Math.max(frames, 1));
 			results.add(r);
 			System.out.println("[Imagine Metal] benchmark: " + String.format(Locale.ROOT, "%-36s %6.1f fps %6.2f ms", r.name, r.fps, r.ms));
+			// (and where the GPU's time went in that window, per pass)
+			PassTimes.Window w = PassTimes.bench();
+			if (!w.empty()) {
+				System.out.println("[Imagine Metal] benchmark passes: " + String.format(Locale.ROOT, "%-36s ", r.name) + w.describe());
+				if (r.name.equals(REF)) {
+					refPassN++;
+					for (int t = 0; t < PassTimes.TAGS; t++) refPass[t] += w.ms(t);
+					refPassFrame += w.frameMs();
+				}
+			}
 			next();
 		}
 	}
@@ -153,6 +171,18 @@ public final class Benchmark {
 			String line = String.format(Locale.ROOT, "  %-36s %+5.1f ms  (%.0f fps)", r.name, r.ms, r.fps);
 			System.out.println("[Imagine Metal] benchmark: " + line);
 			if (shown++ < 10) Live.chat(line.trim());
+		}
+		if (refPassN > 0) {
+			// the GPU's time per pass with everything on (the reference windows averaged), the most expensive first
+			List<Integer> order = new ArrayList<>();
+			for (int t = 0; t < PassTimes.TAGS; t++) if (refPass[t] / refPassN >= 0.05) order.add(t);
+			order.sort((a, b) -> Double.compare(refPass[b], refPass[a]));
+			StringBuilder b = new StringBuilder(String.format(Locale.ROOT, "benchmark: GPU %.1f ms a frame with everything on:", refPassFrame / refPassN));
+			for (int i = 0; i < order.size(); i++) {
+				int t = order.get(i);
+				b.append(i == 0 ? " " : ", ").append(PassTimes.NAMES[t]).append(String.format(Locale.ROOT, " %.1f", refPass[t] / refPassN));
+			}
+			say(b.toString(), true);
 		}
 		say("benchmark done (all results in latest.log)", true);
 		if (wasOff) Live.setOff(true);

@@ -38,6 +38,10 @@ final class ImNative {
 	private static final MethodHandle SKY_DRAW_END = fn("im_sky_draw_end", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT,
 		JAVA_LONG, JAVA_LONG, JAVA_INT), false);
 	private static final MethodHandle GPU_MS = fn("im_gpu_ms", FunctionDescriptor.of(java.lang.foreign.ValueLayout.JAVA_DOUBLE), false);
+	// the per-pass GPU timing (imtime.m, PassTimes)
+	private static final MethodHandle TIME_ENABLE = fn("im_time_enable", FunctionDescriptor.ofVoid(JAVA_INT), false);
+	private static final MethodHandle TIME_TAG = fn("im_time_tag", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_INT, JAVA_INT), false);
+	private static final MethodHandle TIME_READ = fn("im_time_read", FunctionDescriptor.ofVoid(JAVA_LONG), false);
 	private static final MethodHandle SKY_TEXTURES = fn("im_sky_textures", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_INT,
 		JAVA_LONG, JAVA_INT, JAVA_INT), false);
 
@@ -206,6 +210,30 @@ final class ImNative {
 	static int skyDraw(long enc, long state, long target, long frame, int frameBytes, long rot, int mode, long err, int errCap) {
 		try {
 			return (int) SKY_DRAW.invokeExact(enc, state, target, frame, frameBytes, rot, mode, err, errCap);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
+	static void timeEnable(boolean on) {
+		try {
+			TIME_ENABLE.invokeExact(on ? 1 : 0);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
+	static int timeTag(long enc, int tag, boolean inPass) {
+		try {
+			return (int) TIME_TAG.invokeExact(enc, tag, inPass ? 1 : 0);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
+	static void timeRead(long out) {
+		try {
+			TIME_READ.invokeExact(out);
 		} catch (Throwable t) {
 			throw new IllegalStateException(t);
 		}

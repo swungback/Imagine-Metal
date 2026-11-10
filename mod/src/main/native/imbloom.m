@@ -259,6 +259,8 @@ static void imbPass3(id<MTLCommandBuffer> cmd, id<MTLTexture> target, MTLLoadAct
 	rp.colorAttachments[0].texture = target;
 	rp.colorAttachments[0].loadAction = load;
 	rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+	// (the pass timing: by what the pass is)
+	imt_rp(rp, [label hasSuffix:@"occlusion"] ? IMT_AO : [label hasSuffix:@"resolve"] ? IMT_RESOLVE : IMT_BLOOM);
 	id<MTLRenderCommandEncoder> r = [cmd renderCommandEncoderWithDescriptor:rp];
 	r.label = label;
 	[r setViewport:(MTLViewport) {0, 0, (double) target.width, (double) target.height, 0, 1}];
@@ -380,6 +382,7 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 				rp.colorAttachments[0].texture = b->shaftTex;
 				rp.colorAttachments[0].loadAction = MTLLoadActionDontCare;
 				rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+				imt_rp(rp, IMT_SHAFTS);
 				id<MTLRenderCommandEncoder> r = [cmd renderCommandEncoderWithDescriptor:rp];
 				r.label = @"Imagine Metal light shafts";
 				[r setViewport:(MTLViewport) {0, 0, (double) b->shaftTex.width, (double) b->shaftTex.height, 0, 1}];
@@ -506,6 +509,7 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 				rp.colorAttachments[1].texture = next;
 				rp.colorAttachments[1].loadAction = MTLLoadActionDontCare;
 				rp.colorAttachments[1].storeAction = MTLStoreActionStore;
+				imt_rp(rp, IMT_TAA);
 				id<MTLRenderCommandEncoder> r = [cmd renderCommandEncoderWithDescriptor:rp];
 				r.label = @"Imagine Metal TAA";
 				[r setViewport:(MTLViewport) {0, 0, (double) dst.width, (double) dst.height, 0, 1}];

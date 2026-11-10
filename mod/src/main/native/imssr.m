@@ -69,7 +69,7 @@ int im_ssr_capture(Enc *enc, ImSsr *s, id<MTLTexture> color, id<MTLTexture> dept
 			return 1;
 		}
 		id<MTLCommandBuffer> cmd = mc_frame_cmd(enc);
-		id<MTLBlitCommandEncoder> b = [cmd blitCommandEncoder];
+		id<MTLBlitCommandEncoder> b = [imt_blit(cmd, IMT_CAPTURE) autorelease];
 		b.label = @"Imagine Metal reflection history";
 		MTLOrigin o = {0, 0, 0};
 		[b copyFromTexture:color sourceSlice:0 sourceLevel:0 sourceOrigin:o sourceSize:MTLSizeMake(color.width, color.height, 1)
@@ -125,7 +125,7 @@ int im_under_capture(Enc *enc, ImSsr *s, id<MTLTexture> color, id<MTLTexture> de
 		// nether portal, the translucent torches and the selection outline drew nothing)
 		reopen = mc_render_is_open(enc);
 		id<MTLCommandBuffer> cmd = mc_frame_cmd(enc);
-		id<MTLBlitCommandEncoder> b = [cmd blitCommandEncoder];
+		id<MTLBlitCommandEncoder> b = [imt_blit(cmd, IMT_CAPTURE) autorelease];
 		b.label = @"Imagine Metal under the water";
 		MTLOrigin o = {0, 0, 0};
 		if (color)

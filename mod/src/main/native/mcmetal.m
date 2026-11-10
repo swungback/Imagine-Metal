@@ -821,9 +821,7 @@ static id<MTLBlitCommandEncoder> blit(Enc *enc) {
 	if (!enc->blit) {
 		encCounters[2]++;
 		endRender(enc);
-		@autoreleasepool {
-			enc->blit = [[cmd(enc) blitCommandEncoder] retain];
-		}
+		enc->blit = imt_blit(cmd(enc), -1);
 	}
 	return enc->blit;
 }
@@ -872,6 +870,7 @@ id<MTLComputeCommandEncoder> mc_profiled_compute(Enc *enc, id<MTLCommandBuffer> 
 			lastComputeGroup = enc->sampleCount / 4;
 			int group = enc->sampleCount / 4;
 			enc->sampleCount += 4;
+			imt_cpd(d, c == enc->pre ? IMT_CULL : -1);
 			id<MTLComputeCommandEncoder> ce = [[c computeCommandEncoderWithDescriptor:d] retain];
 			if (group < 512) {
 				enc->sampleEnc[group] = [ce retain];
@@ -879,7 +878,7 @@ id<MTLComputeCommandEncoder> mc_profiled_compute(Enc *enc, id<MTLCommandBuffer> 
 			}
 			return ce;
 		}
-		return [[c computeCommandEncoderWithDispatchType:type] retain];
+		return imt_compute(c, c == enc->pre ? IMT_CULL : -1, type);
 	}
 }
 
@@ -893,14 +892,14 @@ id<MTLBlitCommandEncoder> mc_profiled_blit(Enc *enc, id<MTLCommandBuffer> c) {
 			d.sampleBufferAttachments[0].endOfEncoderSampleIndex = enc->sampleCount + 1;
 			int group = enc->sampleCount / 4;
 			enc->sampleCount += 4;
-			id<MTLBlitCommandEncoder> be = [[c blitCommandEncoderWithDescriptor:d] retain];
+			id<MTLBlitCommandEncoder> be = [[c blitCommandEncoderWithDescriptor:d] retain];  // (not in the pass timing while tracing)
 			if (group < 512) {
 				enc->sampleEnc[group] = [be retain];
 				enc->sampleKind[group] = 'B';
 			}
 			return be;
 		}
-		return [[c blitCommandEncoder] retain];
+		return imt_blit(c, -1);
 	}
 }
 
@@ -926,9 +925,7 @@ id<MTLComputeCommandEncoder> mc_pre_compute(Enc *enc) {
 static id<MTLBlitCommandEncoder> preBlit(Enc *enc) {
 	if (!enc->preBlit) {
 		mc_pre_end_encoders(enc);
-		@autoreleasepool {
-			enc->preBlit = [[mc_pre(enc) blitCommandEncoder] retain];
-		}
+		enc->preBlit = imt_blit(mc_pre(enc), IMT_CULL);
 	}
 	return enc->preBlit;
 }
@@ -969,6 +966,7 @@ id<MTLCommandBuffer> mc_enc_commit(Enc *enc) {
 	endRender(enc);
 	id<MTLCommandBuffer> c = cmd(enc);
 	if (diagOn) [c addCompletedHandler:^(id<MTLCommandBuffer> cb) { diagReport("main", n, t, big, mainBytes, cb); }];
+	imt_commit(enc, c);  // (Imagine Metal: this submit's pass timing read when it completes; the next submit's chosen)
 	[c commit];
 	if (gcOn) {  // -Dmcopt.metal.gpuCount: the next frame's encoders get a new record and frame index
 		gcFrame++;
@@ -1234,6 +1232,7 @@ static void openRender(Enc *enc, MTLRenderPassDescriptor *rp) {
 	}
 	int renderGroup = enc->samples && rp.sampleBufferAttachments[0].sampleBuffer == enc->samples ? enc->sampleCount / 4 - 1 : -1;
 	int counted = gcOn && gcFrame % gcEvery == 0;  // -Dmcopt.metal.gpuCount: see GPU counting above; nothing without the flag
+	imt_open_render(rp);  // (Imagine Metal: the per-pass GPU timing, imtime.m)
 	if (counted) gcBeforeOpen(enc, rp, cmd(enc));
 	else if (gcOn) rp.visibilityResultBuffer = nil;  // a frame between counted ones (a kept descriptor may still name the buffer)
 	enc->render = [[cmd(enc) renderCommandEncoderWithDescriptor:rp] retain];
@@ -1505,6 +1504,18 @@ void mc_render_resume(Enc *enc, id<MTLComputeCommandEncoder> compute) {
 // something outside the pass (a blit) ended it; the caller binds the pass's state again (MetalBridge.restorePass).
 int mc_render_is_open(Enc *enc) {
 	return enc->render != nil;
+}
+
+// (Imagine Metal, the pass timing) the open render encoder ended and the same attachments opened again, loaded: 0 when it can't be
+// done exactly (an attachment's contents dead or memoryless), nothing changed then.
+int mc_render_split(Enc *enc) {
+	if (!enc->render || enc->dead) return 0;
+	for (int i = 0; i < enc->colorCount; i++)
+		if (enc->colors[i] && (enc->colors[i].storageMode == MTLStorageModeMemoryless || enc->colors[i].sampleCount != 1)) return 0;
+	if (enc->depth && (enc->depth.storageMode == MTLStorageModeMemoryless || enc->depth.sampleCount != 1)) return 0;
+	endRender(enc);
+	mc_render_reopen(enc);
+	return 1;
 }
 
 void mc_render_reopen(Enc *enc) {
@@ -1835,6 +1846,8 @@ void mc_present(Enc *enc, id<CAMetalDrawable> drawable, id<MTLTexture> src) {
 		rp.colorAttachments[0].texture = drawable.texture;
 		rp.colorAttachments[0].loadAction = MTLLoadActionDontCare;
 		rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+		imt_rp(rp, IMT_PRESENT);
+		imt_present();
 		id<MTLRenderCommandEncoder> r = [cmd(enc) renderCommandEncoderWithDescriptor:rp];
 		[r setRenderPipelineState:enc->ctx->present];
 		[r setFragmentTexture:src atIndex:0];
@@ -1931,6 +1944,7 @@ static void pqEncodePresent(id<CAMetalDrawable> drawable, int slot, uint64_t wai
 }
 
 int mc_present_queued(Enc *enc, id<CAMetalDrawable> drawable, id<MTLTexture> src) {
+	imt_present();
 	int k = pqFill(enc, src);
 	if (k < 0) return 0;
 	if (pqDrawable) {  // a present encoded but not yet submitted (two in one frame): the newer one wins, free the older slot
@@ -1958,6 +1972,7 @@ static uint64_t pqAcq;  // this frame's hand-off, published by pqSubmit after th
 void mc_cadence_present(id<CAMetalDrawable> drawable, int slot);
 
 int mc_present_queued_acquire(Enc *enc, CAMetalLayer *layer, id<MTLTexture> src, long cadence) {
+	imt_present();
 	int k = pqFill(enc, src);
 	if (k < 0) return 0;
 	if (pqAcq) atomic_store(&pqBusy[pqAcq & 3], 0);  // two presents in one frame: the newer one wins

@@ -123,6 +123,7 @@ public final class ImagineFrame {
 		camView = camera.viewRotationMatrix != null ? new org.joml.Matrix4f(camera.viewRotationMatrix) : null;
 		Sky.active = false;
 		Clouds.frameStart();
+		mcopt.metal.own.OwnTerrain.leafPrepass = Settings.leafPrepass;
 		if (failed || !Engine.TERRAIN) return;
 		try {
 			long t0 = Perf.start();

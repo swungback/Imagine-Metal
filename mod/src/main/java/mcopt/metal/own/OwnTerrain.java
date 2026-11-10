@@ -113,6 +113,12 @@ public final class OwnTerrain {
 	// lie many deep: each layer was shaded in full before the nearer one hid it; with the depth first only the visible one is)
 	private static final boolean PREPASS = !"false".equalsIgnoreCase(System.getProperty("mcopt.own.prepass", "true"));
 	/**
+	 * (Imagine Metal) the same pre-pass on the frag path (OwnFrag, its unit-occlusion phases), live: the path the game actually
+	 * takes with the indie profile (uocc). PREPASS above only ever reached the base path's drawList, so on that path there was no
+	 * pre-pass at all until 2026-11-10. imaginemetal.Settings.leafPrepass sets it every frame (the benchmark switches it).
+	 */
+	public static volatile boolean leafPrepass = PREPASS;
+	/**
 	 * -Dmcopt.own.quads=true: occlusion per quad. The cull lists every unit it passes; phase A (pre command buffer) lists the
 	 * quads visible last frame as an index list built on the GPU; the pass splits once for a depth pyramid; every listed quad is
 	 * tested with its own corners and the newly visible are drawn (phase B). Exact as the unit version, finer grained.

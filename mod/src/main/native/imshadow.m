@@ -131,6 +131,7 @@ void im_shadow_render(Enc *enc, ImShadow *s, const void *frame, int frameBytes, 
 		rp.depthAttachment.storeAction = MTLStoreActionStore;
 		rp.renderTargetWidth = (NSUInteger) s->resolution;
 		rp.renderTargetHeight = (NSUInteger) s->resolution;
+		imt_rp(rp, IMT_SHADOW);
 		id<MTLRenderCommandEncoder> r = [cmd renderCommandEncoderWithDescriptor:rp];
 		r.label = @"Imagine Metal shadow map";
 		[r setViewport:(MTLViewport) {0, 0, (double) s->resolution, (double) s->resolution, 0, 1}];

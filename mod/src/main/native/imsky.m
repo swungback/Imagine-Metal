@@ -113,6 +113,7 @@ static int im_sky_draw_any(Enc *enc, ImSky *s, id<MTLTexture> target, id<MTLText
 		rp.colorAttachments[0].texture = target;
 		rp.colorAttachments[0].loadAction = mode == 0 ? MTLLoadActionDontCare : MTLLoadActionLoad;  // (the sky writes every pixel)
 		rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+		imt_rp(rp, mode == 1 ? IMT_CLOUDS : IMT_SKY);
 		id<MTLRenderCommandEncoder> r = [cmd renderCommandEncoderWithDescriptor:rp];
 		r.label = @"Imagine Metal sky";
 		[r setViewport:(MTLViewport) {0, 0, (double) target.width, (double) target.height, 0, 1}];
