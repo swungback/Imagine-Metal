@@ -22,6 +22,8 @@ abstract class WindowMixin {
 		Window.FramebufferSize s = cir.getReturnValue();
 		int sw = w.getScreenWidth(), sh = w.getScreenHeight();
 		if (sw <= 0 || sh <= 0) return;
+		sw = Resolution.scaled(sw);
+		sh = Resolution.scaled(sh);
 		if (s.width() > sw || s.height() > sh) cir.setReturnValue(new Window.FramebufferSize(Math.min(s.width(), sw), Math.min(s.height(), sh)));
 	}
 
@@ -30,7 +32,10 @@ abstract class WindowMixin {
 		if (Resolution.RETINA) return;
 		Window w = (Window) (Object) this;
 		int sw = w.getScreenWidth(), sh = w.getScreenHeight();
-		if (sw <= 0 || sh <= 0 || newWidth <= sw && newHeight <= sh) return;
+		if (sw <= 0 || sh <= 0) return;
+		sw = Resolution.scaled(sw);
+		sh = Resolution.scaled(sh);
+		if (newWidth <= sw && newHeight <= sh) return;
 		ci.cancel();
 		((WindowAccessor) (Object) this).imaginemetal$onFramebufferResize(Math.min(newWidth, sw), Math.min(newHeight, sh));
 	}

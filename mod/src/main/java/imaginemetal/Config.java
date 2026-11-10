@@ -22,6 +22,9 @@ public final class Config {
 		# to the Retina screen, as Sodium Extra's "Reduce resolution on macOS" does): 4x fewer pixels, much faster.
 		# true: every Retina pixel (2880x1800 for that window): sharper, much slower.
 		imaginemetal.retina=false
+		# Experiment (with retina=false): the share of the window's size the game draws at on each axis (0.5 to 1; 0.75 draws
+		# 1080x675 for a 1440x900 window). Fewer pixels to shade: faster, softer (menus and HUD too).
+		imaginemetal.renderScale=1
 		#
 		# Shadows from the sun and moon.
 		imaginemetal.shadows=true

@@ -171,6 +171,11 @@ public final class SettingsScreen extends OptionsSubScreen {
 						.withValues(1024, 2048, 4096)
 						.withTooltip(v -> Tooltip.create(Component.literal("Shadow map size: sharper leaf shadows with more. " + RESTART)))
 						.create(0, 0, 150, 20, Component.literal("Shadow detail*"), (b, v) -> Settings.shadowRes = v));
+				this.list.addBig(CycleButton.<Integer>builder(v -> Component.literal(v + "%"), nearestScale(Settings.renderScale))
+					.withValues(100, 85, 75, 67)
+					.withTooltip(v -> Tooltip.create(Component.literal(
+						"Experiment: draw the whole game at this share of the window's size and let the Mac scale it up. Fewer pixels to shade, so faster; softer, menus and HUD too. " + RESTART)))
+					.create(0, 0, 310, 20, Component.literal("Render scale*"), (b, v) -> Settings.renderScale = v));
 				this.list.addBig(toggle("Imagine Metal lighting*", Settings.terrain, v -> Settings.terrain = v,
 					"Off: vanilla's lighting on the terrain, for comparing. " + RESTART));
 				this.list.addHeader(Component.literal("Speed"));
@@ -192,6 +197,12 @@ public final class SettingsScreen extends OptionsSubScreen {
 					.create(0, 0, 310, 20, Component.literal("Debug view"), (b, v) -> Settings.debug = v));
 			}
 		}
+	}
+
+	private static int nearestScale(int percent) {
+		int best = 100;
+		for (int v : new int[] {100, 85, 75, 67}) if (Math.abs(v - percent) < Math.abs(best - percent)) best = v;
+		return best;
 	}
 
 	private static AbstractWidget cycle(String name, String[] names, int value, Consumer<Integer> set, String tooltip) {
