@@ -1,4 +1,4 @@
-# Imagine Metal: handoff (2026-11-11, ~00:30)
+# Imagine Metal: handoff (2026-11-11, ~01:30)
 
 Where things stand, for picking the work up in a new conversation.
 
@@ -11,7 +11,61 @@ Where things stand, for picking the work up in a new conversation.
   are chat lines in the log (`[CHAT] <herningstang> ...`) just before each screenshot.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
 
-## START HERE: Jack's 22:34 test of the shadow-map change, and what it says about the frame (2026-11-11 00:30)
+## START HERE: overnight 2026-11-11 (written ~01:30; build db9ee42, CI green)
+- NOT DEPLOYED: Jack's Mac went offline (asleep) before the build finished, so the instance still has 6f65e15 (near view cull
+  off, far cache ON). First thing next session: download the dev release jar, check it (unzip -p ... Benchmark.class | strings |
+  grep 'experimental, off'), copy to instances/Imagine metal/minecraft/mods/imagine-metal-0.1.0.jar with the game closed.
+- What db9ee42 has on top of 6f65e15:
+  1. shadowFarCache OFF by default too (both shadow experiments off = shadows exactly as on 2026-11-10 21:30). Toggles for
+     both under Settings > Advanced > Debug (not saved). Benchmark steps turn each ON ("... (experimental, off)"): a negative
+     cost there is its gain.
+  2. Debug view "Shadow maps" (Settings.debug 5, lighting.metal): red = near cascade, blue = far, purple = blend band, yellow =
+     no map; bright = map says lit, dark = shadowed. The RAW map value, before the low-sun lift and the foliage softening.
+  3. Render scale experiment: imaginemetal.renderScale (Advanced > "Render scale*", 100/85/75/67 %, restart). Whole
+     framebuffer, GUI included (Resolution.scaled, WindowMixin), so menus and HUD get soft: only to MEASURE what fewer pixels buy.
+- Pop-in, where it stands. Jack's 00:27 screenshots were on 6f65e15 (view cull off) and still pop, so the view cull is cleared.
+  All three pairs: shadows near the camera, none further out, appearing on approach. Two of the three were at a low sun.
+  PRIME SUSPECT now, and NOT new code: imShade's `if (cls == IM_MAT_FOLIAGE) sun = mix(sun, max(sun, open), 0.45 *
+  smoothstep(26.0, 40.0, length(p)))` (added earlier for blotchy far canopy shadows; the class includes grass blocks, so it
+  fades shadows on the GROUND between 26 and 40 blocks) plus the low-sun lift `sun = mix(sun, max(sun, open * 0.55), lowSun)`.
+  Together, on grass and leaves beyond 40 blocks at a low sun, a shadow keeps about a quarter of its contrast: descending or
+  walking toward it, it "pops in" across a 14-block band. Jack may simply never have looked for it before I told him to.
+  TEST (2 minutes, decides it): with both experiments off, stand where shadows are missing at distance, switch Debug view to
+  "Shadow maps". Dark shapes out there in the debug view = the maps are fine and it is the softening: then narrow it to leaves
+  (not grass blocks; e.g. only the cutout layer) and/or stretch the band (26..40 -> something like 30..90), with Jack's eyes on
+  it. No dark shapes = the maps really lack them: then it is casters/cull, and predates the cache. Then turn "Far shadow cache"
+  on and see if anything changes: if not, the cache is innocent and goes back on by default (it was worth 2-4 ms).
+- What Gael's pack does differently (read tonight: GaelQuinta/minecraft-metal-shaders 90d4f9e, metal/src/main/resources/mcopt/
+  shade/terrain_own.metal, shade_common.metal, docs/dev/TAAU.md). Methods only; Jack doesn't want its look.
+  * It does NOT shade every pixel: TAA upscaling with dynamic resolution is on by default (docs/dev/TAAU.md: preset "balanced"
+    starts at 0.80 scale, range 0.67-0.90, holds 120 fps; "performance" 0.67). At 0.80 that is 64 % of the pixels, at 0.67
+    45 %. Mip bias log2(scale) keeps textures sharp; sharpen 0.25-0.40. THE biggest difference. (Which base resolution his
+    runs at on Jack's Mac, points or Retina, I could not check: Mac offline.)
+  * half precision nearly everywhere in the fragment stage (half3 albedo, normals, light levels).
+  * "lean variants": the terrain fragment shader is compiled in several versions with whole blocks #ifdef'd out by what the
+    frame needs (overworld only, dry, no dynamic light near, camera above water). His comment: "the water shader is
+    register-bound". Ours does this with function constants (IM_FC_*), and the opaque passes already drop the water/glass
+    code (imKind is constant 0 unless CUTOUT_LIMIT < 0.2), so not much left there.
+  * sky colour for fog and reflections from a small LUT texture (skyLut), not computed per pixel (our imSkyColor is ~40 lines
+    of maths, but only runs for reflections; imAirFog doesn't call it).
+  * no shadow lookup where sky light <= 0.3 (ours: always, then multiplied by smoothstep(0, 0.07, sky)). Candidate, small.
+  * a much lighter lighting model overall (shadeLit2): no gamma-space light sum (ours: 5 vec3 pow per pixel), no generated
+    normals, PBR only with a pack.
+- What I did NOT do, and why: no blind cuts to imAirFog / generated normals / PBR. Reading them, earlier sessions already
+  gated each (normals fade with texel size and read <= 3 texels; reflections trace only for smooth surfaces within 96 blocks;
+  the grid's reads are skipped in daylight; fog skips < 6 blocks). What is left are 0.1-0.3 ms items that need the benchmark
+  to confirm, and the benchmark needs Jack's Mac. And the "shade each pixel once" (deferred) plan is mostly moot on this GPU:
+  Apple's hidden-surface removal already shades opaque pixels once, the leaf pre-pass does it for cutouts, and mcopt's unit
+  occlusion culls the rest. So the frame is simply (pixels) x (a heavy shader). Levers, by expected size:
+  1. fewer pixels: a proper WORLD-ONLY render scale with the TAA upscaling (Hdr.java already swaps the main target's colour
+     for our HDR image during the level: scale that image and the depth, resolve up in Bloom's map into the 8-bit image; GUI
+     and hand stay sharp). Tonight's whole-frame renderScale is only the measuring stick for it. Jack's call (softer picture).
+  2. half precision in imShade (big edit, needs eyes: banding in dark gradients is the risk).
+  3. the gamma-space sum's pows, the sky-light gate on the shadow lookup, fog per vertex: small, measurable ones.
+- Jack, 00:26: render distance 8 doesn't raise the fps, 43 costs ~13: the frame is per-pixel. 00:32: wants Gael's METHODS,
+  not his look. Wants answers before work when he asks questions ("can u answer questions first then work dude").
+
+## Jack's 22:34 test of the shadow-map change (2026-11-11 00:30; superseded above where they differ)
 - It worked on the GPU: "shadow maps" 3.0-5.9 ms -> 1.2-1.7 ms (3.1-3.5 while flying fast through the jungle); far cascade
   drawn on 20 of 507 frames hovering, ~130 of 480 flying. Jungle spot after /tp: 46-48 fps (was 39-43), GPU 21-24 ms,
   terrain 13.6-14.9. Forest: 55-64 fps, GPU 18-20, terrain 10-12.5. No benchmark run yet on this build.
