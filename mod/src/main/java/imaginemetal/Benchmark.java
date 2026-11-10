@@ -134,7 +134,7 @@ public final class Benchmark {
 				System.out.println("[Imagine Metal] benchmark passes: " + String.format(Locale.ROOT, "%-36s ", r.name) + w.describe());
 				if (r.name.equals(REF)) {
 					refPassN++;
-					for (int t = 0; t < PassTimes.TAGS; t++) refPass[t] += w.ms(t);
+					for (int tg = 0; tg < PassTimes.TAGS; tg++) refPass[tg] += w.ms(tg);
 					refPassFrame += w.frameMs();
 				}
 			}
