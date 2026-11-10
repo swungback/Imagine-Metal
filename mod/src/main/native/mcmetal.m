@@ -1501,6 +1501,40 @@ void mc_render_resume(Enc *enc, id<MTLComputeCommandEncoder> compute) {
 	}
 }
 
+// (Imagine Metal) whether a render encoder is open, and reopening it on the same attachments with their contents loaded back after
+// something outside the pass (a blit) ended it; the caller binds the pass's state again (MetalBridge.restorePass).
+int mc_render_is_open(Enc *enc) {
+	return enc->render != nil;
+}
+
+void mc_render_reopen(Enc *enc) {
+	endBlit(enc);
+	if (enc->render) return;
+	@autoreleasepool {
+		MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+		int any = 0;
+		for (int i = 0; i < enc->colorCount; i++) {
+			if (!enc->colors[i]) continue;
+			rp.colorAttachments[i].texture = enc->colors[i];
+			rp.colorAttachments[i].loadAction = enc->colors[i].storageMode == MTLStorageModeMemoryless ? MTLLoadActionDontCare : MTLLoadActionLoad;
+			rp.colorAttachments[i].storeAction = MTLStoreActionUnknown;
+			any = 1;
+		}
+		if (enc->depth) {
+			rp.depthAttachment.texture = enc->depth;
+			rp.depthAttachment.loadAction = MTLLoadActionLoad;
+			rp.depthAttachment.storeAction = MTLStoreActionUnknown;
+			any = 1;
+		}
+		if (!any) {
+			rp.renderTargetWidth = enc->width;
+			rp.renderTargetHeight = enc->height;
+			rp.defaultRasterSampleCount = 1;
+		}
+		openRender(enc, rp);
+	}
+}
+
 void mc_r_pipeline(Enc *enc, id<MTLRenderPipelineState> pso, id<MTLDepthStencilState> depth, int cull, int wireframe,
 	float biasConstant, float biasSlope, int primitive) {
 	id<MTLRenderCommandEncoder> r = enc->render;

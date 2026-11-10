@@ -92,6 +92,7 @@ int im_under_capture(Enc *enc, ImSsr *s, id<MTLTexture> color, id<MTLTexture> de
 	// and the water read an empty texture, black, as what's under it)
 	// (color nil: the depth alone, for the mob shadows' trace)
 	if (!s || !depth) return 0;
+	int reopen = 0;
 	@autoreleasepool {
 		if (color && (!s->under || s->under.width != color.width || s->under.height != color.height || s->under.pixelFormat != color.pixelFormat)) {
 			[s->under release];
@@ -119,6 +120,10 @@ int im_under_capture(Enc *enc, ImSsr *s, id<MTLTexture> color, id<MTLTexture> de
 			snprintf(err, (size_t) errCap, "under-water depth could not be created");
 			return 1;
 		}
+		// (a pass open here is the one the translucent terrain draws into: it is reopened after the copy, contents loaded back,
+		// and the Java side binds its state again. Left closed, every draw after the copy went to no encoder: the water, the
+		// nether portal, the translucent torches and the selection outline drew nothing)
+		reopen = mc_render_is_open(enc);
 		id<MTLCommandBuffer> cmd = mc_frame_cmd(enc);
 		id<MTLBlitCommandEncoder> b = [cmd blitCommandEncoder];
 		b.label = @"Imagine Metal under the water";
@@ -129,9 +134,10 @@ int im_under_capture(Enc *enc, ImSsr *s, id<MTLTexture> color, id<MTLTexture> de
 		[b copyFromTexture:depth sourceSlice:0 sourceLevel:0 sourceOrigin:o sourceSize:MTLSizeMake(depth.width, depth.height, 1)
 			toTexture:s->underDepth destinationSlice:0 destinationLevel:0 destinationOrigin:o];
 		[b endEncoding];
+		if (reopen) mc_render_reopen(enc);
 	}
 	mc_im_under_bind(s->under, s->underDepth);
-	return 0;
+	return reopen ? 2 : 0;
 }
 
 void mc_im_pbr_bind(id<MTLTexture> n, id<MTLTexture> s);  // mcown.m

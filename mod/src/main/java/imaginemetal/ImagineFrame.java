@@ -80,8 +80,9 @@ public final class ImagineFrame {
 	private static final float[] SUN_NOON = {1.22f, 1.05f, 0.74f};
 	private static final float[] SUN_GOLDEN = {1.75f, 0.72f, 0.28f};  // (a deeper gold: the land at sunset glows orange, not yellow)
 	// night (toward Reimagined's: a lavender-blue moonlight, its red above its green, a deep blue sky light; a little darker)
-	private static final float[] MOON = {0.12f, 0.11f, 0.20f};
-	private static final float[] NIGHT_SKY = {0.036f, 0.039f, 0.085f};
+	// (a quarter darker: nights read too bright, still bright at the lowest night brightness)
+	private static final float[] MOON = {0.09f, 0.083f, 0.15f};
+	private static final float[] NIGHT_SKY = {0.027f, 0.029f, 0.064f};
 	private static final float[] TORCH = {1.45f, 0.50f, 0.12f};  // (Reimagined's hue, a little brighter: its torch rooms are lit further)
 	private static final float[] CAVE = {0.0115f, 0.0125f, 0.0175f};  // (twice what it was: deep caves were pitch black, nothing to see by)
 	private static final float[] END_LIGHT = {0.52f, 0.40f, 0.74f};
@@ -278,9 +279,12 @@ public final class ImagineFrame {
 				nightDown[i] = nightMid[i] * nightDownK[i];
 				// (a deeper, more violet night than Reimagined's: red kept, green pulled back, a little darker)
 				float[] violet = {0.92f, 0.78f, 1.0f};
-				nightUp[i] *= violet[i] * 0.85f;
-				nightMid[i] *= violet[i] * 0.85f;
-				nightDown[i] *= violet[i] * 0.85f;
+				// (the night brightness setting reaches the night sky and its haze too: the air's glow over the land kept a night at
+				// the lowest setting almost as bright as at 100 %)
+				float nb = 0.85f * Settings.nightBrightness;
+				nightUp[i] *= violet[i] * nb;
+				nightMid[i] *= violet[i] * nb;
+				nightDown[i] *= violet[i] * nb;
 			}
 			sunDir[0] = sx;
 			sunDir[1] = sy;

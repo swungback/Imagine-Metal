@@ -593,11 +593,14 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 			float4 l = lvol.sample(lfs, q * inv);
 			if (l.a <= 0.0) continue;
 			// (a^6: only the air right around a light glows, a ball of it; a^4 lit whole corridors and the column of air over a torch)
+			// (a^8 now: a dropped torch's light filled a whole cave room with a brown haze at a^6)
 			float a2 = l.a * l.a;
-			acc += l.rgb / max(max(max(l.r, l.g), l.b), 1e-3) * (a2 * a2 * a2);
+			float a4 = a2 * a2;
+			acc += l.rgb / max(max(max(l.r, l.g), l.b), 1e-3) * (a4 * a4);
 		}
-		// (a soft glow round the lights: at three times this it filled whole rooms and caverns)
-		c += acc * (stepL * 0.02) * (1.0 - 0.6 * smoothstep(0.4, 1.2, imbLuma(c)));
+		// (a soft glow round the lights: at three times this it filled whole rooms and caverns; at 0.02 a lit cave room still
+		// read as fogged up. Kept to what's darker than the glow, so a lit room isn't veiled)
+		c += acc * (stepL * 0.009) * (1.0 - 0.8 * smoothstep(0.05, 0.6, imbLuma(c)));
 	}
 	if (fx.z > 0.5) {
 		float d = depth.read(uint2(clamp(in.uv, 0.0, 0.9999) * float2(depth.get_width(), depth.get_height())));

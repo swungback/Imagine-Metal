@@ -153,7 +153,7 @@ public final class Bloom {
 				float fogK = 0f;
 				if (ImagineFrame.underwater) fogK = 1.4f;
 				else if (ImagineFrame.shaftOn || ImagineFrame.cave > 0f)
-					fogK = (ImagineFrame.shaftRain * ImagineFrame.shaftRain * 0.8f + ImagineFrame.night * 0.3f) * (1f - ImagineFrame.cave) + ImagineFrame.cave * 1.4f;
+					fogK = (ImagineFrame.shaftRain * ImagineFrame.shaftRain * 0.8f + ImagineFrame.night * 0.3f) * (1f - ImagineFrame.cave) + ImagineFrame.cave * 0.6f;  // (cave 1.4: a lit cavern, a lush cave's glow berries, turned to a grey veil)
 				// (the Nether: Reimagined's strongest, 14, over the view range)
 				float fogMode = ImagineFrame.underwater ? 1f : 0f;
 				if (ImagineFrame.dimNow == 1) {

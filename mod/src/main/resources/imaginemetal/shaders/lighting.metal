@@ -278,9 +278,12 @@ static float imEmission(uint cls, float3 tex) {
 	switch (cls) {
 		// (hot cores: the brightest texels far past white, so the bloom haloes them, the darker ones lower so the texture reads)
 		// (only the bright parts far past white: the whole block glowing turned a jack o'lantern's pumpkin skin white too)
-		case IM_MAT_EMITTER: return 3.2 * smoothstep(0.42, 0.95, l) * l + 0.2 * l;
+		// (and not so far past white that its colour goes: a jack o'lantern's carved face read as a flat white glare, no detail)
+		case IM_MAT_EMITTER: return 1.9 * smoothstep(0.45, 0.98, l) * l + 0.22 * l;
 		case IM_MAT_GLOW_GEM: return 0.0;  // (crying obsidian: its veins only, imShade)
-		case IM_MAT_LAVA: return 1.35 + 3.0 * l * l;  // (Reimagined's: brighter where the texture is, its hot spots near white)
+		// (Reimagined's: brighter where the texture is; its hot spots orange-yellow, not white: white specks over a lava lake read
+		// like a rash)
+		case IM_MAT_LAVA: return 1.15 + 1.5 * l * l;
 		case IM_MAT_FLAME: return 4.0 * smoothstep(0.62, 0.92, hi) * smoothstep(0.15, 0.4, sat);
 		// ores: every pixel with clear colour against the grey stone around it (the whole speck, its coloured edge too; iron's pale
 		// specks count; a speck's near-grey highlights and coal's black specks don't), at a faint glow that keeps the texture's own
@@ -988,7 +991,11 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		cl *= cl;
 		sun *= 0.45 + 1.8 * cl;
 	}
-	float3 direct = f.lightColor.rgb * (wrap * sun);
+	// (a low sun or moon (Reimagined's shadowTime): its light weaker and its shadows paler, so at sunrise and sunset the land
+	// isn't cut by long, hard, near-black shadows across whole valleys; the sky's light carries more of the picture)
+	float lowSun = f.flags.x == 0 ? 1.0 - smoothstep(0.03, 0.32, f.lightDir.y) : 0.0;
+	sun = mix(sun, max(sun, open * 0.55), lowSun);
+	float3 direct = f.lightColor.rgb * (wrap * sun * (1.0 - 0.35 * lowSun));
 	if (sun > 0.002 && f.extra.y > 0.5) direct *= imGlassTint(p, n, f, seeds);
 	// (and glow when the light is behind them: Reimagined's subsurface highlight, looking toward the sun through grass and leaves,
 	// their backlit edges lit up gold; added on top of the surface, as its highlight is)
@@ -1196,7 +1203,10 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			// (texture kept: Reimagined keeps 70 % of the surface under its reflection)
 			refl = mix(refl, max(c, refl), 0.7);
 			if (surf.metal < 0.5) fm *= cls == IM_MAT_GEM ? mix(1.0, 0.5, gemDark) : 0.75;  // (a dark gem or obsidian stays dark: its reflection a sheen over it)
-			refl *= mix(float3(1.0), base / max(max(max(base.r, base.g), base.b), 0.02), surf.metal);
+			// (a gem's reflection takes its colour too, as a metal's: in a cave the trace finds the last frame's grey haze, and an
+			// amethyst cluster showed flat grey-white squares on its brightest texels)
+			float tintK = max(surf.metal, cls == IM_MAT_GEM ? 0.7 : 0.0);
+			refl *= mix(float3(1.0), base / max(max(max(base.r, base.g), base.b), 0.02), tintK);
 			c = mix(c, refl, saturate(fm));
 		}
 	}
@@ -1233,8 +1243,14 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// (a ramp by brightness instead of the texture's own colour: its red crust under the bloom's white haze read pink)
 	if (cls == IM_MAT_LAVA) {
 		float ll = imLuma(tex);
-		float3 crust = float3(0.85, 0.2, 0.025), mid = float3(1.0, 0.42, 0.05), hot = float3(1.0, 0.8, 0.35);
-		ecol = mix(mix(crust, mid, smoothstep(0.25, 0.55, ll)), hot, smoothstep(0.6, 0.95, ll)) * (0.35 + 0.65 * ll);
+		// (more orange-red, the hottest a deep yellow-orange that never reaches white even past the screen's top)
+		float3 crust = float3(0.75, 0.11, 0.015), mid = float3(1.0, 0.3, 0.03), hot = float3(1.0, 0.52, 0.09);
+		ecol = mix(mix(crust, mid, smoothstep(0.2, 0.5, ll)), hot, smoothstep(0.55, 0.95, ll)) * (0.4 + 0.6 * ll);
+	}
+	if (cls == IM_MAT_EMITTER) {
+		// (a light's colour kept: deepened a little, so its brightest parts glow in their own colour instead of washing to white)
+		float em = max(max(ecol.r, ecol.g), ecol.b);
+		ecol = ecol * pow(ecol / max(em, 1e-3), 0.4);
 	}
 	if (cls == IM_MAT_ORE || cls == IM_MAT_NETHER_ORE) {
 		// (Reimagined's glowing ores: each speck's own colour made deeper (colour x colour^k: redstone's red pure, diamond's
@@ -1338,10 +1354,13 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 		float3 R = reflect(-V, n);
 		float fres = pow(1.0 - saturate(dot(n, V)), 3.0);
 		float3 env = mix(f.ambientDown.rgb, f.ambientUp.rgb, R.y * 0.5 + 0.5) * skyF * 1.4 + torch * 0.9;
+		// (the shine follows the texture's own light and dark: a flat tint over the whole piece hid every detail of gold armour
+		// by a torch, one smooth yellow shape)
 		float3 tintM = base / max(max(max(base.r, base.g), base.b), 0.05);
+		tintM *= smoothstep(0.05, 0.6, imLuma(base)) * 0.85 + 0.15;
 		// (a torch or lantern near it makes its own highlight, as the sun does: armour shines indoors too)
-		float tsp = pow(saturate(dot(n, V)), 6.0) * 0.6;
-		radiance += tintM * (f.lightColor.rgb * sp + env * (0.25 + 0.9 * fres) + torch * tsp) * (shine * f.minLight.w);
+		float tsp = pow(saturate(dot(n, V)), 12.0) * 0.22;
+		radiance += tintM * (f.lightColor.rgb * sp + env * (0.1 + 0.6 * fres) + torch * tsp) * (shine * f.minLight.w);
 	}
 	float3 c = imGrade(imTonemap(radiance, f.tonemap), f);
 	// items in the world that give off light (a lava bucket's lava, a torch's flame, glowstone dust, blaze rods): their hot,

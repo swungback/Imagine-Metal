@@ -65,8 +65,10 @@ public final class Reflections {
 			MetalBridge.flushClear(encoder, depth);
 			try (MemoryStack stack = MemoryStack.stackPush()) {
 				long err = stack.ncalloc(1, 1024, 1);
-				if (ImNative.underCapture(MetalBridge.enc(encoder), state, water ? MetalBridge.textureHandle(color) : 0L, MetalBridge.textureHandle(depth), err, 1024) != 0)
-					throw new IllegalStateException(MemoryUtil.memUTF8(err));
+				int rc = ImNative.underCapture(MetalBridge.enc(encoder), state, water ? MetalBridge.textureHandle(color) : 0L, MetalBridge.textureHandle(depth), err, 1024);
+				if (rc == 1) throw new IllegalStateException(MemoryUtil.memUTF8(err));
+				// (2: the open pass was ended for the copy and reopened: its pipeline, buffers and scissor bound again)
+				if (rc == 2) MetalBridge.restorePass(encoder);
 			}
 			underReady = water;
 			underDepthReady = true;

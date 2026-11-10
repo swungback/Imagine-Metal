@@ -78,3 +78,5 @@ id<MTLBlitCommandEncoder> mc_blit(Enc *enc);  // the frame's blit encoder, endin
 void mc_set_rp_log(int on);
 id<MTLCommandBuffer> mc_frame_cmd(Enc *enc);  // the frame's command buffer with no encoder open (native shading pipeline)
 void mc_render_resume(Enc *enc, id<MTLComputeCommandEncoder> compute);
+int mc_render_is_open(Enc *enc);
+void mc_render_reopen(Enc *enc);  // (Imagine Metal) after a blit ended the open pass
