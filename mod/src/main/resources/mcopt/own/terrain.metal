@@ -2365,6 +2365,11 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 		bool still = all(u >= imf.waterStill.xy) && all(u <= imf.waterStill.zw);
 		bool flow = all(u >= imf.waterFlow.xy) && all(u <= imf.waterFlow.zw);
 		bool portal = all(u >= imf.portalRect.xy) && all(u <= imf.portalRect.zw);
+		// (and water by its tint: a mod's own water sprites (Streams' flowing water) aren't Minecraft's, and were taken for glass,
+		// grey, a seam where they met the still water. Glass, ice, slime and honey are drawn untinted; water takes the biome's colour)
+		float3 vc = getColor(in).rgb;
+		bool tinted = max(max(vc.r, vc.g), vc.b) - min(min(vc.r, vc.g), vc.b) > 0.08 && vc.b >= vc.r;
+		still = still || (tinted && !portal);
 		imKind = still || flow ? (imf.water.x > 0.5 ? 1u : 0u) : portal || imf.water.y < 0.5 ? 0u : 2u;
 		imPortal = portal;
 		bool sl;
@@ -2393,7 +2398,8 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 			} else {
 				// Reimagined (water.glsl, its own style): the texture squared, tinted by the biome's water colour (its green kept up),
 				// a little warmer; nearly opaque where deep, clear up close, opaque at a grazing angle
-				float3 wq3 = sqrt(wc) * float3(1.0, 0.9, 0.85);
+				// (pulled toward Reimagined's turquoise, not warmed: warmed it came out a dull grey over the sea)
+				float3 wq3 = mix(sqrt(wc), float3(0.2, 0.7, 0.85), 0.35) * float3(0.85, 1.0, 1.05);
 				// (the texture's speckle calmed: its light texels, squared, read as white streaks like rain over the whole sea from
 				// above; most of it kept as a soft ripple, pulled toward the texture's mean)
 				float3 tq = mix(float3(0.62), texel.rgb, 0.35);
@@ -2573,11 +2579,15 @@ fragment float4 own_fs_tr(VOut in [[stage_in]], float4 imDst [[color(0)]], const
 		// (clearer: at 0.42 and 0.16 water ten blocks deep was two thirds its own colour and the seabed's red gone, read as not
 		// see-through)
 		float3 absorb = (1.0 - wn) * 0.26 + 0.02;
-		behind = pow(max(dst, 0.0), 2.2) * exp(-absorb * thick);
+		// (the seabed's light given back what the sky light's fall with depth took: a level a block, dark below a few blocks)
+		behind = pow(max(dst, 0.0), 2.2) * (1.0 + 0.8 * saturate(thick / 10.0)) * exp(-absorb * thick);
 		float vol = (1.0 - exp(-thick * 0.09)) * 0.72;
 		a = max(a, vol);
 	} else {
 		behind = pow(max(dst, 0.0), 2.2) * imTint;
+		// (the seabed seen through the water a little brighter: the sky light fades a level a block down, and below a few blocks
+		// everything read as one dark grey)
+		if (imWaterN.z > 0.25) behind *= 1.3;
 	}
 	float3 col = mix(behind, pow(max(c.rgb, 0.0), 2.2), a);
 	if (foam > 0.0) col = mix(col, pow(saturate(c.rgb * 1.5 + 0.4), 2.2), foam);
