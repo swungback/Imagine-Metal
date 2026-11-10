@@ -82,6 +82,20 @@ Where things stand, for picking the work up in a new conversation.
 - Open: "compat with texture packs generated pbr" (unclear: ask), mobs look weird under water (check after fog change),
   "waves look off / too symmetrical" (water style 1 ripple from the texture), sun drawn as a hollow square (not reported).
 
+## Third round 2026-11-10 17:10-17:20 (Jack away; deployed, untested)
+- Live shaders toggle: imaginemetal.Live (pause menu "Shaders: on/off" button; F8 via GLFW by reflection if present).
+  Off = every live setting off (snapshot kept, restored on), ImFrame flags.z 0: imShade's plain lightmap-like path,
+  entities vanilla. Settings.save() turns it back on first so the file keeps real values.
+- Benchmark rewritten: Live.snapshot/restore of every live Settings field (reflection), ~27 steps incl. shadow range 96,
+  normals, parallax, held light, water vanilla, sky/air, haze, wet, aurora, storm, stars, and "shaders off (live)". Results
+  in ms per frame, sorted, top 10 in chat, all in latest.log ("[Imagine Metal] benchmark:").
+- Resource pack / modded compat: translucent-layer opaque texels (texel.a > 0.95) shaded as normal surfaces, not glass;
+  modded blocks classed by name words (MOD_METAL/GEM/STONE/WOOD) before their sound.
+- Under water: fog and ambient a vibrant turquoise (0.08, 0.78, 0.82), not cold blue.
+- FPS suspects not yet measured: LambDynamicLights (rebuilds chunk sections whenever a light moves: 154 "exactPos table
+  full" rebuild lines in 20 min; our held light and moving-light seeds already do its job), EMF/ETF, sound physics (CPU).
+  Next: read Jack's benchmark lines and cut the top costs.
+
 ## Still open after the first round
 - Moon "line there??" (15.09.24): a faint vertical band from the moon straight down the sky, sharp left edge. Probable cause
   fixed: the shafts switched hard between the near map, the far map and the eye's brightness at each map's edge, and a map's
