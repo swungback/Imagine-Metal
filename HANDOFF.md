@@ -39,7 +39,7 @@ Where things stand, for picking the work up in a new conversation.
 - Test round 11-10 ~15:00: Jack screenshots with chat notes; read logs/latest.log [CHAT] lines.
 - Jack wants to be told when to start a new chat (save usage); hand off via this file.
 
-## Pushed 2026-11-10 ~15:40-16:30 (from Jack's 14:55-15:26 test round; not yet confirmed in game)
+## Pushed 2026-11-10 ~15:40-16:00 (from Jack's 14:55-15:26 test round; jar 249fbbf deployed to the instance, not yet confirmed in game)
 - ROOT CAUSE of "invisible" things: Reflections.captureUnder runs at the head of executeClassicTransparency while the level's
   render pass is open. mc_frame_cmd ended that encoder for the blit and nothing reopened it, so every draw after it went to a nil
   encoder (silently dropped): water, nether portal, translucent-layer blocks (Weskerson's 3D torches, copper torch: 26.x puts
