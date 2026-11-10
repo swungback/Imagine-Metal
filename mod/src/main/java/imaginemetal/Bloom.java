@@ -66,8 +66,10 @@ public final class Bloom {
 		boolean water = ImagineFrame.underwater;
 		if (!Settings.shafts || !Reflections.valid || !(ImagineFrame.shaftOn || water) || !Shadows.valid()) return r;
 		// (x: -1 eyes in water, else the sky light at the eyes, squared; sealed underground there's no air the sun lights)
+		// (no cut-off by the sky light at the eyes: a step deeper into a lush cave under its opening and the beams vanished; the
+		// shadow maps decide where the light reaches)
 		float eye = ImagineFrame.eyeSkyLight();
-		if (!water && eye < 0.07f) return r;
+		if (!water && eye < 0.07f && ImagineFrame.cave > 0.98f && ImagineFrame.shaftCover > 0.98f) return r;
 		r[0] = water ? -1f : eye * eye;
 		r[1] = ImagineFrame.shaftCover;
 		r[2] = Settings.shaftStrength * 1.4f;

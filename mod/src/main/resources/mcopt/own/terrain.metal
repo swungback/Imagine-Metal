@@ -2396,7 +2396,7 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 				// little toward turquoise), lit like any surface; own_fs_tr lays it over what's under the water by how deep it is.
 				// Here only the surface's own share: its ripples faintly, and more at a grazing angle
 				float3 wn = wc / max(max(wc.r, max(wc.g, wc.b)), 1e-3);
-				wn = mix(wn, float3(0.25, 0.8, 0.9), 0.2);
+				wn = mix(wn, float3(0.3, 0.9, 0.85), 0.5);  // (every biome's water toward one turquoise: blue ones read purple over sand)
 				float tl = mix(0.62, dot(texel.rgb, float3(0.299, 0.587, 0.114)), 0.35);
 				color.rgb = wn * (0.34 + 0.3 * tl);
 				color.a = mix(0.05 + 0.1 * tl * tl, 1.0, fr * fr * 0.9);
@@ -2404,7 +2404,7 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 				// Reimagined (water.glsl, its own style): the texture squared, tinted by the biome's water colour (its green kept up),
 				// a little warmer; nearly opaque where deep, clear up close, opaque at a grazing angle
 				// (pulled toward Reimagined's turquoise, not warmed: warmed it came out a dull grey over the sea)
-				float3 wq3 = mix(sqrt(wc), float3(0.2, 0.7, 0.85), 0.35) * float3(0.85, 1.0, 1.05);
+				float3 wq3 = mix(sqrt(wc), float3(0.25, 0.75, 0.75), 0.5) * float3(0.9, 1.0, 1.0);
 				// (the texture's speckle calmed: its light texels, squared, read as white streaks like rain over the whole sea from
 				// above; most of it kept as a soft ripple, pulled toward the texture's mean)
 				float3 tq = mix(float3(0.62), texel.rgb, 0.35);
@@ -2428,6 +2428,7 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 				float3 wt = getColor(in).rgb;
 				wt = 1.0 - (1.0 - wt) * (1.0 - wt);
 				wt = normalize(max(wt, 1e-3));
+				wt = normalize(mix(wt, float3(0.42, 0.72, 0.62), 0.5));  // (turquoise for every biome, no purple seabeds)
 				wt.g *= 0.88;
 				float far = length(in.imPos) / max(imf.fogParams.x, 16.0);
 				far *= far;
@@ -2508,7 +2509,9 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 	} else if (imf.water.z > 0.5 && imf.flags.x == 0 && imf.water.x > 0.5) {
 		// under water (Reimagined's): the biome's water fog colour, pushed toward its blue-green, thickening with the square of
 		// the distance (clear close by, a deep blue wall at about 60 blocks)
-		float dist = length(in.imPos) / 48.0;
+		// (thicker the deeper the eyes are under the sea's level: "a little more foggy further down")
+		float deep = saturate((60.0 - imf.fogParams.y) / 40.0);
+		float dist = length(in.imPos) / (46.0 - 16.0 * deep);
 		imFog = 1.0 - exp(-dist * dist);
 		// (bluer and a little brighter than the plain colour: Reimagined's water reads blue, ours came out teal-grey)
 		float3 wfc = pow(max(fog.FogColor.rgb, 1e-3), float3(0.33, 0.21, 0.26)) * 0.24 * float3(0.8, 1.0, 1.3);
@@ -2516,11 +2519,17 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 		// purple into it and under the sea turned a dull grey-violet)
 		float wl = dot(wfc, float3(0.2126, 0.7152, 0.0722));
 		// (a vibrant tropical turquoise, brighter, not a cold deep blue: "not like a cold ocean")
-		wfc = mix(wfc, float3(0.08, 0.78, 0.82) * (wl / 0.5348) * 1.3, 0.8);
+		// (the turquoise the water has from above, a little darker the deeper)
+		wfc = mix(wfc, float3(0.12, 0.75, 0.7) * (wl / 0.5348) * 1.3 * (1.0 - 0.45 * deep), 0.8);
 		imFogColor = pow(imPresent(wfc, imf), 1.0 / 2.2);
 	}
 	imFog = 1.0 - (1.0 - imFog) * (1.0 - imFade);
-	return float4(mix(color.rgb, imFogColor, imFog), color.a);
+	// (waving plants marked for the TAA (alpha 0.98, invisible): it can't follow their sway, and its history left ghost copies
+	// of grass and dead bushes on the sand; there it keeps less of it)
+	float outA = color.a;
+	uint wcF = (in.imMat >> 4) & 15u, clsF = in.imMat & 15u;
+	if (!(CUTOUT && CUTOUT_LIMIT < 0.2) && wcF != 0u && clsF != 4u && clsF != 6u) outA = min(outA, 0.98);
+	return float4(mix(color.rgb, imFogColor, imFog), outA);
 #else
 	return float4(mix(color.rgb, fog.FogColor.rgb, fogValue * fog.FogColor.a), color.a);
 #endif
@@ -2586,13 +2595,17 @@ fragment float4 own_fs_tr(VOut in [[stage_in]], float4 imDst [[color(0)]], const
 			float edge = smoothstep(0.02, 0.08, thick) * (1.0 - smoothstep(0.08, 0.4, thick));
 			float fn = imValueNoise((in.imPos.xz + imf.world.xz) * 3.0 + imf.world.w * 0.4);
 			float skyF = saturate(in.imLight.y * 1.4 - 0.4);
-			foam = edge * smoothstep(0.45, 0.75, fn) * (1.0 - smoothstep(16.0, 32.0, dist)) * 0.3 * skyF;
+			// (off: from the water's depth alone a shore and a wall can't be told apart, and every pool's edge kept a white line)
+			foam = 0.0 * edge * fn * skyF;
 		} else {
 			dst = imUnder.read(pi).rgb;
 		}
 		float3 wc = getColor(in).rgb;
 		wc.g = max(wc.g, 0.39);
 		float3 wn = wc / max(max(wc.r, max(wc.g, wc.b)), 1e-3);
+		// (toward one turquoise: a blue biome's water took the red out of the sand under it and the seabed read lavender, "purple",
+		// a deep blue one "hella blue")
+		wn = mix(wn, float3(0.45, 0.95, 0.85), 0.55);
 		// (clearer: at 0.42 and 0.16 water ten blocks deep was two thirds its own colour and the seabed's red gone, read as not
 		// see-through)
 		float3 absorb = (1.0 - wn) * 0.26 + 0.02;

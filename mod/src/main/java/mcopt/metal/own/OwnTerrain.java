@@ -109,7 +109,9 @@ public final class OwnTerrain {
 	 * Same picture as vanilla's solid-then-cutout (cutout still wins depth ties), but solid fragments behind leaves are rejected
 	 * before shading, and no alpha-tested draw lands on a tile's pending opaque work.
 	 */
-	private static final boolean PREPASS = Boolean.getBoolean("mcopt.own.prepass");
+	// (Imagine Metal: on by default, -Dmcopt.own.prepass=false to turn off. Our terrain shading is expensive and a jungle's leaves
+	// lie many deep: each layer was shaded in full before the nearer one hid it; with the depth first only the visible one is)
+	private static final boolean PREPASS = !"false".equalsIgnoreCase(System.getProperty("mcopt.own.prepass", "true"));
 	/**
 	 * -Dmcopt.own.quads=true: occlusion per quad. The cull lists every unit it passes; phase A (pre command buffer) lists the
 	 * quads visible last frame as an index list built on the GPU; the pass splits once for a depth pyramid; every listed quad is

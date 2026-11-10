@@ -19,7 +19,7 @@ public final class Benchmark {
 	private record Result(String name, double fps, double ms) {
 	}
 
-	private static final double SETTLE = 1.5, MEASURE = 3.0;
+	private static final double SETTLE = 2.0, MEASURE = 5.0;  // (longer: 3 s windows swung by a few fps either way)
 	private static List<Step> steps;
 	private static int index;
 	private static long stepStart, frames, measureStart;

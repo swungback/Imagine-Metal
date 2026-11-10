@@ -282,14 +282,16 @@ static float imEmission(uint cls, float3 tex) {
 		// (only the parts that are the light: warm ones from mid brightness, cool or green ones only near white (a sea lantern,
 		// an end rod); a copper bulb's green frame glowed as much as its lit middle)
 		case IM_MAT_EMITTER: {
+			// (by the brightest channel: a jack o'lantern's orange skin (about 0.8) stays a surface, its yellow face (1.0) glows)
 			float warm = smoothstep(0.08, 0.25, tex.r - tex.b) * step(tex.g, tex.r + 0.02);
-			float part = max(warm * smoothstep(0.45, 0.9, l), smoothstep(0.78, 0.95, l));
+			float part = max(warm * smoothstep(0.86, 0.98, hi), smoothstep(0.82, 0.95, l));
 			return (1.9 * l * smoothstep(0.45, 0.98, l) + 0.25 * l) * part;
 		}
 		case IM_MAT_GLOW_GEM: return 0.0;  // (crying obsidian: its veins only, imShade)
 		// (Reimagined's: brighter where the texture is; its hot spots orange-yellow, not white: white specks over a lava lake read
 		// like a rash)
-		case IM_MAT_LAVA: return 1.1 + 2.4 * l * l * l;  // (the hot spots harder: a tighter, brighter bloom close to them)
+		// (lower overall so its texture shows instead of one flat glowing sheet; the hot spots still far past white)
+		case IM_MAT_LAVA: return 0.55 + 2.6 * l * l * l;
 		case IM_MAT_FLAME: return 4.0 * smoothstep(0.62, 0.92, hi) * smoothstep(0.15, 0.4, sat);
 		// ores: every pixel with clear colour against the grey stone around it (the whole speck, its coloured edge too; iron's pale
 		// specks count; a speck's near-grey highlights and coal's black specks don't), at a faint glow that keeps the texture's own
@@ -448,7 +450,7 @@ static ImSurf imSurface(uint cls, float3 col, float3 tex) {
 			s.hl = 1.5;
 			break;
 		case IM_MAT_GEM: case IM_MAT_GLOW_GEM:  // Photon's gems and obsidian: smooth, a strong reflectance
-			s.g = 0.55 + 0.4 * sqrt(imLinStep(0.05, 0.85, L));
+			s.g = 0.68 + 0.3 * sqrt(imLinStep(0.05, 0.85, L));
 			s.d = s.g;
 			s.f0 = 0.2;
 			s.hl = 2.0;
@@ -1049,6 +1051,9 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// (no block light and full daylight: the grid's eight reads skipped, most of an open landscape by day)
 	float4 bl = block < 0.01 && sky > 0.97 && f.blockColor.w > 0.5 ? float4(f.blockColor.rgb, 0.0) : imBlockLight(p, n, f, lvol, lsamp);
 	float3 torch = bl.rgb * imBlockCurve(max(block, bl.a)) * (1.0 - 0.25 * f.blockColor.w * smoothstep(0.5, 1.0, sky));
+	// (a light's own faces sit in its brightest light: the whole block lit up, a copper bulb's frame and a jack o'lantern's skin
+	// as bright as their glowing parts. Only the parts that glow should: its own light on it much less)
+	if (cls == IM_MAT_EMITTER || cls == IM_MAT_FLAME || cls == IM_MAT_DIM) torch *= 0.3;
 	// the light in the player's hands: a level falling one a block from the eye, as a placed light would, softer at the edge
 	if (f.held.w > 0.0) {
 		// (as placed coloured lights are: 4 levels stronger, the colour's saturation pushed 1.6x, as bright as the torch colour)
@@ -1119,8 +1124,20 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			float nlt = saturate(dot(N, Lt));
 			float hl2 = imHighlight(N, V, Lt, nlt, surf.g) * surf.hl * mix(0.3, 1.0, max(surf.metal, smoothstep(0.04, 0.2, surf.f0)));
 			if (cls == IM_MAT_FOLIAGE) hl2 *= 0.3;
-			if (cls == IM_MAT_GEM) hl2 *= mix(1.0, 0.35, gemDark);  // (obsidian beside a torch washed out lavender: a glint, not a glaze)
+			if (cls == IM_MAT_GEM) hl2 *= mix(1.0, 0.7, gemDark);  // (obsidian beside a torch: a glint, not a glaze)
 			radiance += torch * (hl2 * 0.35) * tint * f.minLight.w;
+		}
+		// (the light in the hand: its highlight on whatever glossy surface faces the eye, as a torch held up to obsidian or
+		// polished stone glints; it lit them before but never shone on them)
+		if (f.held.w > 0.0) {
+			float hlv = saturate(min(f.held.w + 4.0 / 15.0, 1.0) - length(p) / 15.0);
+			if (hlv > 0.0) {
+				float3 hcol = f.held.rgb / max(max(max(f.held.r, f.held.g), f.held.b), 1e-3) * max(max(f.blockColor.r, f.blockColor.g), f.blockColor.b);
+				float nv = saturate(dot(N, V));
+				float hs = imHighlight(N, V, V, nv, surf.g) * surf.hl * mix(0.4, 1.0, max(surf.metal, smoothstep(0.04, 0.2, surf.f0)));
+				if (cls == IM_MAT_FOLIAGE) hs *= 0.3;
+				radiance += hcol * imBlockCurve(hlv) * (hs * 0.45) * tint * f.minLight.w;
+			}
 		}
 	}
 
@@ -1233,7 +1250,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			float3 refl = hit.a > 0.0 ? mix(skyR, hit.rgb, hit.a) : hit.a < 0.0 ? c * 0.9 : skyR;
 			// (texture kept: Reimagined keeps 70 % of the surface under its reflection)
 			refl = mix(refl, max(c, refl), 0.7);
-			if (surf.metal < 0.5) fm *= cls == IM_MAT_GEM ? mix(1.0, 0.5, gemDark) : 0.75;  // (a dark gem or obsidian stays dark: its reflection a sheen over it)
+			if (surf.metal < 0.5) fm *= cls == IM_MAT_GEM ? mix(1.0, 0.85, gemDark) : 0.75;  // (obsidian: "should be shinier")  // (a dark gem or obsidian stays dark: its reflection a sheen over it)
 			// (a gem's reflection takes its colour too, as a metal's: in a cave the trace finds the last frame's grey haze, and an
 			// amethyst cluster showed flat grey-white squares on its brightest texels)
 			float tintK = max(surf.metal, cls == IM_MAT_GEM ? 0.7 : 0.0);
@@ -1277,7 +1294,8 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		// (more orange-red, the hottest a deep yellow-orange that never reaches white even past the screen's top)
 		// (a little redder again: "too orange")
 		float3 crust = float3(0.78, 0.075, 0.01), mid = float3(1.0, 0.22, 0.02), hot = float3(1.0, 0.42, 0.06);
-		ecol = mix(mix(crust, mid, smoothstep(0.2, 0.5, ll)), hot, smoothstep(0.55, 0.95, ll)) * (0.4 + 0.6 * ll);
+		// (the texture's light and dark kept strongly: dark crust much darker than the hot veins)
+		ecol = mix(mix(crust, mid, smoothstep(0.2, 0.5, ll)), hot, smoothstep(0.55, 0.95, ll)) * (0.15 + 0.85 * ll * ll);
 	}
 	if (cls == IM_MAT_EMITTER) {
 		// (a light's colour kept: deepened a little, so its brightest parts glow in their own colour instead of washing to white)
@@ -1328,7 +1346,7 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 		float3 g = (r1 * dl1 + r2 * dl2) / (abs(det) > 1e-10 ? det : 1e-10);
 		g -= n * dot(g, n);
 		float gl = length(g);
-		if (gl > 1e-5) n = normalize(n - g * (min(gl, 4.0) / gl) * 0.06);
+		if (gl > 1e-5) n = normalize(n - g * (min(gl, 4.0) / gl) * 0.03);  // (0.06 read as noise on a husk and a camel)
 	}
 	float block = saturate(light.x), sky = saturate(light.y);
 	float skyF = imSkyCurve(sky);
@@ -1399,7 +1417,7 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 		// in the light instead of a flat cut-out; the darker texels stay matte
 		float3 V = -normalize(p);
 		float3 H = normalize(V + f.lightDir.xyz);
-		float shineM = smoothstep(0.15, 0.7, imLuma(base)) * 0.35;
+		float shineM = smoothstep(0.25, 0.8, imLuma(base)) * 0.15;
 		float spM = pow(saturate(dot(n, H)), 12.0) * sun * saturate(nl * 3.0);
 		float rimM = pow(1.0 - saturate(dot(n, V)), 3.0) * 0.5;
 		radiance += base * (f.lightColor.rgb * spM + (ambient + torch) * rimM) * (shineM * f.minLight.w);
@@ -1431,8 +1449,8 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 		// stood out as dark blue cut-outs; ours laid over them as over the terrain)
 		float wd = length(p) / 48.0;
 		float wf = 1.0 - exp(-wd * wd);
-		float3 wfc = float3(0.08, 0.78, 0.82) * (0.06 + 0.16 * f.nightMiddle.w);
-		radiance = mix(radiance * 1.25, wfc, wf);
+		float3 wfc = float3(0.1, 0.72, 0.68) * (0.06 + 0.16 * f.nightMiddle.w);
+		radiance = mix(radiance, wfc, wf * 0.8);
 	}
 	// (the hand: no vibrance, its light's colour half kept: a netherite sword's warm grey went maroon by a torch and purple by the sky)
 	float3 c = hand ? imTonemap(radiance, f.tonemap) : imGrade(imTonemap(radiance, f.tonemap), f);

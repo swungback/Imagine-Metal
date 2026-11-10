@@ -172,6 +172,8 @@ public final class Materials {
 		if (name.contains("end_portal_frame")) return (byte) (NETHER_ORE | 2 << 4);  // (Reimagined's: the eye glows, lighting.metal imShade)
 		// (Reimagined's redstone and lapis blocks glow their colour and light the room around them)
 		if (name.contains("redstone_block") || name.contains("lapis_block")) return DIM;
+		// (a faint glow, a brown mushroom's level 1: a surface, not a light: its whole cap lit up peach)
+		if (light > 0 && light <= 2 && !name.contains("torch") && !name.contains("candle")) light = 0;
 		if (light > 0) {
 			// a flame or a small lit part on an unlit body: only its bright, saturated texels glow
 			if (name.contains("torch") || name.contains("lantern") || name.contains("candle") || name.contains("fire") || name.contains("campfire")

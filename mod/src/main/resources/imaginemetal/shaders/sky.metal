@@ -494,7 +494,8 @@ static float4 imSkyPixel(ImSkyOut in, constant ImFrame &f, constant float4x4 &ro
 			float inv = f.sunsetDown.w * f.sunsetDown.w;
 			float vis = (1.0 - f.dayUp.w) * inv * inv * (1.0 - f.nightMiddle.w);
 			if (vis > 0.0) {
-				float3 axis = normalize(float3(0.35, 0.25, 0.9));
+				// (a band arching high across the sky, away from where the moon runs (east-west), as the galaxy's arm does)
+				float3 axis = normalize(float3(0.8, 0.2, 0.55));  // (its plane crosses the moon's path at about 55 degrees; the old one lay along it)
 				float band = exp(-pow(dot(d, axis) * 3.2, 2.0));
 				// (no atan2: its jump at due west drew a straight line from the horizon up the night sky, "line there??")
 				float2 nq = d.xz / (d.y + 0.35) * 2.2;
@@ -506,7 +507,7 @@ static float4 imSkyPixel(ImSkyOut in, constant ImFrame &f, constant float4x4 &ro
 				}
 				float neb = smoothstep(0.35, 0.8, nb) * band;
 				float3 nc = mix(float3(0.25, 0.1, 0.45), float3(0.1, 0.25, 0.55), imValueNoise(nq * 0.2 + 5.0));
-				sky += nc * neb * 0.05 * vis * smoothstep(0.0, 0.2, d.y);
+				sky += nc * neb * 0.075 * vis * smoothstep(0.0, 0.2, d.y);
 			}
 		}
 		if ((st & 2u) != 0u) {

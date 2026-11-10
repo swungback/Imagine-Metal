@@ -793,6 +793,7 @@ fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur 
 	// the neighbourhood's colour box, and the nearest depth in it (its edges follow the nearer object)
 	float3 mn = c, mx = c, m1 = c, m2 = c * c;
 	float dmin = depth.read(min(px, size - 1));
+	float wav = cur.read(px).a;  // (0.98: a waving plant, terrain.metal)
 	for (int y = -1; y <= 1; y++)
 		for (int x = -1; x <= 1; x++) {
 			if (x == 0 && y == 0) continue;
@@ -800,6 +801,7 @@ fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur 
 			float3 v = cur.read(q).rgb;
 			mn = min(mn, v);
 			mx = max(mx, v);
+			wav = min(wav, cur.read(q).a);
 			m1 += v;
 			m2 += v * v;
 			dmin = max(dmin, depth.read(q));  // (reversed Z: the nearest is the largest)
@@ -827,6 +829,8 @@ fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur 
 			float k = mix(0.86, 0.6, saturate(moved / 8.0));
 			// (and less where the history had to be pulled in a lot: something moved there that the camera's motion doesn't explain)
 			k *= 1.0 - 0.6 * saturate(length(hc - h) / max(imbLuma(m1) * 0.5, 0.02));
+			// (beside a waving plant much less history: the sway left ghost copies of grass on the sand)
+			if (wav < 0.99) k *= 0.35;
 			res = mix(c, h, k);
 			// (a light sharpen against what's left of the softness, on the screen only: fed back into the history it sharpened
 			// the already sharpened picture every frame, the finest grain growing until the colour box stopped it, a crawling
