@@ -93,7 +93,7 @@ int im_under_capture(Enc *enc, ImSsr *s, id<MTLTexture> color, id<MTLTexture> de
 	// (color nil: the depth alone, for the mob shadows' trace)
 	if (!s || !depth) return 0;
 	@autoreleasepool {
-		if (color && (!s->under || s->under.width != color.width || s->under.height != color.height || s->under.pixelFormat != color.pixelFormat) {
+		if (color && (!s->under || s->under.width != color.width || s->under.height != color.height || s->under.pixelFormat != color.pixelFormat)) {
 			[s->under release];
 			MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:color.pixelFormat width:color.width
 				height:color.height mipmapped:NO];
