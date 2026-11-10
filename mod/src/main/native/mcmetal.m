@@ -460,12 +460,14 @@ static id<MTLCommandBuffer> cmd(Enc *enc) {
 		enc->cpuNextPending = 0;
 		enc->cmd = enc->cpuNext;
 		enc->cpuNext = nil;
+		imt_cmd_begin(enc->cmd);  // (Imagine Metal: a timed frame runs alone on the GPU, imtime.m)
 	}
 	if (!enc->cmd) {
 		@autoreleasepool {
 			enc->cmd = [[enc->ctx->queue commandBuffer] retain];
 			encCounters[0]++;
 		}
+		imt_cmd_begin(enc->cmd);  // (Imagine Metal: a timed frame runs alone on the GPU, imtime.m)
 	}
 	return enc->cmd;
 }
@@ -909,6 +911,7 @@ id<MTLCommandBuffer> mc_pre(Enc *enc) {
 			enc->pre = [[enc->ctx->queue commandBuffer] retain];
 			encCounters[1]++;
 			imt_pre_cmd(enc->pre);  // (Imagine Metal: the pass timing puts its encoders before the main buffer's)
+			imt_cmd_begin(enc->pre);
 		}
 	}
 	return enc->pre;

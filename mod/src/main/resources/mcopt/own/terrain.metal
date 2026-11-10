@@ -2325,6 +2325,7 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 #ifdef IM_SHADE
 	, constant ImFrame &imf, depth2d_array<float> imShadowMap, sampler imShadowCmp, texture3d<float> imLightVol, sampler imLightSampler, texture3d<float> imSeeds, texture2d<float> imPbrN, texture2d<float> imPbrS
 	, texture2d<float> imHistColor, depth2d<float> imHistDepth, sampler imHistSampler, thread float3 &imTint, thread float3 &imWaterN, depth2d<float> imUnderDepth
+	, texture3d<float> imLightFilt, texture3d<float> imLightOpen
 #endif
 	) {
 #ifdef OWN_TPROBE
@@ -2453,7 +2454,7 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 		float4 qs = float4(in.imQL.y & 255u, (in.imQL.y >> 8) & 255u, (in.imQL.y >> 16) & 255u, in.imQL.y >> 24);
 		imLightQ = saturate(float2(mix(mix(qb.x, qb.y, st.y), mix(qb.w, qb.z, st.y), st.x), mix(mix(qs.x, qs.y, st.y), mix(qs.w, qs.z, st.y), st.x)) / 240.0);
 	}
-	color.rgb = imShade(color.rgb, texel.rgb, in.imPos, imLightQ, in.imMat | (imKind << 8), in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imSeeds, imPbrN, imPbrS,
+	color.rgb = imShade(color.rgb, texel.rgb, in.imPos, imLightQ, in.imMat | (imKind << 8), in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imLightFilt, imLightOpen, imSeeds, imPbrN, imPbrS,
 		in.texCoord0, in.imRect, atlas, imHistColor, imHistDepth, imHistSampler, imUnderDepth); // (Imagine Metal)
 	if (IM_FC_PORTALS && imPortal && imf.extra.x > 0.5 && imf.portalRect.z > imf.portalRect.x) color = imPortalLook(in.texCoord0, in.imPos, texel, atlas, imf);
 	// (the translucent pass has no material bytes, so a flame drawn in it (a resource pack's 3D torch, the copper torch: sprites with
@@ -2541,13 +2542,13 @@ fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]],
 	, constant ImFrame &imf [[buffer(30)]], depth2d_array<float> imShadowMap [[texture(20)]], sampler imShadowCmp [[sampler(13)]]
 	, texture3d<float> imLightVol [[texture(21)]], sampler imLightSampler [[sampler(12)]], texture3d<float> imSeeds [[texture(24)]], texture2d<float> imPbrN [[texture(27)]], texture2d<float> imPbrS [[texture(28)]]
 	, texture2d<float> imHistColor [[texture(22)]], depth2d<float> imHistDepth [[texture(23)]], sampler imHistSampler [[sampler(11)]]
-	, depth2d<float> imUnderDepth [[texture(26)]]
+	, depth2d<float> imUnderDepth [[texture(26)]], texture3d<float> imLightFilt [[texture(29)]], texture3d<float> imLightOpen [[texture(30)]]
 #endif
 	) {
 #ifdef IM_SHADE
 	float3 imTint = float3(1.0), imWaterN = float3(0.0);
 	return ownFsBody(in, g, t, fog, atlas, atlasSampler, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imSeeds, imPbrN, imPbrS, imHistColor, imHistDepth,
-		imHistSampler, imTint, imWaterN, imUnderDepth);
+		imHistSampler, imTint, imWaterN, imUnderDepth, imLightFilt, imLightOpen);
 #else
 	return ownFsBody(in, g, t, fog, atlas, atlasSampler);
 #endif
@@ -2562,11 +2563,11 @@ fragment float4 own_fs_tr(VOut in [[stage_in]], float4 imDst [[color(0)]], const
 	, constant ImFrame &imf [[buffer(30)]], depth2d_array<float> imShadowMap [[texture(20)]], sampler imShadowCmp [[sampler(13)]]
 	, texture3d<float> imLightVol [[texture(21)]], sampler imLightSampler [[sampler(12)]], texture3d<float> imSeeds [[texture(24)]], texture2d<float> imPbrN [[texture(27)]], texture2d<float> imPbrS [[texture(28)]]
 	, texture2d<float> imHistColor [[texture(22)]], depth2d<float> imHistDepth [[texture(23)]], sampler imHistSampler [[sampler(11)]]
-	, texture2d<float> imUnder [[texture(25)]], depth2d<float> imUnderDepth [[texture(26)]]
+	, texture2d<float> imUnder [[texture(25)]], depth2d<float> imUnderDepth [[texture(26)]], texture3d<float> imLightFilt [[texture(29)]], texture3d<float> imLightOpen [[texture(30)]]
 	) {
 	float3 imTint = float3(1.0), imWaterN = float3(0.0);
 	float4 c = ownFsBody(in, g, t, fog, atlas, atlasSampler, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imSeeds, imPbrN, imPbrS, imHistColor, imHistDepth,
-		imHistSampler, imTint, imWaterN, imUnderDepth);
+		imHistSampler, imTint, imWaterN, imUnderDepth, imLightFilt, imLightOpen);
 	float a = saturate(c.a);
 	float3 dst = imDst.rgb;
 	float3 behind;

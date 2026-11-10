@@ -21,6 +21,9 @@
 // runs frames into each other (the CPU is a few frames ahead), so a sampled frame's first encoders start long before they can
 // do anything, behind the previous frame's work (its span read 41.6 ms at a 7.4 ms frame). The sampled frame counts from where
 // the work before it ended; what an encoder did under the previous frame's work is that frame's, not booked.
+// And a timed submit runs alone: the submit after a lead or a sampled one waits on the GPU (an MTLEvent) until it has ended. Where
+// the GPU has room (shaders off: 136 fps, the GPU far from busy) it otherwise runs the next frames under a sampled one, which
+// stretched that frame to 18 ms of a 7.3 ms frame: its start-to-end wasn't its cost. Costs a little overlap every sixth frame.
 #import "mcmetal.h"
 #include <os/lock.h>
 #include <stdatomic.h>
@@ -50,6 +53,9 @@ static int imtPresented;   // this submit presented (mc_present*)
 static int imtRenderTag = -1;  // the tag of the render encoder now open (mcmetal.m openRender), -1 none
 static MTLTimestamp imtCpu0, imtGpu0;
 static id<MTLDevice> imtDevice;
+static id<MTLEvent> imtEvent;     // a timed submit signals it when done; the next submit's command buffers wait for that
+static uint64_t imtEventVal;      // the last value signalled
+static uint64_t imtWaitVal;       // what this submit's command buffers wait for (0: nothing)
 
 int imtTag;  // the tag the game's own passes are booked under now
 
@@ -87,6 +93,7 @@ static int imtInit(Ctx *ctx) {
 			}
 			[device sampleTimestamps:&imtCpu0 gpuTimestamp:&imtGpu0];
 			imtDevice = [device retain];
+			imtEvent = [device newEvent];
 			imtOk = 1;
 			printf("[Imagine Metal] pass timing on (every %d frames)\n", IMT_EVERY);
 			return 1;
@@ -116,6 +123,10 @@ static int imtGroup(int tag, id cb) {
 }
 
 void imt_pre_cmd(id<MTLCommandBuffer> c) { imtPreCb = c; }
+
+void imt_cmd_begin(id<MTLCommandBuffer> c) {
+	if (imtWaitVal && imtEvent) [c encodeWaitForEvent:imtEvent value:imtWaitVal];
+}
 
 // A render pass descriptor's timestamps (attachment 1), under tag (-1: the current one). Clears attachment 1 when not sampling, so
 // a descriptor kept across frames (mcopt.cpu.pass) doesn't keep writing into an old slot.
@@ -194,6 +205,13 @@ int im_time_tag(Enc *enc, int tag, int inPass) {
 void imt_commit(Enc *enc, id<MTLCommandBuffer> c) {
 	int presented = imtPresented;
 	imtPresented = 0;
+	// (a timed submit, lead or sampled: the next submit waits for it on the GPU, so nothing runs under it)
+	imtWaitVal = 0;
+	if (imtSlot >= 0 && imtEvent) {
+		imtEventVal++;
+		[c encodeSignalEvent:imtEvent value:imtEventVal];
+		imtWaitVal = imtEventVal;
+	}
 	imtRenderTag = -1;
 	imtPreCb = nil;  // (committed just before: mcmetal.m mc_enc_commit; the next submit's pre is a new one)
 	imtTag = IMT_MISC;  // (the next submit's first passes: uploads, the lightmap, until the level's own say otherwise)

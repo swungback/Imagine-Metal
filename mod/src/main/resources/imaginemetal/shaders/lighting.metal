@@ -314,6 +314,20 @@ static float imEmission(uint cls, float3 tex) {
 // light level there (0..1; it spreads each source 4 levels stronger than Minecraft does, so coloured lights read clearly).
 // The colour's saturation is pushed past the source's own, since lighting grey stone and the tone curve wash a light's colour
 // out; on screen it then reads as the colour it is.
+// (the filter's result, c the open voxels' weighted mean, as the grid's colour at the torch light's strength)
+static float4 imBlockLightOf(float4 c, float inside, constant ImFrame &f) {
+	float3 warm = f.blockColor.rgb;
+	float m = max(max(c.r, c.g), c.b);
+	if (m < 1e-4) return float4(warm, 0.0);
+	float3 hue = c.rgb / m;
+	float hl = imLuma(hue);
+	hue = max(hl + (hue - hl) * 1.35, 0.0);
+	// (as bright as the torch colour, times how bright the sources here are: 1 for most, about half near lava)
+	hue *= max(max(warm.r, warm.g), warm.b) / max(max(max(hue.r, hue.g), hue.b), 1e-4) * min(m, 1.0);
+	float w = inside * smoothstep(0.0, 0.04, c.a);
+	return float4(mix(warm, hue, w), c.a * inside);
+}
+
 static float4 imBlockLight(float3 p, float3 n, constant ImFrame &f, texture3d<float> vol, sampler vs) {
 	float3 warm = f.blockColor.rgb;
 	if (f.lightVol.w < 0.5) return float4(warm, 0.0);
@@ -338,15 +352,23 @@ static float4 imBlockLight(float3 p, float3 n, constant ImFrame &f, texture3d<fl
 		wsum += w;
 	}
 	c = wsum > 1e-4 ? c / wsum : float4(0.0);
-	float m = max(max(c.r, c.g), c.b);
-	if (m < 1e-4) return float4(warm, 0.0);
-	float3 hue = c.rgb / m;
-	float hl = imLuma(hue);
-	hue = max(hl + (hue - hl) * 1.35, 0.0);
-	// (as bright as the torch colour, times how bright the sources here are: 1 for most, about half near lava)
-	hue *= max(max(warm.r, warm.g), warm.b) / max(max(max(hue.r, hue.g), hue.b), 1e-4) * min(m, 1.0);
-	float w = inside * smoothstep(0.0, 0.04, c.a);
-	return float4(mix(warm, hue, w), c.a * inside);
+	return imBlockLightOf(c, inside, f);
+}
+
+// The same filter from the grid's filter-weighted copies (light.metal filt and open; the terrain binds them at 29 and 30): the
+// hardware's trilinear sample of filt is the sum of w v over the open voxels, of open the sum of w, so two filtered samples give
+// what the eight reads above add up by hand (the same sampler: linear, clamped to the edge, as the reads' clamp)
+static float4 imBlockLightF(float3 p, float3 n, constant ImFrame &f, texture3d<float> filt, texture3d<float> open, sampler vs) {
+	float3 warm = f.blockColor.rgb;
+	if (f.lightVol.w < 0.5) return float4(warm, 0.0);
+	float3 uvw = (p + n * 0.5 - f.lightVol.xyz) / f.lightSize.xyz;
+	float3 e = min(uvw, 1.0 - uvw) * f.lightSize.xyz;
+	float inside = smoothstep(1.0, 14.0, min(min(e.x, e.y), e.z));
+	if (inside <= 0.0) return float4(warm, 0.0);
+	float4 c = filt.sample(vs, uvw, level(0.0));
+	float wsum = open.sample(vs, uvw, level(0.0)).r;
+	c = wsum > 1e-4 ? c / wsum : float4(0.0);
+	return imBlockLightOf(c, inside, f);
 }
 
 // One terrain fragment: albedo as sampled and tinted (display-encoded, vanilla's AO and face shade already in it through the
@@ -379,10 +401,17 @@ static float3 imGenNormal(texture2d<float> atlas, float2 uv, float4 rect, float 
 	if (max(fade.x, fade.y) < 0.02) return float3(0, 0, 1);
 	float lc = length(col);
 	float2 nm = float2(0.0);
-	if (t.y + off.y < hi.y) nm.y += imGnDif(atlas, t + float2(0, off.y), lc);
-	if (t.x + off.x < hi.x) nm.x += imGnDif(atlas, t + float2(off.x, 0), lc);
-	if (t.y - off.y > lo.y) nm.y -= imGnDif(atlas, t - float2(0, off.y), lc);
-	if (t.x - off.x > lo.x) nm.x -= imGnDif(atlas, t - float2(off.x, 0), lc);
+	// (the four neighbours' reads, each skipped past the sprite's edge as before; a read whose point stays in the centre texel reads
+	// the centre texel, so that one is read once and shared: near, an eighth of a texel out, most points don't cross into a
+	// neighbour, so mostly one read, never more than three, instead of four. The same values summed in the same order.)
+	float2 tc = floor(t);
+	bool upIn = t.y + off.y < hi.y, rightIn = t.x + off.x < hi.x, downIn = t.y - off.y > lo.y, leftIn = t.x - off.x > lo.x;
+	bool upX = floor(t.y + off.y) != tc.y, rightX = floor(t.x + off.x) != tc.x, downX = floor(t.y - off.y) != tc.y, leftX = floor(t.x - off.x) != tc.x;
+	float dc = (upIn && !upX) || (rightIn && !rightX) || (downIn && !downX) || (leftIn && !leftX) ? imGnDif(atlas, t, lc) : 0.0;
+	if (upIn) nm.y += upX ? imGnDif(atlas, t + float2(0, off.y), lc) : dc;
+	if (rightIn) nm.x += rightX ? imGnDif(atlas, t + float2(off.x, 0), lc) : dc;
+	if (downIn) nm.y -= downX ? imGnDif(atlas, t - float2(0, off.y), lc) : dc;
+	if (leftIn) nm.x -= leftX ? imGnDif(atlas, t - float2(off.x, 0), lc) : dc;
 	nm = clamp(nm * (2.5 * strength) * fade, -1.0, 1.0);
 	return normalize(float3(nm, 1.0));
 }
@@ -856,7 +885,7 @@ static inline float imDither(float2 pixel, constant ImFrame &f) {
 }
 
 static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint mat, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp,
-	texture3d<float> lvol, sampler lsamp, texture3d<float> seeds, texture2d<float> pbrN, texture2d<float> pbrS, float2 uv, float4 rect, texture2d<float> atlas, texture2d<float> hc, depth2d<float> hd, sampler hs,
+	texture3d<float> lvol, sampler lsamp, texture3d<float> lfilt, texture3d<float> lopen, texture3d<float> seeds, texture2d<float> pbrN, texture2d<float> pbrS, float2 uv, float4 rect, texture2d<float> atlas, texture2d<float> hc, depth2d<float> hd, sampler hs,
 	depth2d<float> ud) {
 	// (the engine hasn't filled a frame yet, or the shaders are switched off live: lit plainly, close to vanilla's lightmap)
 	if (f.flags.z == 0) {
@@ -1084,7 +1113,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 
 	// torches: warm, weaker in full daylight
 	// (no block light and full daylight: the grid's eight reads skipped, most of an open landscape by day)
-	float4 bl = !IM_FC_COLORLIGHT || (block < 0.01 && sky > 0.97 && f.blockColor.w > 0.5) ? float4(f.blockColor.rgb, 0.0) : imBlockLight(p, n, f, lvol, lsamp);
+	float4 bl = !IM_FC_COLORLIGHT || (block < 0.01 && sky > 0.97 && f.blockColor.w > 0.5) ? float4(f.blockColor.rgb, 0.0) : imBlockLightF(p, n, f, lfilt, lopen, lsamp);
 	float3 torch = bl.rgb * imBlockCurve(max(block, bl.a)) * (1.0 - 0.25 * f.blockColor.w * smoothstep(0.5, 1.0, sky));
 	// (a light's own faces sit in its brightest light: the whole block lit up, a copper bulb's frame and a jack o'lantern's skin
 	// as bright as their glowing parts. Only the parts that glow should: its own light on it much less)
@@ -1204,7 +1233,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		if (f.lightVol.w < 0.5) return float3(0.25, 0.0, 0.25);
 		float3 uvw = (p + n * 0.5 - f.lightVol.xyz) / f.lightSize.xyz;
 		if (any(uvw < 0.0) || any(uvw > 1.0)) return float3(0.25, 0.0, 0.25);
-		float4 gl = imBlockLight(p, n, f, lvol, lsamp);
+		float4 gl = imBlockLightF(p, n, f, lfilt, lopen, lsamp);
 		float gm = max(max(gl.r, gl.g), gl.b);
 		return pow(gm > 1e-4 ? gl.rgb / gm * saturate(gl.a * 1.5) : float3(0.0), 1.0 / 2.2) * 0.9 + base * 0.1;
 	}

@@ -88,6 +88,7 @@ void imt_rp(MTLRenderPassDescriptor *rp, int tag);  // our own render passes: th
 void imt_open_render(MTLRenderPassDescriptor *rp);  // mcopt's render encoders (openRender)
 void imt_cpd(MTLComputePassDescriptor *d, int tag, id<MTLCommandBuffer> c);  // c: the encoder's command buffer (the pre one's run first)
 void imt_pre_cmd(id<MTLCommandBuffer> c);  // the pre command buffer just made (mc_pre)
+void imt_cmd_begin(id<MTLCommandBuffer> c);  // a command buffer of the frame just made, nothing encoded yet
 id<MTLComputeCommandEncoder> imt_compute(id<MTLCommandBuffer> c, int tag, MTLDispatchType type);  // retained
 id<MTLBlitCommandEncoder> imt_blit(id<MTLCommandBuffer> c, int tag);  // retained
 void imt_present(void);

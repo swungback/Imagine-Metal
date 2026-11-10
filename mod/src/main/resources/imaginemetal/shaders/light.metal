@@ -9,11 +9,16 @@
 //
 // shift: when the box moves (the player crossed into another section), how far, in voxels: the previous frame is read shifted by
 // it, so what has already spread stays in place in the world instead of starting over.
+//
+// filt / open: the same step's result weighted for the terrain's leak-proof filter (lighting.metal imBlockLightF): filt = the
+// voxel times open, open = 1 where light can be (0 solid). One hardware trilinear sample of each gives the sums the filter's
+// eight reads built by hand (sum of w v over open voxels, sum of w), so its result is the same at a quarter of the reads.
 #include <metal_stdlib>
 using namespace metal;
 
 kernel void im_light_step(texture3d<float, access::read> seeds [[texture(0)]], texture3d<half, access::read> prev [[texture(1)]],
-	texture3d<half, access::write> next [[texture(2)]], constant int4 &shift [[buffer(0)]], uint3 id [[thread_position_in_grid]]) {
+	texture3d<half, access::write> next [[texture(2)]], texture3d<half, access::write> filt [[texture(3)]], texture3d<half, access::write> open [[texture(4)]],
+	constant int4 &shift [[buffer(0)]], uint3 id [[thread_position_in_grid]]) {
 	int3 size = int3(next.get_width(), next.get_height(), next.get_depth());
 	int3 v = int3(id);
 	if (any(v >= size)) return;
@@ -23,6 +28,8 @@ kernel void im_light_step(texture3d<float, access::read> seeds [[texture(0)]], t
 	// a solid block stops light, unless it gives off light itself (glowstone, sea lanterns, froglights...)
 	if ((bits & 128u) != 0u && level == 0.0) {
 		next.write(half4(0.0h, 0.0h, 0.0h, -1.0h), id);  // (a < 0: solid, "no data" to the terrain's filter, not "no light")
+		filt.write(half4(0.0h), id);
+		open.write(half4(0.0h), id);
 		return;
 	}
 	float strength = level;
@@ -53,4 +60,6 @@ kernel void im_light_step(texture3d<float, access::read> seeds [[texture(0)]], t
 		hue = m > 1e-4 ? hue / m : hue;
 	}
 	next.write(half4(half3(hue), half(strength)), id);
+	filt.write(half4(half3(hue), half(strength)), id);
+	open.write(half4(1.0h), id);
 }

@@ -27,6 +27,12 @@ void mc_im_light_bind(id<MTLTexture> volume, id<MTLSamplerState> sampler, id<MTL
 	imLightTex = volume;
 	imLightSampler = sampler;
 }
+// (the light grid weighted for the terrain's filter, imlight.m / light.metal: own_fs textures 29 and 30)
+static id<MTLTexture> imLightFilt, imLightOpen;
+void mc_im_light_bind_filter(id<MTLTexture> filt, id<MTLTexture> open) {
+	imLightFilt = filt;
+	imLightOpen = open;
+}
 static id<MTLTexture> imShadowTex;
 static id<MTLSamplerState> imShadowCmp;
 void mc_im_shadow_bind(id<MTLTexture> map, id<MTLSamplerState> cmp) {
@@ -937,6 +943,10 @@ drawCall:
 		[r setFragmentTexture:imLightTex atIndex:21];
 		[r setFragmentSamplerState:imLightSampler atIndex:12];
 		if (imSeedTex) [r setFragmentTexture:imSeedTex atIndex:24];
+		if (imLightFilt && imLightOpen) {
+			[r setFragmentTexture:imLightFilt atIndex:29];
+			[r setFragmentTexture:imLightOpen atIndex:30];
+		}
 	}
 	if (imUnderTex) [r setFragmentTexture:imUnderTex atIndex:25];
 	if (imUnderDepthTex) [r setFragmentTexture:imUnderDepthTex atIndex:26];

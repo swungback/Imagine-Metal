@@ -8,12 +8,13 @@
 #include <string.h>
 
 void mc_im_light_bind(id<MTLTexture> volume, id<MTLSamplerState> sampler, id<MTLTexture> seeds);  // mcown.m
+void mc_im_light_bind_filter(id<MTLTexture> filt, id<MTLTexture> open);  // mcown.m
 
 #define IM_LIGHT_PENDING 160
 typedef struct {
 	id<MTLDevice> device;
 	id<MTLComputePipelineState> step;
-	id<MTLTexture> seeds, light[2];
+	id<MTLTexture> seeds, light[2], filt, open;  // (filt, open: the step's result weighted for the terrain's filter, light.metal)
 	id<MTLSamplerState> linear;
 	int sx, sy, sz, cur;
 	// uploads waiting for the next step: copied into their own buffers and blitted into seeds on the frame's command buffer, so
@@ -59,6 +60,10 @@ ImLight *im_light_new(Ctx *ctx, const char *source, int sx, int sy, int sz, char
 		td.storageMode = MTLStorageModePrivate;
 		td.usage = MTLTextureUsageShaderRead | MTLTextureUsageShaderWrite;
 		for (int i = 0; i < 2; i++) l->light[i] = [ctx->device newTextureWithDescriptor:td];
+		// (the step's result weighted for the terrain's filter: light.metal filt / open)
+		l->filt = [ctx->device newTextureWithDescriptor:td];
+		td.pixelFormat = MTLPixelFormatR16Float;
+		l->open = [ctx->device newTextureWithDescriptor:td];
 		MTLSamplerDescriptor *sd = [[MTLSamplerDescriptor new] autorelease];
 		sd.minFilter = MTLSamplerMinMagFilterLinear;
 		sd.magFilter = MTLSamplerMinMagFilterLinear;
@@ -66,13 +71,15 @@ ImLight *im_light_new(Ctx *ctx, const char *source, int sx, int sy, int sz, char
 		sd.tAddressMode = MTLSamplerAddressModeClampToEdge;
 		sd.rAddressMode = MTLSamplerAddressModeClampToEdge;
 		l->linear = [ctx->device newSamplerStateWithDescriptor:sd];
-		if (!l->seeds || !l->light[0] || !l->light[1] || !l->linear) {
+		if (!l->seeds || !l->light[0] || !l->light[1] || !l->filt || !l->open || !l->linear) {
 			snprintf(err, (size_t) errCap, "light grid textures could not be created");
 			return NULL;
 		}
 		l->seeds.label = @"Imagine Metal light seeds";
 		l->light[0].label = @"Imagine Metal light A";
 		l->light[1].label = @"Imagine Metal light B";
+		l->filt.label = @"Imagine Metal light, filter-weighted";
+		l->open.label = @"Imagine Metal light, open voxels";
 		return l;
 	}
 }
@@ -124,6 +131,8 @@ void im_light_step(Enc *enc, ImLight *l, int shiftX, int shiftY, int shiftZ, int
 		[c setTexture:l->seeds atIndex:0];
 		[c setTexture:l->light[l->cur] atIndex:1];
 		[c setTexture:l->light[next] atIndex:2];
+		[c setTexture:l->filt atIndex:3];
+		[c setTexture:l->open atIndex:4];
 		int shift[4] = {shiftX, shiftY, shiftZ, 0};
 		[c setBytes:shift length:sizeof shift atIndex:0];
 		[c dispatchThreads:MTLSizeMake((NSUInteger) l->sx, (NSUInteger) l->sy, (NSUInteger) l->sz) threadsPerThreadgroup:MTLSizeMake(8, 8, 4)];
@@ -131,4 +140,5 @@ void im_light_step(Enc *enc, ImLight *l, int shiftX, int shiftY, int shiftZ, int
 		l->cur = next;
 	}
 	mc_im_light_bind(l->light[l->cur], l->linear, l->seeds);
+	mc_im_light_bind_filter(l->filt, l->open);
 }
