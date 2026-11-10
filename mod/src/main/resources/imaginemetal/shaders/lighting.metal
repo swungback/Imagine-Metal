@@ -1027,6 +1027,9 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// isn't cut by long, hard, near-black shadows across whole valleys; the sky's light carries more of the picture)
 	float lowSun = f.flags.x == 0 ? 1.0 - smoothstep(0.03, 0.32, f.lightDir.y) : 0.0;
 	sun = mix(sun, max(sun, open * 0.55), lowSun);
+	// (leaves past the near shadow map: the far map's coarse texels speckled the canopy with blotchy dark patches, "shadows far
+	// look off"; there their shadows are softened toward the open sky)
+	if (cls == IM_MAT_FOLIAGE) sun = mix(sun, max(sun, open), 0.45 * smoothstep(26.0, 40.0, length(p)));
 	float3 direct = f.lightColor.rgb * (wrap * sun * (1.0 - 0.35 * lowSun));
 	if (sun > 0.002 && f.extra.y > 0.5) direct *= imGlassTint(p, n, f, seeds);
 	// (and glow when the light is behind them: Reimagined's subsurface highlight, looking toward the sun through grass and leaves,
