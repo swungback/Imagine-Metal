@@ -1311,6 +1311,19 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 	float nlen = length(nrm);
 	bool particle = nlen < 0.1;
 	float3 n = particle ? -normalize(p) : nrm / nlen;
+	if (!particle && !hand && kind < 2.5) {
+		// (mobs' and armour's own bumps, generated as the terrain's are: the texture's light and dark across the surface (screen
+		// derivatives, Schüler's frame) tilt the normal a little, so a mob's skin and armour plates read in relief, not flat print)
+		float lb = imLuma(base);
+		float3 dp1 = dfdx(p), dp2 = dfdy(p);
+		float dl1 = dfdx(lb), dl2 = dfdy(lb);
+		float3 r1 = cross(dp2, n), r2 = cross(n, dp1);
+		float det = dot(dp1, r1);
+		float3 g = (r1 * dl1 + r2 * dl2) / (abs(det) > 1e-10 ? det : 1e-10);
+		g -= n * dot(g, n);
+		float gl = length(g);
+		if (gl > 1e-5) n = normalize(n - g * (min(gl, 4.0) / gl) * 0.06);
+	}
 	float block = saturate(light.x), sky = saturate(light.y);
 	float skyF = imSkyCurve(sky);
 	// (the Nether has no sky light, so its ambient (Reimagined's netherColor, ambientUp) reached nothing: it lights everything)
@@ -1397,11 +1410,15 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 		float3 env = mix(f.ambientDown.rgb, f.ambientUp.rgb, R.y * 0.5 + 0.5) * skyF * 1.4 + torch * 0.9;
 		// (the shine follows the texture's own light and dark: a flat tint over the whole piece hid every detail of gold armour
 		// by a torch, one smooth yellow shape)
+		// (a metal: less of its light diffuse, more mirrored; both in the texture's own light and dark, squared, so the plates'
+		// edges and rivets stay readable: "cooked", flat and not shiny, by a torch)
+		radiance *= mix(1.0, 0.6, shine);
 		float3 tintM = base / max(max(max(base.r, base.g), base.b), 0.05);
-		tintM *= smoothstep(0.05, 0.6, imLuma(base)) * 0.85 + 0.15;
+		float tl = smoothstep(0.05, 0.75, imLuma(base));
+		tintM *= 0.15 + 0.85 * tl * tl;
 		// (a torch or lantern near it makes its own highlight, as the sun does: armour shines indoors too)
-		float tsp = pow(saturate(dot(n, V)), 12.0) * 0.22;
-		radiance += tintM * (f.lightColor.rgb * sp + env * (0.1 + 0.6 * fres) + torch * tsp) * (shine * f.minLight.w);
+		float tsp = pow(saturate(dot(n, V)), 3.0) * 0.5;
+		radiance += tintM * (f.lightColor.rgb * sp + env * (0.15 + 0.7 * fres) + torch * tsp) * (shine * f.minLight.w);
 	}
 	if (f.water.z > 0.5 && f.flags.x == 0 && !hand) {
 		// (eyes under water: the terrain fades into our blue-green water fog, mobs only into Minecraft's dark navy one, so they

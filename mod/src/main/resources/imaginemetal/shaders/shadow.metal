@@ -45,6 +45,7 @@ vertex ImShadowOut im_shadow_vs(uint vid [[vertex_id]], uint iid [[instance_id]]
 	ImShadowOut o;
 	uint quadStart, meta;
 	int3 origin;
+	uint matOff = 0xffffffffu;
 	if (FAT) {
 		Inst e = ((device const Inst *) lists)[f.listBase + iid];
 		quadStart = e.quadStart;
@@ -56,12 +57,25 @@ vertex ImShadowOut im_shadow_vs(uint vid [[vertex_id]], uint iid [[instance_id]]
 		quadStart = rec.quadStart;
 		meta = rec.meta;
 		origin = int3(s.x, s.y, s.z);
+		matOff = rec.pad0;
 	}
 	uint quad = vid >> 2, corner = vid & 3;
 	if (quad > (meta & 63)) {
 		o.pos = float4(0, 0, 2, 1); // past the unit's quads: outside the clip volume
 		o.uv = float2(0);
 		return o;
+	}
+	// (small plants on the ground cast none: a dead bush's, a flower's or grass's thin, sharp, pale shadow lay beside it like a
+	// ghost copy. Their quads are the ones with only their upper corners waving (terrain.metal); leaves, tall plants' tops and
+	// vines wave whole and still cast)
+	if (matOff != 0xffffffffu) {
+		uint m = ((device const uchar *) arenaRaw)[matOff + quad];
+		uint wc = (m >> 4) & 15u, cls = m & 15u;
+		if (cls != 4u && cls != 6u && wc != 0u && wc != 15u && wc != 5u) {
+			o.pos = float4(0, 0, 2, 1);
+			o.uv = float2(0);
+			return o;
+		}
 	}
 	Vtx v = imShadowFetch((quadStart + quad) * 4 + corner, arenaRaw);
 	float3 pos = float3(v.pos) + float3(origin - f.camBlock.xyz) + f.camOffset.xyz;
