@@ -24,6 +24,8 @@ public final class Benchmark {
 
 	private static final double SETTLE = 1.5, MEASURE = 4.0;  // (3 s windows swung by a few fps either way)
 	private static final String REF = "everything on";
+	/** A timing step, not a feature: the terrain's encoder cut into its parts (leaf depth, solid, leaf colour) to time them apart. */
+	private static final String SPLIT = "(timing) terrain cut into its parts";
 	private static List<Step> steps;
 	private static int index;
 	private static long stepStart, frames, measureStart;
@@ -31,7 +33,7 @@ public final class Benchmark {
 	private static Map<Field, Object> saved;
 	private static boolean wasOff;
 	private static final double[] refPass = new double[PassTimes.TAGS];
-	private static double refPassFrame;
+	private static double refPassFrame, refPassIdle;
 	private static int refPassN;
 
 	private Benchmark() {
@@ -48,6 +50,7 @@ public final class Benchmark {
 		steps = new ArrayList<>();
 		steps.add(new Step("everything on", () -> {
 		}));
+		steps.add(new Step(SPLIT, () -> PassTimes.splitTerrain = true));
 		steps.add(new Step("leaf depth pre-pass off", () -> Settings.leafPrepass = false));
 		steps.add(new Step("shadows off", () -> Settings.shadows = false));
 		steps.add(new Step("shadow range 96", () -> Settings.shadowRange = Math.min(Settings.shadowRange, 96f)));
@@ -91,7 +94,7 @@ public final class Benchmark {
 		index = -1;
 		results.clear();
 		java.util.Arrays.fill(refPass, 0.0);
-		refPassFrame = 0.0;
+		refPassFrame = refPassIdle = 0.0;
 		refPassN = 0;
 		say("Benchmark: stand still and don't touch anything, about " + Math.round(steps.size() * (SETTLE + MEASURE)) + " seconds...", true);
 		next();
@@ -136,6 +139,7 @@ public final class Benchmark {
 					refPassN++;
 					for (int tg = 0; tg < PassTimes.TAGS; tg++) refPass[tg] += w.ms(tg);
 					refPassFrame += w.frameMs();
+					refPassIdle += w.idleMs();
 				}
 			}
 			next();
@@ -157,6 +161,7 @@ public final class Benchmark {
 				refN++;
 				continue;
 			}
+			if (r.name.equals(SPLIT)) continue;  // (its cost is the cuts themselves; its passes line is the point)
 			double before = i > 0 && results.get(i - 1).name.equals(REF) ? results.get(i - 1).ms : Double.NaN;
 			double after = i + 1 < results.size() && results.get(i + 1).name.equals(REF) ? results.get(i + 1).ms : before;
 			if (Double.isNaN(before)) before = after;
@@ -177,7 +182,8 @@ public final class Benchmark {
 			List<Integer> order = new ArrayList<>();
 			for (int t = 0; t < PassTimes.TAGS; t++) if (refPass[t] / refPassN >= 0.05) order.add(t);
 			order.sort((a, b) -> Double.compare(refPass[b], refPass[a]));
-			StringBuilder b = new StringBuilder(String.format(Locale.ROOT, "benchmark: GPU %.1f ms a frame with everything on:", refPassFrame / refPassN));
+			StringBuilder b = new StringBuilder(String.format(Locale.ROOT, "benchmark: GPU %.1f ms a frame with everything on (idle %.1f):",
+				refPassFrame / refPassN, refPassIdle / refPassN));
 			for (int i = 0; i < order.size(); i++) {
 				int t = order.get(i);
 				b.append(i == 0 ? " " : ", ").append(PassTimes.NAMES[t]).append(String.format(Locale.ROOT, " %.1f", refPass[t] / refPassN));
@@ -189,6 +195,7 @@ public final class Benchmark {
 	}
 
 	private static void restore() {
+		PassTimes.splitTerrain = false;
 		if (Live.isOff()) Live.setOff(false);
 		Live.restore(saved);
 	}

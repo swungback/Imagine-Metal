@@ -1024,7 +1024,11 @@ final class OwnFrag {
 				this.oracleEnd(c);
 			}
 			if (OwnTerrain.STATS) this.stats(c);
-			return split;
+			if (imaginemetal.PassTimes.splitTerrain && imaginemetal.PassTimes.terrainPart(imaginemetal.PassTimes.TERRAIN)) this.bound = false;
+			// (a timing cut is a split too: the caller puts the game's pass state back, MetalBridge.restorePass)
+			boolean cut = this.timeCut;
+			this.timeCut = false;
+			return split || cut;
 		}
 		if (c.occ) {
 			// phase A: what each unit's mask says was visible; the split and the pyramid; phase B: the rest that is visible, new masks
@@ -1114,6 +1118,8 @@ final class OwnFrag {
 
 	/** (Imagine Metal) the cutout depth pre-pass's state for layer(): 0 off, 1 drawing the pre-pass, 2 the colour after it. */
 	private int preMode;
+	/** (Imagine Metal) the benchmark's timing step cut the render encoder this frame (PassTimes.terrainPart). */
+	private boolean timeCut;
 
 	/**
 	 * (Imagine Metal) whether the cutout layer gets its depth pre-pass this frame: OwnTerrain.leafPrepass (live; Imagine Metal's
@@ -1139,6 +1145,13 @@ final class OwnFrag {
 	/** bank: an offset added to every list id (splitNear: c.listCount() for phase A's farther sections). */
 	private void layer(Config c, int layer, int kind, long d, long arena, long table, long recs, long u, GpuTextureView atlas, GpuSampler sampler,
 		GpuTextureView light, GpuSampler lightSampler, long lists, long args, int bank) {
+		// (Imagine Metal: the benchmark's timing step books the leaf depth pre-pass, the solid and the leaf colour apart; a cut is a
+		// new encoder, so everything is bound again)
+		if (imaginemetal.PassTimes.splitTerrain && imaginemetal.PassTimes.terrainPart(this.preMode == 1 ? imaginemetal.PassTimes.TERRAIN_LEAF_DEPTH
+			: layer == 1 ? imaginemetal.PassTimes.TERRAIN_LEAVES : imaginemetal.PassTimes.TERRAIN)) {
+			this.bound = false;
+			this.timeCut = true;
+		}
 		boolean bins = layer == 1 && c.sort;
 		int classes = c.classes(), used = bins ? BINS : c.sizeClasses();
 		for (int i = 0; i < used; i++) {

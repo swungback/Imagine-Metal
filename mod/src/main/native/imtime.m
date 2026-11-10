@@ -10,9 +10,13 @@
 // When the frame's command buffer completes, the samples are read and summed per tag; Java reads the averages (ms a frame) every
 // few seconds for the perf line (Perf) and the benchmark.
 //
-// An encoder's time is from the first of its stages starting to the last ending. Neighbouring encoders can overlap a little on the
-// GPU (the next one's vertex stage under this one's fragment stage), so the tags' sum can come out a little over the frame's span,
-// which is the honest total: the first sample of the frame to the last.
+// Attribution: encoders overlap on the GPU (the next one's vertex stage under this one's fragment stage, and an encoder's first
+// sample can come long before its work, while it waits behind the ones before it), so an encoder's own first-to-last span says
+// little (they summed to twice the frame). Instead the submit's encoders are put in the order the GPU runs them (the pre command
+// buffer's, then the main one's, each in encoding order) and each is booked the time from where the work before it ended (the
+// latest end so far) to its own end: what it added to the frame. Those parts partition the submit's span (its first sample to its
+// last end) exactly, with the gaps where the GPU had nothing (an encoder starting after everything before it had ended) booked
+// apart as idle: tags + idle = span, by construction. Encoders not timed (debug-only ones) land in the next timed encoder.
 #import "mcmetal.h"
 #include <os/lock.h>
 #include <stdatomic.h>
@@ -25,6 +29,8 @@
 static id<MTLCounterSampleBuffer> imtBuf[IMT_SLOTS];
 static _Atomic int imtBusy[IMT_SLOTS];
 static unsigned char imtTagOf[IMT_SLOTS][IMT_GROUPS];
+static unsigned char imtPreOf[IMT_SLOTS][IMT_GROUPS];  // the group is in the pre command buffer (runs before the main one)
+static id imtPreCb;  // the pre command buffer now being recorded (unretained; mcmetal.m mc_pre), nil none
 // the GPU's clock when the slot was taken: a sample buffer keeps what earlier uses wrote wherever this one wrote nothing (a stage that
 // didn't run), so anything older than this is stale (it made encoders look hundreds of ms long)
 static MTLTimestamp imtBase[IMT_SLOTS];
@@ -45,6 +51,8 @@ static double imtSum[IMT_TAGS];  // µs summed over the sampled frames since the
 static double imtSpan;           // the frames' spans summed (µs)
 static int imtFrames;            // sampled frames (that presented) since the last read
 static int imtEncoders;
+static double imtIdle;           // the spans' GPU-idle gaps summed (µs)
+static int imtDropped;           // encoders not timed because a slot was full
 
 static int imtInit(Ctx *ctx) {
 	if (imtTried) return imtOk;
@@ -86,18 +94,27 @@ void im_time_enable(int on) { imtOn = on; }
 int imt_sampling(void) { return imtSlot >= 0; }
 
 // The next group's first sample index (4 a group), booked under tag; -1 when this submit isn't sampled or the slot is full.
-static int imtGroup(int tag) {
-	if (imtSlot < 0 || imtCount >= IMT_GROUPS) return -1;
+// cb: the encoder's command buffer (nil: the main one); a pre one's encoders default to culling.
+static int imtGroup(int tag, id cb) {
+	if (imtSlot < 0) return -1;
+	if (imtCount >= IMT_GROUPS) {
+		imtDropped++;
+		return -1;
+	}
 	int g = imtCount++;
-	imtTagOf[imtSlot][g] = (unsigned char) (tag < 0 ? imtTag : tag);
+	int pre = cb != nil && cb == imtPreCb;
+	imtTagOf[imtSlot][g] = (unsigned char) (tag >= 0 ? tag : pre ? IMT_CULL : imtTag);
+	imtPreOf[imtSlot][g] = (unsigned char) pre;
 	return g * 4;
 }
+
+void imt_pre_cmd(id<MTLCommandBuffer> c) { imtPreCb = c; }
 
 // A render pass descriptor's timestamps (attachment 1), under tag (-1: the current one). Clears attachment 1 when not sampling, so
 // a descriptor kept across frames (mcopt.cpu.pass) doesn't keep writing into an old slot.
 void imt_rp(MTLRenderPassDescriptor *rp, int tag) {
 	MTLRenderPassSampleBufferAttachmentDescriptor *s = rp.sampleBufferAttachments[1];
-	int at = imtGroup(tag);
+	int at = imtGroup(tag, nil);
 	if (at < 0) {
 		s.sampleBuffer = nil;
 		return;
@@ -115,8 +132,8 @@ void imt_open_render(MTLRenderPassDescriptor *rp) {
 	imtRenderTag = rp.sampleBufferAttachments[1].sampleBuffer ? imtTag : -1;
 }
 
-void imt_cpd(MTLComputePassDescriptor *d, int tag) {
-	int at = imtGroup(tag);
+void imt_cpd(MTLComputePassDescriptor *d, int tag, id<MTLCommandBuffer> c) {
+	int at = imtGroup(tag, c);
 	if (at < 0) return;
 	d.sampleBufferAttachments[1].sampleBuffer = imtBuf[imtSlot];
 	d.sampleBufferAttachments[1].startOfEncoderSampleIndex = (NSUInteger) at;
@@ -129,7 +146,7 @@ id<MTLComputeCommandEncoder> imt_compute(id<MTLCommandBuffer> c, int tag, MTLDis
 		if (imtSlot < 0) return [[c computeCommandEncoderWithDispatchType:type] retain];
 		MTLComputePassDescriptor *d = [MTLComputePassDescriptor computePassDescriptor];
 		d.dispatchType = type;
-		imt_cpd(d, tag);
+		imt_cpd(d, tag, c);
 		return [[c computeCommandEncoderWithDescriptor:d] retain];
 	}
 }
@@ -138,7 +155,7 @@ id<MTLComputeCommandEncoder> imt_compute(id<MTLCommandBuffer> c, int tag, MTLDis
 id<MTLBlitCommandEncoder> imt_blit(id<MTLCommandBuffer> c, int tag) {
 	@autoreleasepool {
 		if (imtSlot < 0) return [[c blitCommandEncoder] retain];
-		int at = imtGroup(tag);
+		int at = imtGroup(tag, c);
 		if (at < 0) return [[c blitCommandEncoder] retain];
 		MTLBlitPassDescriptor *d = [MTLBlitPassDescriptor blitPassDescriptor];
 		d.sampleBufferAttachments[1].sampleBuffer = imtBuf[imtSlot];
@@ -171,6 +188,7 @@ void imt_commit(Enc *enc, id<MTLCommandBuffer> c) {
 	int presented = imtPresented;
 	imtPresented = 0;
 	imtRenderTag = -1;
+	imtPreCb = nil;  // (committed just before: mcmetal.m mc_enc_commit; the next submit's pre is a new one)
 	imtTag = IMT_MISC;  // (the next submit's first passes: uploads, the lightmap, until the level's own say otherwise)
 	if (imtSlot >= 0) {
 		int slot = imtSlot, n = imtCount;
@@ -179,37 +197,48 @@ void imt_commit(Enc *enc, id<MTLCommandBuffer> c) {
 		if (n == 0) {
 			atomic_store(&imtBusy[slot], 0);
 		} else {
+			// (the slot's tag and pre tables stay as they are until the handler frees the slot)
 			[c addCompletedHandler:^(id<MTLCommandBuffer> done) {
 				MTLTimestamp cpu1, gpu1;
 				[imtDevice sampleTimestamps:&cpu1 gpuTimestamp:&gpu1];
 				double usPerTick = gpu1 > imtGpu0 ? (double) (cpu1 - imtCpu0) / (double) (gpu1 - imtGpu0) / 1000.0 : 0.001;
 				double sum[IMT_TAGS] = {0};
-				uint64_t first = UINT64_MAX, last = 0;
+				uint64_t first = 0, reach = 0, idle = 0;
 				int used = 0;
 				@autoreleasepool {
 					NSData *data = [imtBuf[slot] resolveCounterRange:NSMakeRange(0, (NSUInteger) n * 4)];
 					const MTLCounterResultTimestamp *ts = data.length >= (NSUInteger) n * 4 * sizeof(MTLCounterResultTimestamp) ? data.bytes : NULL;
-					for (int g = 0; ts && g < n; g++) {
-						uint64_t a = UINT64_MAX, b = 0;
-						for (int k = 0; k < 4; k++) {
-							uint64_t t = ts[g * 4 + k].timestamp;
-							if (t == MTLCounterErrorValue || t == 0 || t < base) continue;
-							if (t < a) a = t;
-							if (t > b) b = t;
+					// the GPU's order: the pre command buffer's encoders (committed first), then the main one's, each in encoding order
+					for (int pass = 0; ts && pass < 2; pass++) {
+						for (int g = 0; g < n; g++) {
+							if (imtPreOf[slot][g] != (pass == 0)) continue;
+							uint64_t a = UINT64_MAX, b = 0;
+							for (int k = 0; k < 4; k++) {
+								uint64_t t = ts[g * 4 + k].timestamp;
+								if (t == MTLCounterErrorValue || t == 0 || t < base) continue;
+								if (t < a) a = t;
+								if (t > b) b = t;
+							}
+							if (b <= a || a == UINT64_MAX) continue;
+							if (b - a > (uint64_t) (1.0e6 / usPerTick)) continue;  // (over a second: not a real sample)
+							if (!used) first = reach = a;
+							used++;
+							uint64_t from = reach;
+							if (a > reach) {  // (the GPU had nothing to do until this one started)
+								idle += a - reach;
+								from = a;
+							}
+							if (b > from) sum[imtTagOf[slot][g]] += (double) (b - from) * usPerTick;
+							if (b > reach) reach = b;
 						}
-						if (b <= a || a == UINT64_MAX) continue;
-						if (b - a > (uint64_t) (1.0e6 / usPerTick)) continue;  // (over a second: not a real sample)
-						sum[imtTagOf[slot][g]] += (double) (b - a) * usPerTick;
-						if (a < first) first = a;
-						if (b > last) last = b;
-						used++;
 					}
 				}
 				atomic_store(&imtBusy[slot], 0);
 				if (!used) return;
 				os_unfair_lock_lock(&imtLock);
 				for (int t = 0; t < IMT_TAGS; t++) imtSum[t] += sum[t];
-				imtSpan += (double) (last - first) * usPerTick;
+				imtSpan += (double) (reach - first) * usPerTick;
+				imtIdle += (double) idle * usPerTick;
 				imtEncoders += used;
 				if (presented) imtFrames++;
 				os_unfair_lock_unlock(&imtLock);
@@ -233,16 +262,21 @@ void imt_commit(Enc *enc, id<MTLCommandBuffer> c) {
 }
 
 // The sampled frames' sums since the last read, and resets them: out[t] µs per tag, out[IMT_TAGS] the frames' GPU spans (µs),
-// out[IMT_TAGS + 1] sampled frames, out[IMT_TAGS + 2] encoders. imaginemetal.PassTimes keeps its own windows of them.
+// out[IMT_TAGS + 1] sampled frames, out[IMT_TAGS + 2] encoders, out[IMT_TAGS + 3] the spans' idle gaps (µs), out[IMT_TAGS + 4]
+// encoders left untimed (slot full). imaginemetal.PassTimes keeps its own windows of them.
 void im_time_read(double *out) {
 	os_unfair_lock_lock(&imtLock);
 	for (int t = 0; t < IMT_TAGS; t++) out[t] = imtSum[t];
 	out[IMT_TAGS] = imtSpan;
 	out[IMT_TAGS + 1] = imtFrames;
 	out[IMT_TAGS + 2] = imtEncoders;
+	out[IMT_TAGS + 3] = imtIdle;
+	out[IMT_TAGS + 4] = imtDropped;
 	for (int t = 0; t < IMT_TAGS; t++) imtSum[t] = 0.0;
 	imtSpan = 0.0;
 	imtFrames = 0;
 	imtEncoders = 0;
+	imtIdle = 0.0;
+	imtDropped = 0;
 	os_unfair_lock_unlock(&imtLock);
 }

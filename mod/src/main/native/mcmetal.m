@@ -870,7 +870,7 @@ id<MTLComputeCommandEncoder> mc_profiled_compute(Enc *enc, id<MTLCommandBuffer> 
 			lastComputeGroup = enc->sampleCount / 4;
 			int group = enc->sampleCount / 4;
 			enc->sampleCount += 4;
-			imt_cpd(d, c == enc->pre ? IMT_CULL : -1);
+			imt_cpd(d, c == enc->pre ? IMT_CULL : -1, c);
 			id<MTLComputeCommandEncoder> ce = [[c computeCommandEncoderWithDescriptor:d] retain];
 			if (group < 512) {
 				enc->sampleEnc[group] = [ce retain];
@@ -908,6 +908,7 @@ id<MTLCommandBuffer> mc_pre(Enc *enc) {
 		@autoreleasepool {
 			enc->pre = [[enc->ctx->queue commandBuffer] retain];
 			encCounters[1]++;
+			imt_pre_cmd(enc->pre);  // (Imagine Metal: the pass timing puts its encoders before the main buffer's)
 		}
 	}
 	return enc->pre;
@@ -1713,6 +1714,7 @@ void mc_clear_rect(Enc *enc, id<MTLTexture> color, id<MTLTexture> depthTex, floa
 			rp.depthAttachment.loadAction = MTLLoadActionLoad;
 			rp.depthAttachment.storeAction = MTLStoreActionStore;
 		}
+		imt_rp(rp, -1);  // (Imagine Metal: the pass timing, under the current pass)
 		id<MTLRenderCommandEncoder> re = [cmd(enc) renderCommandEncoderWithDescriptor:rp];
 		struct { float color[4]; float depth; float pad[3]; } c = {{r, g, b, a}, depth < 0 ? 0 : depth, {0}};
 		[re setRenderPipelineState:pso];

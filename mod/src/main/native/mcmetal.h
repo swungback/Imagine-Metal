@@ -86,7 +86,8 @@ enum { IMT_MISC, IMT_SHADOW, IMT_LIGHT, IMT_SKY, IMT_TERRAIN, IMT_ENTITIES, IMT_
 	IMT_AO, IMT_BLOOM, IMT_RESOLVE, IMT_TAA, IMT_HUD, IMT_PRESENT, IMT_CULL, IMT_CLOUDS };
 void imt_rp(MTLRenderPassDescriptor *rp, int tag);  // our own render passes: the descriptor's timestamps under tag (-1 the current one)
 void imt_open_render(MTLRenderPassDescriptor *rp);  // mcopt's render encoders (openRender)
-void imt_cpd(MTLComputePassDescriptor *d, int tag);
+void imt_cpd(MTLComputePassDescriptor *d, int tag, id<MTLCommandBuffer> c);  // c: the encoder's command buffer (the pre one's run first)
+void imt_pre_cmd(id<MTLCommandBuffer> c);  // the pre command buffer just made (mc_pre)
 id<MTLComputeCommandEncoder> imt_compute(id<MTLCommandBuffer> c, int tag, MTLDispatchType type);  // retained
 id<MTLBlitCommandEncoder> imt_blit(id<MTLCommandBuffer> c, int tag);  // retained
 void imt_present(void);

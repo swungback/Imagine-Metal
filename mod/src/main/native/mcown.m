@@ -478,9 +478,10 @@ static id<MTLComputeCommandEncoder> opCompute(id<MTLCommandBuffer> cmd, int slot
 		d.sampleBufferAttachments[0].startOfEncoderSampleIndex = (NSUInteger) (2 * slot);
 		d.sampleBufferAttachments[0].endOfEncoderSampleIndex = (NSUInteger) (2 * slot + 1);
 		opUsed[r] |= 1 << slot;
+		imt_cpd(d, -1, cmd);  // (Imagine Metal: the pass timing too, attachment 1)
 		return [cmd computeCommandEncoderWithDescriptor:d];
 	}
-	return type == MTLDispatchTypeConcurrent ? [cmd computeCommandEncoderWithDispatchType:type] : [cmd computeCommandEncoder];
+	return [imt_compute(cmd, -1, type) autorelease];  // (Imagine Metal: the pass timing; plain when not sampling)
 }
 
 // The solid-section occlusion's parameters and pyramid for the culls (a zero 'on' and a 1 x 1 texture when it is off this frame).
@@ -1320,7 +1321,7 @@ void mco_frag_cull(Own *w, Enc *enc, const void *frame, int frameLength, const v
 	@autoreleasepool {
 		if (w->fragClearN > 0) {
 			// (newly allocated buffers zeroed first, in the same pre command buffer, before the cull or any later pass reads them)
-			id<MTLBlitCommandEncoder> b = [mc_pre(enc) blitCommandEncoder];
+			id<MTLBlitCommandEncoder> b = [imt_blit(mc_pre(enc), IMT_CULL) autorelease];
 			b.label = @"own frag clear";
 			for (int i = 0; i < w->fragClearN; i++) [b fillBuffer:w->fragClear[i] range:NSMakeRange(0, w->fragClear[i].length) value:0];
 			[b endEncoding];
@@ -1672,6 +1673,7 @@ static int ownPyramidRP(Own *w, id<MTLCommandBuffer> cb, id<MTLTexture> depth, u
 		rp.colorAttachments[0].texture = w->rpViews[0];
 		rp.colorAttachments[0].loadAction = MTLLoadActionDontCare;
 		rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+		imt_rp(rp, -1);  // (Imagine Metal: the pass timing, under the current pass)
 		id<MTLRenderCommandEncoder> r = [cb renderCommandEncoderWithDescriptor:rp];
 		r.label = @"own frag pyramid base";
 		[r setRenderPipelineState:w->rpPso];
