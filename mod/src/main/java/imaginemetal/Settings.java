@@ -57,6 +57,10 @@ public final class Settings {
 	public static volatile boolean netherStorm = Engine.flag("imaginemetal.netherStorm", true);
 	public static volatile boolean bloomFog = Engine.flag("imaginemetal.bloomFog", true);
 	public static volatile boolean shadowFarAlternate = Engine.flag("imaginemetal.shadowFarAlternate", true);
+	/** The far shadow cascade kept until something changes it (Shadows): not saved; -Dimaginemetal.shadowFarCache=false starts with it off. */
+	public static volatile boolean shadowFarCache = Engine.flag("imaginemetal.shadowFarCache", true);
+	/** The near shadow cascade's casters culled to what the view can see (Shadows.viewCull): not saved; -Dimaginemetal.shadowNearViewCull=false. */
+	public static volatile boolean shadowNearViewCull = Engine.flag("imaginemetal.shadowNearViewCull", true);
 	public static volatile boolean ssao = Engine.flag("imaginemetal.ssao", true);
 	public static volatile float ssaoStrength = Config.number("imaginemetal.ssaoStrength", 0.7f, 0f, 1f);
 	public static volatile boolean shafts = Engine.flag("imaginemetal.shafts", true);

@@ -1,4 +1,4 @@
-# Imagine Metal: handoff (2026-11-10, ~21:35)
+# Imagine Metal: handoff (2026-11-10, ~22:00)
 
 Where things stand, for picking the work up in a new conversation.
 
@@ -11,7 +11,31 @@ Where things stand, for picking the work up in a new conversation.
   are chat lines in the log (`[CHAT] <herningstang> ...`) just before each screenshot.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
 
-## START HERE: 21:29 jungle benchmark on d810a0d (same spot, RD16, 1440x900, M1 8 GPU cores)
+## START HERE: shadow maps made cheaper (2026-11-10 ~22:00; NOT in game yet: check `git log origin/main` for whether it's pushed)
+- Step 1 of the 21:29 list, Java only (Shadows.java, OwnTerrain.setSlot/beginFrame0, Settings, Benchmark); no shader or native
+  change. Compiled only against stubs in the Claude session: CI is the first real build.
+- Far cascade kept (Settings.shadowFarCache, -Dimaginemetal.shadowFarCache=false): drawn again only when (a) its own light step
+  turns (RUN_STEP x floor(range / 32): 0.005 at range 160, about once a second at noon, every 2-3 frames at a low sun), (b) the
+  camera is 8 blocks (summed over axes) from where it was drawn, (c) a section in its box changed (OwnTerrain.setSlot ->
+  Shadows.terrainChanged, with the frame whose section table first holds the change), (d) range changed / another OwnTerrain,
+  (e) it's 1 s old (safety net). Never two frames running when shadowFarAlternate is on, so the worst case is the old cost.
+  The far cascade now has its own light direction and basis (LIGHT[1], slightly off the near one's between steps).
+- Near cascade: casters culled to what the view can see (Shadows.viewCull, Settings.shadowNearViewCull,
+  -Dimaginemetal.shadowNearViewCull=false): the cull's box is the bounding rectangle, across the light, of the view's wedge
+  (CULL[0]); the map's matrix and texel grid are untouched. Whole square when the view looks along the light. Checked against
+  brute force in a script (20 000 random views, no receiver outside the box).
+- Log every 10 s: "[Imagine Metal] shadows: far cascade drawn on X of Y frames". Benchmark has two new steps: "far shadow map
+  redrawn every other frame (cache off)" and "near shadow casters not culled to the view" (both should come out SLOWER).
+- To check in game: (1) standing still at noon the log should show the far cascade on a few frames in a hundred; (2) place /
+  break a block 40+ blocks away: its shadow must follow within a frame or two (if it lags ~1 s, terrainChanged isn't
+  firing: only the safety net is); (3) walk and fly: far shadows mustn't pop or vanish at the 8-block redraws; (4) turn the view
+  fast near trees: no shadows missing at the screen's edges (if any, viewCull: try the flag off); (5) far shadows tick once a
+  second at noon instead of gliding: if Jack sees it, lower the far step (prepare, farStep).
+- If the frame still doesn't move: the near cascade is the cost (every frame), then try near casters capped by distance along
+  the light, or the near cascade at half rate with reprojection.
+- Then steps 2 and 3 of the list below.
+
+## 21:29 jungle benchmark on d810a0d (same spot, RD16, 1440x900, M1 8 GPU cores)
 - Everything on 39 fps / 25.4 ms (was 40 / 25.0). Shaders off 125 fps / 8.0 ms (was 136 / 7.3: the measuring now costs a little,
   see the event below). Shadows off 53 fps: -7.0 ms. Sky/air off -4.2, normals off -3.5, PBR off -3.0, shadow range 96 -1.8,
   coloured light off -1.6 (was -4.9), leaf pre-pass off +5.9. Mob shadows off -0.1 (Jack keeps them off: they look broken, below).

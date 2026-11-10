@@ -1156,8 +1156,17 @@ public final class OwnTerrain {
 		if (mcopt.metal.FrameLog.ON) mcopt.metal.FrameLog.end(mcopt.metal.FrameLog.OWN_BEGIN);
 	}
 
+	/** (Imagine Metal) true from beginFrame's frame++ until this frame's section table has taken the changed slots. */
+	private boolean tableOpen;
+
+	/** (Imagine Metal) the frame number: shadowCull reads the section table of this frame. */
+	public long frameNumber() {
+		return this.frame;
+	}
+
 	private void beginFrame0() {
 		this.frame++;
+		this.tableOpen = true;
 		for (Long b; (b = this.releaseQueue.poll()) != null; ) {
 			long handle = b;
 			this.later(() -> OwnNative.release(handle));
@@ -1187,6 +1196,7 @@ public final class OwnTerrain {
 				MemoryUtil.memCopy(this.master + (long) slot * SECTION_BYTES, table + (long) slot * SECTION_BYTES, SECTION_BYTES);
 			}
 		}
+		this.tableOpen = false;
 		int live = (int) this.recAlloc.used();
 		// (-Dmcopt.own.frag.listGrowFault, tieClose test: this growth skipped, so the cull meets a real shortfall, listCap below the
 		// records in use; tieCloseFallback must grow the lists before encoding, counted as 'lists grown at the cull')
@@ -1446,6 +1456,11 @@ public final class OwnTerrain {
 		}
 		this.maxSlot = Math.max(this.maxSlot, slot);
 		long a = this.master + (long) slot * SECTION_BYTES;
+		// (Imagine Metal: the kept far shadow cascade is drawn again when a section in its box changes: where the old mesh was and
+		// where the new one is. The change is in the section table from this frame's when beginFrame is still filling it, else the next's)
+		long seen = this.tableOpen ? this.frame : this.frame + 1;
+		if (old != null) imaginemetal.Shadows.terrainChanged(seen, MemoryUtil.memGetInt(a), MemoryUtil.memGetInt(a + 4), MemoryUtil.memGetInt(a + 8));
+		if (m != null) imaginemetal.Shadows.terrainChanged(seen, x, y, z);
 		MemoryUtil.memPutInt(a, x);
 		MemoryUtil.memPutInt(a + 4, y);
 		MemoryUtil.memPutInt(a + 8, z);
