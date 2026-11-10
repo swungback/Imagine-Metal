@@ -1,4 +1,4 @@
-# Imagine Metal: handoff (2026-11-10, night, after the pass-timing rewrite)
+# Imagine Metal: handoff (2026-11-10, ~21:35)
 
 Where things stand, for picking the work up in a new conversation.
 
@@ -10,6 +10,29 @@ Where things stand, for picking the work up in a new conversation.
 - Jack's settings: `config/imaginemetal.properties` in that instance. Screenshots and `logs/latest.log` there too. His notes
   are chat lines in the log (`[CHAT] <herningstang> ...`) just before each screenshot.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
+
+## START HERE: 21:29 jungle benchmark on d810a0d (same spot, RD16, 1440x900, M1 8 GPU cores)
+- Everything on 39 fps / 25.4 ms (was 40 / 25.0). Shaders off 125 fps / 8.0 ms (was 136 / 7.3: the measuring now costs a little,
+  see the event below). Shadows off 53 fps: -7.0 ms. Sky/air off -4.2, normals off -3.5, PBR off -3.0, shadow range 96 -1.8,
+  coloured light off -1.6 (was -4.9), leaf pre-pass off +5.9. Mob shadows off -0.1 (Jack keeps them off: they look broken, below).
+- The d810a0d cuts worked on the GPU: terrain 18.2 -> 15.8 ms (leaf colour 9.3 -> 7.9, solid + rest 6.7 -> 6.0, leaf depth 1.1).
+  BUT the frame didn't get faster. Reading (likely, not proven): the frame is now held by geometry work running alongside the
+  pixel shading, mostly the shadow maps (the jungle's leaves drawn twice more from the sun, cutout alpha-tested, both cascades,
+  every frame). Evidence: shadows off -7.0 ms of frame; shadow range 96 -1.8; terrain's -2.4 ms GPU didn't show in the frame.
+- With the event (sampled frames run alone, d810a0d) "shadow maps" now reads 1.2-10 ms, ~6-9 when the wait landed: its cost
+  alone, where before it was mostly hidden under the previous frame's fragment work. GPU totals now 23-30 ms vs a 25 ms frame
+  (the overlap is worth ~2 ms). One "generated normals off" window had idle 49 ms: a pipeline-compile hitch, ignore.
+- Shaders-off check STILL fails with the event: GPU 17.3 ms at 8.0 ms, terrain 12.9. So it wasn't (only) frames running under
+  it. Probably the GPU clocking down when lightly loaded (Apple DVFS), making wall time per frame meaningless there; not
+  verified. Everything-on (GPU saturated) stays consistent, so use those. Consider dropping the event (it costs ~0.4-0.7 ms
+  average fps in the benchmark) once the shadow-map cost is understood, or keep it only for a benchmark step.
+- NEXT (in this order):
+  1. Shadow maps cheaper: far cascade cached (redraw only when the sun has turned past a step, its snapped origin moved, or
+     terrain in range changed; keep its world-space matrix and re-derive the camera-relative one each frame), near cascade
+     every frame. Check Shadows.java / imshadow.m / OwnTerrain.shadowCull for caster culling against the visible receivers.
+     Measure: "shadow maps" tag and the shadows-off delta.
+  2. Mob shadows via the shadow map (entities, near cascade only, capped, no block entities), delete imContactShadow.
+  3. Then terrain again (sky/air 4.2 in imAirFog per pixel; PBR 3.0; normals 3.5) or the deferred split if terrain stays > ~11.
 
 ## 21:00 jungle benchmark on 1d653de (timing now usable with everything on) and the cuts made from it (d810a0d, deployed)
 - Everything on 40 fps / 25.0 ms; GPU total 24-25 ms = the frame (passes + idle add up; idle 0.1). Terrain's number moves with
