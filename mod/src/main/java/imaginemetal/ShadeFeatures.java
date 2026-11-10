@@ -12,7 +12,8 @@ import mcopt.metal.own.OwnTerrain;
  */
 final class ShadeFeatures {
 	private static int current = -1;
-	private static boolean failed;
+	/** -Dimaginemetal.shadeFeatures=false: every feature compiled in, as before (switched by the frame's values only). */
+	private static boolean failed = "false".equalsIgnoreCase(System.getProperty("imaginemetal.shadeFeatures"));
 	private static final MemorySegment ERR = Arena.global().allocate(1024);
 
 	private ShadeFeatures() {
