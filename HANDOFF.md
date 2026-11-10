@@ -1,4 +1,4 @@
-# Imagine Metal: handoff (2026-11-10)
+# Imagine Metal: handoff (2026-11-10, evening)
 
 Where things stand, for picking the work up in a new conversation.
 
@@ -39,7 +39,40 @@ Where things stand, for picking the work up in a new conversation.
 - Test round 11-10 ~15:00: Jack screenshots with chat notes; read logs/latest.log [CHAT] lines.
 - Jack wants to be told when to start a new chat (save usage); hand off via this file.
 
-## Still open
+## Pushed 2026-11-10 ~15:40-16:30 (from Jack's 14:55-15:26 test round; not yet confirmed in game)
+- ROOT CAUSE of "invisible" things: Reflections.captureUnder runs at the head of executeClassicTransparency while the level's
+  render pass is open. mc_frame_cmd ended that encoder for the blit and nothing reopened it, so every draw after it went to a nil
+  encoder (silently dropped): water, nether portal, translucent-layer blocks (Weskerson's 3D torches, copper torch: 26.x puts
+  sprites with partial alpha in the translucent layer) and the selection outline. Fix: imssr.m reopens the pass
+  (mcmetal.m mc_render_reopen, colours and depth loaded) and returns 2; Java calls MetalBridge.restorePass (rebinds pipeline,
+  buffers, scissor, uniforms). If water/portal/outline still don't show, look here first (rpLog: -Dmcopt.metal.rpLog).
+- Lava: ramp deeper orange-red, hot spots orange-yellow, emission 1.15 + 1.5 l^2 (white specks read "like acne").
+- Emitters (jack o'lantern): emission 1.9 x smoothstep(0.45, 0.98) x l, colour deepened (pow 0.4) so the face keeps detail.
+- Armour shine follows the texture's brightness, torch highlight much smaller (gold armour was one flat yellow shape).
+- Ores: iron softer, ore glow x1.5 (was 2), ore pixels' highlight 1.4 (iron specks were white blobs).
+- Gems' reflections tinted by their colour (amethyst cluster showed grey-white squares in a cave).
+- Light fog a^8, 0.009, 7 steps, faded where the picture is bright (a thrown torch fogged a whole cave room). Cave bloom fog
+  1.4 -> 0.6 (lush cave grey veil). NOTE Jack earlier asked for cave fog ("no cave fog"); this round he called the veil "fog
+  issues". Ask what he wants: a dark Photon-like cave fog is probably it, not a bright veil.
+- Night: MOON and NIGHT_SKY a quarter darker; nightBrightness now also scales the night sky/haze colours (nightUp/Mid/Down),
+  at the lowest setting the night barely changed before.
+- Low sun or moon: direct light x(1 - 0.35 lowSun), shadows at least 0.55 lit (Reimagined's shadowTime idea) ("shadows huge").
+- Contact (mob) shadows: 8 steps over 1.6 blocks (was 10 over 3: rabbit's long smear); imInShadowMap also checks a ring a
+  quarter block out (waving plants: ghost copies on the sand).
+- Hand items: sky ambient 65 % neutral (netherite sword read purple from the sky's blue).
+- FPS: water/glass reflection trace 11 steps x1.75 (was 18 x1.4); light fog 7 steps; shafts 12/8 steps (was 15/10).
+
+## Still open after this round
+- Moon "line there??" (15.09.24): a faint vertical band from the moon straight down the sky, sharp left edge. Not found;
+  suspects: bloom upsample around the moon, shafts at night, clouds pass. Check with bloom off / shafts off.
+- "far away looks blurry/very low res even with TAA off" (15.00.58): likely air fog + RGSS texture filtering at distance.
+- "this looks off" (15.24.53): canyon to a lush cave, black blocky shadow patches high on the cliff, teal tint on stone.
+- Held torch barely lights a cave (15.14.30) though the log shows held light 14. Check imShade's held-light term in game.
+- Mobs look flat (no PBR), zombie in the dark too bright/flat (15.16.22).
+- FPS: 45-80 typical (gpu 25-49 ms in the perf log). Ask Jack to run Settings > Advanced > Benchmark standing still in a
+  forest and by the sea: the per-feature costs land in the log; optimize the top ones.
+
+## Still open (older)
 - End portal vanishing when backing away; water refraction shifting the selection outline; "running water looks off";
   cave fog wanted ("no cave fog"); FPS over water.
 - Jack's instance on 11-09: our jar renamed .disabled; GaelQuinta's metal-shaders and Distant Horizons added (both conflict

@@ -401,11 +401,11 @@ static ImSurf imSurface(uint cls, float3 col, float3 tex) {
 			break;
 		case IM_MAT_ORE: {
 			float th = max(max(tex.r, tex.g), tex.b) - min(min(tex.r, tex.g), tex.b);
-			if (th > 0.12) {  // the ore's own pixels: gem-like
-				s.g = 0.8;
-				s.d = 0.7;
-				s.f0 = 0.2;
-				s.hl = 2.5;
+			if (th > 0.12) {  // the ore's own pixels: gem-like (a softer highlight: on top of the glow they read as white blobs)
+				s.g = 0.7;
+				s.d = 0.65;
+				s.f0 = 0.15;
+				s.hl = 1.4;
 			} else {
 				s.g = min(g4 * 2.0, 1.0);
 				s.d = s.g;
@@ -756,7 +756,8 @@ static float imOre(uint t, float3 c, thread float3 &cm, bool nether) {
 	if (nether && t == 1u) return c.r > 0.91 ? 3.0 * c.g : 0.0;
 	switch (t) {
 		case 1u:  // iron
-			if (c.r != c.g && c.r - c.b > 0.15) { cm = pow(max(c, 0.0), 0.5); return pow(c.r, 1.5) * 1.5; }
+			// (softer than Reimagined's: in a dark cave its pale peach specks blew out to white blobs, the texture gone)
+			if (c.r != c.g && c.r - c.b > 0.15) { cm = pow(max(c, 0.0), 0.75); return pow(c.r, 1.5) * 1.2; }
 			break;
 		case 2u:  // copper
 			if (max(c.r * 0.5, c.g) - c.b > 0.05 && (c.r + c.g > 1.9 || c.r + c.g + c.b < 1.9)) { cm = c; return c.r * 2.0 + 0.7; }
@@ -1278,7 +1279,8 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		// (Reimagined's light given off, linear, a quarter less in full daylight; through the tone curve (its own goes through
 		// Reimagined's), then doubled so the brightest specks pass white and the bloom haloes them)
 		float3 oe = pow(max(tex * oreCm * (oreE * oreE), 0.0), 2.2) * (1.0 - 0.25 * f.blockColor.w * sky);
-		c += imTonemap(oe * 0.5, f.tonemap) * (2.0 * airT);
+		// (1.5, not 2: specks glowed into soft white blobs with the bloom over them, each speck's own pixels lost)
+		c += imTonemap(oe * 0.5, f.tonemap) * (1.5 * airT);
 	}
 	return pow(c, 1.0 / 2.2);
 }
@@ -1316,6 +1318,9 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 	float ny = particle ? 0.6 : n.y;
 	float3 ambient = mix(f.ambientDown.rgb, f.ambientUp.rgb, ny * 0.5 + 0.5) * skyF;
 	ambient += f.auroraLight.rgb * (skyF * (0.12 + 0.88 * saturate(ny)));
+	// (what's in the hand has no normal and took the sky's full blue from straight above: a netherite sword's warm grey read
+	// purple. Its share of the sky light mostly neutral)
+	if (hand) ambient = mix(ambient, float3(imLuma(ambient)), 0.65);
 	if (f.water.z > 0.5 && f.flags.x == 0) ambient += float3(0.04, 0.09, 0.12) * mix(0.12, 1.0, f.nightMiddle.w);
 	float4 bl = imBlockLight(p, particle ? float3(0.0, 1.0, 0.0) : n, f, lvol, lsamp);
 	float3 torch = bl.rgb * imBlockCurve(max(block, bl.a)) * (1.0 - 0.25 * f.blockColor.w * smoothstep(0.5, 1.0, sky));
