@@ -57,8 +57,11 @@ public final class Settings {
 	public static volatile boolean netherStorm = Engine.flag("imaginemetal.netherStorm", true);
 	public static volatile boolean bloomFog = Engine.flag("imaginemetal.bloomFog", true);
 	public static volatile boolean shadowFarAlternate = Engine.flag("imaginemetal.shadowFarAlternate", true);
-	/** The far shadow cascade kept until something changes it (Shadows): not saved; -Dimaginemetal.shadowFarCache=false starts with it off. */
-	public static volatile boolean shadowFarCache = Engine.flag("imaginemetal.shadowFarCache", true);
+	/**
+	 * The far shadow cascade kept until something changes it (Shadows): not saved. OFF by default since 2026-11-11 (shadows
+	 * popped in with it on, cause not found; Settings > Advanced > Debug has a toggle). -Dimaginemetal.shadowFarCache=true.
+	 */
+	public static volatile boolean shadowFarCache = Engine.flag("imaginemetal.shadowFarCache", false);
 	/**
 	 * The near shadow cascade's casters culled to what the view can see (Shadows.viewCull): not saved. OFF by default since
 	 * 2026-11-11: with it on, shadows went missing over part of the screen when looking down from the air (suspected, not proven,

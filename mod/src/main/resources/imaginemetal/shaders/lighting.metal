@@ -1229,6 +1229,15 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 
 	if (f.flags.y == 1) return float3(light, 0.0);          // debug: light levels
 	if (f.flags.y == 2) return N * 0.5 + 0.5;               // debug: normals (with the generated ones)
+	if (f.flags.y == 5) {                                   // debug: the shadow maps (which cascade serves the pixel, and what it says)
+		// red: the near cascade, blue: the far one, purple: the blend band between them, yellow: no map covers it (the sky light
+		// stands in); bright: the map says lit, dark: shadowed. Without the softening by a low sun or distance.
+		float2 sd = IM_FC_SHADOWS ? imShadow(p, n, pixel, f, smap, cmp) : float2(1.0, 0.0);
+		float4 d0 = f.shadowNear * float4(p, 1.0);
+		float nw = (d0.z > 0.0 && d0.z < 1.0) ? 1.0 - smoothstep(0.8, 0.92, max(abs(d0.x), abs(d0.y))) : 0.0;
+		float3 tint = sd.y <= 0.0 ? float3(1.0, 1.0, 0.1) : mix(float3(0.25, 0.4, 1.0), float3(1.0, 0.3, 0.25), nw);
+		return tint * (0.12 + 0.88 * sd.x) * (0.6 + 0.4 * saturate(imLuma(base) * 3.0));
+	}
 	if (f.flags.y == 4) {                                   // debug: the coloured light grid alone (its colour where light reaches)
 		if (f.lightVol.w < 0.5) return float3(0.25, 0.0, 0.25);
 		float3 uvw = (p + n * 0.5 - f.lightVol.xyz) / f.lightSize.xyz;

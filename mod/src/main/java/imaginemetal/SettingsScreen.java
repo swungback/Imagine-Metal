@@ -181,9 +181,13 @@ public final class SettingsScreen extends OptionsSubScreen {
 					"Turns each feature off in turn for a few seconds and measures the frame rate, then puts everything back. The results go to latest.log.")))
 					.build());
 				this.list.addHeader(Component.literal("Debug"));
-				String[] views = {"Off", "Light levels", "Normals", "Bloom glow only", "Coloured light grid"};
+				this.list.addSmall(toggle("Far shadow cache", Settings.shadowFarCache, v -> Settings.shadowFarCache = v,
+					"Experimental, not saved. The far shadow map is kept until the sun, the camera or the terrain changes, instead of drawn every other frame. Faster; suspected of shadows popping in."),
+					toggle("Near shadow view cull", Settings.shadowNearViewCull, v -> Settings.shadowNearViewCull = v,
+						"Experimental, not saved. The near shadow map leaves out what can't shadow anything on screen."));
+				String[] views = {"Off", "Light levels", "Normals", "Bloom glow only", "Coloured light grid", "Shadow maps"};
 				this.list.addBig(CycleButton.<Integer>builder(v -> Component.literal(views[v]), Settings.debug)
-					.withValues(0, 1, 2, 3, 4)
+					.withValues(0, 1, 2, 3, 4, 5)
 					.withTooltip(v -> Tooltip.create(Component.literal("Shows one part of the picture on its own, to check it.")))
 					.create(0, 0, 310, 20, Component.literal("Debug view"), (b, v) -> Settings.debug = v));
 			}
