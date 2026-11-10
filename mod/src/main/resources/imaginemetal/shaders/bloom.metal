@@ -402,15 +402,17 @@ static float4 imbShaftsNow(ImBloomOut in, depth2d<float> depth, depth2d_array<fl
 			next = pow(t, distrib) * active;
 			if (next >= rayEnd) break;
 			float3 q = dir * next;
+			// (each map faded out toward its edges into the next, not switched: the edge of a map is a plane along the light, which
+			// on screen is a straight line through the sun or moon, and a hard switch there drew a band down the sky under the moon)
 			dens = eyeBright;
+			float4 c1 = f.shadowFar * float4(q, 1.0);
+			float e1 = max(abs(c1.x), abs(c1.y));
+			if (e1 < 0.98 && c1.z > 0.0 && c1.z < 1.0)
+				dens = mix(smap.sample_compare(cmp, float2(0.5 + 0.5 * c1.x, 0.5 - 0.5 * c1.y), 1, c1.z - 0.0002), eyeBright, smoothstep(0.75, 0.98, e1));
 			float4 c0 = f.shadowNear * float4(q, 1.0);
-			if (max(abs(c0.x), abs(c0.y)) < 0.95 && c0.z > 0.0 && c0.z < 1.0) {
-				dens = smap.sample_compare(cmp, float2(0.5 + 0.5 * c0.x, 0.5 - 0.5 * c0.y), 0, c0.z - 0.0001);
-			} else {
-				float4 c1 = f.shadowFar * float4(q, 1.0);
-				if (max(abs(c1.x), abs(c1.y)) < 0.98 && c1.z > 0.0 && c1.z < 1.0)
-					dens = smap.sample_compare(cmp, float2(0.5 + 0.5 * c1.x, 0.5 - 0.5 * c1.y), 1, c1.z - 0.0002);
-			}
+			float e0 = max(abs(c0.x), abs(c0.y));
+			if (e0 < 0.95 && c0.z > 0.0 && c0.z < 1.0)
+				dens = mix(smap.sample_compare(cmp, float2(0.5 + 0.5 * c0.x, 0.5 - 0.5 * c0.y), 0, c0.z - 0.0001), dens, smoothstep(0.75, 0.95, e0));
 			if (water && dens > 0.0) {
 				// (the waves above focus the light into moving beams: a pattern on the surface, carried down along the light)
 				float3 wq = q + f.world.xyz;

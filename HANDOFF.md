@@ -61,10 +61,13 @@ Where things stand, for picking the work up in a new conversation.
   quarter block out (waving plants: ghost copies on the sand).
 - Hand items: sky ambient 65 % neutral (netherite sword read purple from the sky's blue).
 - FPS: water/glass reflection trace 11 steps x1.75 (was 18 x1.4); light fog 7 steps; shafts 12/8 steps (was 15/10).
+- Shafts: shadow maps faded into each other at their edges (the moon's band).
 
 ## Still open after this round
-- Moon "line there??" (15.09.24): a faint vertical band from the moon straight down the sky, sharp left edge. Not found;
-  suspects: bloom upsample around the moon, shafts at night, clouds pass. Check with bloom off / shafts off.
+- Moon "line there??" (15.09.24): a faint vertical band from the moon straight down the sky, sharp left edge. Probable cause
+  fixed: the shafts switched hard between the near map, the far map and the eye's brightness at each map's edge, and a map's
+  edge is a plane along the light, a line through the moon on screen. Now faded (bloom.metal imbShaftsNow). Confirm in game;
+  if it's still there, try bloom off / shafts off.
 - "far away looks blurry/very low res even with TAA off" (15.00.58): likely air fog + RGSS texture filtering at distance.
 - "this looks off" (15.24.53): canyon to a lush cave, black blocky shadow patches high on the cliff, teal tint on stone.
 - Held torch barely lights a cave (15.14.30) though the log shows held light 14. Check imShade's held-light term in game.
