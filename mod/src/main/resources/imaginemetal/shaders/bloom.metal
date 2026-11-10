@@ -385,7 +385,8 @@ static float4 imbShaftsNow(ImBloomOut in, depth2d<float> depth, depth2d_array<fl
 	if (vlMult < 0.0001) return float4(0.0, len, 0.0, 1.0);
 
 	// the march
-	int nearN = water || intense > 0.5 ? 15 : 10;
+	// (12 and 8: the jitter changes every frame and the history smooths it, so fewer shadow-map reads give the same beams)
+	int nearN = water || intense > 0.5 ? 12 : 8;
 	float fogCurve = mix(0.9, 0.5, max(intense, rain));
 	float distrib = mix(2.0, 1.5, intense);
 	float reach = min(p.shaft.w * 0.98, maxD);
@@ -582,13 +583,14 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 		float len = min(length(P), 24.0);
 		float3 dir = normalize(P);
 		float j = fract(52.9829189 * fract(dot(in.pos.xy, float2(0.06711056, 0.00583715))) + 0.61803399 * float(f.flags.w & 1023));
-		float stepL = len / 10.0;
+		// (7 steps, jittered each frame and settled by the TAA: 10 cost a frame's worth of 3D reads for a faint glow)
+		float stepL = len / 7.0;
 		float3 acc = float3(0.0);
 		// (read filtered between the blocks' centres: read block by block, the fog showed the grid, solid cubes of glow with
 		// clear ones between)
 		constexpr sampler lfs(filter::linear, address::clamp_to_zero);
 		float3 inv = 1.0 / f.lightSize.xyz;
-		for (int i = 0; i < 10; i++) {
+		for (int i = 0; i < 7; i++) {
 			float3 q = dir * (stepL * (float(i) + j)) - f.lightVol.xyz;
 			float4 l = lvol.sample(lfs, q * inv);
 			if (l.a <= 0.0) continue;

@@ -493,8 +493,12 @@ static float4 imReflect(float3 p, float3 n, float3 R, float lod, float dither, c
 	// (the start jittered over half a step, not most of one: a full step's jitter put neighbouring pixels on either side of
 	// an edge, hit and missed, the static on water and polished floors that TAA couldn't settle)
 	float t = stepLen * (0.5 + 0.5 * dither), tPrev = 0.0;
-	// (18 steps growing by 1.4: as far as the 26 by 1.3 reached, with fewer reads of the depth)
-	for (int i = 0; i < 18; i++) {
+	// (18 steps growing by 1.4: as far as the 26 by 1.3 reached, with fewer reads of the depth; water and glass, which cover
+	// half the screen over a sea, 11 growing by 1.75 (as far, coarser: the refinement below finds the hit): the sea cost a third
+	// of the frame)
+	int steps = thinTest ? 18 : 11;
+	float grow = thinTest ? 1.4 : 1.75;
+	for (int i = 0; i < steps; i++) {
 		float3 r = q + R * t;
 		float4 c = f.histClip * float4(r, 1.0);
 		if (c.w <= 0.05) break;
@@ -538,7 +542,7 @@ static float4 imReflect(float3 p, float3 n, float3 R, float lod, float dither, c
 		}
 		tPrev = t;
 		t += stepLen;
-		stepLen *= 1.4;
+		stepLen *= grow;
 	}
 	return float4(0.0);
 }
@@ -647,14 +651,23 @@ static bool imInShadowMap(float3 sp, constant ImFrame &f, depth2d_array<float> s
 	uint2 t = uint2(clamp(uv, 0.0, 0.9999) * sz);
 	// (the nearest caster around it, the smallest depth (the maps keep the nearest to the sun): a texel's neighbours too, so a
 	// block's edge isn't taken for something else)
+	// (and a wider ring a quarter of a block out: a plant waving in the wind stands somewhere else in the maps than in the last
+	// frame's depth, and the difference cast a ghost copy of every dead bush and fern on the sand next to it)
+	float xs = length(float3(m[0][0], m[1][0], m[2][0])) * 0.5 * sz.x;  // (map texels a block)
+	int r4 = clamp(int(xs * 0.25 + 0.5), 2, 12);
+	int2 ti = int2(t), smax = int2(sz) - 1;
 	float md = smap.read(t, slice);
 	md = min(md, smap.read(uint2(min(t + uint2(1, 0), uint2(sz) - 1)), slice));
 	md = min(md, smap.read(uint2(min(t + uint2(0, 1), uint2(sz) - 1)), slice));
 	md = min(md, smap.read(uint2(t.x > 0 ? t.x - 1 : 0, t.y), slice));
 	md = min(md, smap.read(uint2(t.x, t.y > 0 ? t.y - 1 : 0), slice));
+	md = min(md, smap.read(uint2(clamp(ti + int2(r4, 0), int2(0), smax)), slice));
+	md = min(md, smap.read(uint2(clamp(ti - int2(r4, 0), int2(0), smax)), slice));
+	md = min(md, smap.read(uint2(clamp(ti + int2(0, r4), int2(0), smax)), slice));
+	md = min(md, smap.read(uint2(clamp(ti - int2(0, r4), int2(0), smax)), slice));
 	float zs = length(float3(m[0][2], m[1][2], m[2][2]));  // (light-depth units a block)
-	// (closer to the sun than every caster there by more than a third of a block: not in the maps)
-	return c.z > md - zs * 0.35;
+	// (closer to the sun than every caster there by more than half a block: not in the maps)
+	return c.z > md - zs * 0.5;
 }
 
 static float imContactShadow(float3 p, float3 n, constant ImFrame &f, depth2d<float> hd, float dither, depth2d_array<float> smap) {
@@ -664,8 +677,10 @@ static float imContactShadow(float3 p, float3 n, constant ImFrame &f, depth2d<fl
 	float2 size = float2(hd.get_width(), hd.get_height());
 	float3 L = f.lightDir.xyz;
 	float occ = 0.0;
-	for (int i = 0; i < 10; i++) {
-		float t = (float(i) + dither) * 0.3;
+	// (8 steps over 1.6 blocks: a mob's shadow at its feet. Over 3 blocks it trailed, from the last frame's depth, as a long
+	// blotchy smear behind a hopping rabbit at a low sun; and it costs less)
+	for (int i = 0; i < 8; i++) {
+		float t = (float(i) + dither) * 0.2;
 		float3 r = q + L * t;
 		float4 c = f.histClip * float4(r, 1.0);
 		if (c.w <= 0.05) break;
@@ -689,7 +704,7 @@ static float imContactShadow(float3 p, float3 n, constant ImFrame &f, depth2d<fl
 			if (difff <= lim) continue;
 			// (terrain is in the sun's shadow maps, which shadow it already: only what they don't hold casts here)
 			if (imInShadowMap(spp - f.histShift.xyz, f, smap)) continue;
-			occ = 1.0 - float(i) / 12.0;
+			occ = 1.0 - float(i) / 9.0;
 			break;
 		}
 	}
