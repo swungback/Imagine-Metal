@@ -381,6 +381,11 @@ static float4 imbShaftsNow(ImBloomOut in, depth2d<float> depth, depth2d_array<fl
 	float invNoon2 = invNoon * invNoon;
 	vlMult *= mix(invNoon2 * 0.875 + 0.125, 1.0, max(intense, rain * rain));
 	vlMult *= 1.4 - 0.4 * rain;
+	// (straight into a low sun less: the beams there summed into a white glare over the whole view)
+	float vl8 = vdotlm * vdotlm;
+	vl8 *= vl8;
+	vl8 *= vl8;
+	vlMult *= 1.0 - 0.45 * vl8;
 	if (sunVis < 0.5) vlMult *= 0.3 + 0.4 * rain * rain + 0.5 * max(f.fogParams.x - len, 0.0) / max(f.fogParams.x, 1.0);
 	if (vlMult < 0.0001) return float4(0.0, len, 0.0, 1.0);
 

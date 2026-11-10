@@ -695,6 +695,8 @@ public final class OwnTerrain {
 				float mid = (ylo + yhi) * 0.5F + 1e-4F;
 				// (corner bits only for blocks that wave: 1 the corners above the quad's middle, 2 all four)
 				if (wave == 2) m |= 0xF0;
+				// (Imagine Metal: vines, every corner with a small sway: 0101, a pattern the "above the middle" corners never make)
+				else if (wave == 3) m |= 0x50;
 				else if (wave == 1) for (int v = 0; v < 4; v++) if (MemoryUtil.memGetFloat(a + (long) v * VERTEX_BYTES + 4) > mid) m |= 16 << v;
 				MemoryUtil.memPutByte(dst + i, (byte) m);
 			}

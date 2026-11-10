@@ -295,7 +295,8 @@ static float imEmission(uint cls, float3 tex) {
 		case IM_MAT_DIM: return 1.6 * smoothstep(0.5, 0.85, hi) * smoothstep(0.12, 0.35, sat);
 		// sculk's specks: only their brightest pixels (small, calm dots), but far past white, so the bloom gives each a soft halo
 		// while the screen's roll-off keeps the dot itself from getting brighter
-		case IM_MAT_SCULK: return 3.5 * smoothstep(0.62, 0.9, hi) * smoothstep(0.2, 0.45, sat);
+		// (6, was 3.5: in the deep dark the specks had almost no halo)
+		case IM_MAT_SCULK: return 6.0 * smoothstep(0.62, 0.9, hi) * smoothstep(0.2, 0.45, sat);
 		default: return 0.0;
 	}
 }
@@ -593,7 +594,8 @@ static float3 imAirFog(float3 p, float skyLight, constant ImFrame &f, thread flo
 	float sy = f.sunDir.y + 0.02;
 	sc *= 1.0 + 0.35 * saturate((exp(-300.0 * sy * sy) - 0.05) / 0.95);  // (Photon: brighter in the early morning and evening)
 	// (a soft ceiling: the glow toward a low sun never washes the land out to a flat sheet)
-	float sm = max(max(sc.r, sc.g), sc.b), cap = 0.5 * max(max(f.lightColor.r, f.lightColor.g), f.lightColor.b) + 0.05;
+	// (0.35, was 0.5: looking into a low sun the land turned a pink-white sheet, "whiteout")
+	float sm = max(max(sc.r, sc.g), sc.b), cap = 0.35 * max(max(f.lightColor.r, f.lightColor.g), f.lightColor.b) + 0.04;
 	if (sm > 1e-4) sc *= cap * (1.0 - exp(-sm / cap)) / sm;
 	return max(sc, 0.0);
 }
@@ -1392,6 +1394,14 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 		// (a torch or lantern near it makes its own highlight, as the sun does: armour shines indoors too)
 		float tsp = pow(saturate(dot(n, V)), 12.0) * 0.22;
 		radiance += tintM * (f.lightColor.rgb * sp + env * (0.1 + 0.6 * fres) + torch * tsp) * (shine * f.minLight.w);
+	}
+	if (f.water.z > 0.5 && f.flags.x == 0 && !hand) {
+		// (eyes under water: the terrain fades into our blue-green water fog, mobs only into Minecraft's dark navy one, so they
+		// stood out as dark blue cut-outs; ours laid over them as over the terrain)
+		float wd = length(p) / 48.0;
+		float wf = 1.0 - exp(-wd * wd);
+		float3 wfc = float3(0.16, 0.62, 0.95) * (0.05 + 0.13 * f.nightMiddle.w);
+		radiance = mix(radiance * 1.25, wfc, wf);
 	}
 	float3 c = imGrade(imTonemap(radiance, f.tonemap), f);
 	// items in the world that give off light (a lava bucket's lava, a torch's flame, glowstone dust, blaze rods): their hot,

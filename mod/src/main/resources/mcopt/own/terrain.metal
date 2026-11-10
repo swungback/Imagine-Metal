@@ -1833,7 +1833,8 @@ vertex VOut own_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant Dr
 		// vertex is in the world and the time, so shared corners move together and the plant stays in one piece
 		uint wc = (ov.imMat >> 4) & 15u;
 		if ((ov.imMat & 15u) == 4u || (ov.imMat & 15u) == 6u) wc = 0u;  // (an ore's upper bits say which ore it is)
-		if (wc != 0u && (wc == 15u || ((wc >> corner) & 1u) != 0u)) {
+		bool vine = wc == 5u;
+		if (wc != 0u && (wc == 15u || vine || ((wc >> corner) & 1u) != 0u)) {
 			float3 wp = float3(origin & 1023) + rel;
 			float tw = g.GameTime * 1200.0;
 			const float amp = 0.065;  // (one for every waving block: a tall plant's halves share their corners and must move alike)
@@ -1841,6 +1842,8 @@ vertex VOut own_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant Dr
 			float3 d = float3(sin(tw * 1.6 + ph) * 0.7 + sin(tw * 2.9 + wp.z * 1.3) * 0.3,
 				sin(tw * 2.1 + wp.x * 0.9 + wp.z * 0.7) * 0.15,
 				cos(tw * 1.3 + ph * 0.8) * 0.6 + sin(tw * 3.3 + wp.x * 1.1) * 0.3) * amp;
+			// (vines: a third across, more up and down, slower down the strand: they hang off a wall 0.05 out)
+			if (vine) d *= float3(0.33, 1.6, 0.33);
 			float4x4 m = CPU_CLIP ? df.clip : proj.ProjMat * t.ModelViewMat;
 			float4 dc = m * float4(d, 0.0);
 			dc.y = -dc.y;
@@ -2450,6 +2453,13 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 	color.rgb = imShade(color.rgb, texel.rgb, in.imPos, imLightQ, in.imMat | (imKind << 8), in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imSeeds, imPbrN, imPbrS,
 		in.texCoord0, in.imRect, atlas, imHistColor, imHistDepth, imHistSampler, imUnderDepth); // (Imagine Metal)
 	if (imPortal && imf.extra.x > 0.5 && imf.portalRect.z > imf.portalRect.x) color = imPortalLook(in.texCoord0, in.imPos, texel, atlas, imf);
+	// (the translucent pass has no material bytes, so a flame drawn in it (a resource pack's 3D torch, the copper torch: sprites with
+	// soft edges land in that layer) didn't glow: its opaque, hot, saturated texels glow as a flame's do; glass is see-through)
+	if (CUTOUT && CUTOUT_LIMIT < 0.2 && imKind != 1u && !imPortal && texel.a > 0.97) {
+		float fhi = max(max(texel.r, texel.g), texel.b), flo = min(min(texel.r, texel.g), texel.b);
+		float fe = 4.0 * smoothstep(0.62, 0.92, fhi) * smoothstep(0.15, 0.4, fhi - flo);
+		if (fe > 0.0) color.rgb = pow(pow(max(color.rgb, 0.0), 2.2) + pow(texel.rgb, 2.2) * fe, 1.0 / 2.2);
+	}
 	float3 imFogColor = fog.FogColor.rgb;
 	float imFog = fogValue * fog.FogColor.a;
 	if (imf.sunDir.w > 0.5) {
@@ -2561,15 +2571,19 @@ fragment float4 own_fs_tr(VOut in [[stage_in]], float4 imDst [[color(0)]], const
 		float dist = length(in.imPos);
 		float thick = du0 <= 1e-7 ? 64.0 : clamp(dist * (in.pos.z / du0 - 1.0), 0.0, 64.0);
 		if (imWaterN.z > 0.75) {
-			float2 uv1 = in.pos.xy / sz + imWaterN.xy * (0.045 * saturate(thick * 0.5) / max(1.0, dist * 0.08));
+			// (0.02: at 0.045 the shore's stones swam about under a few blocks of water)
+			float2 uv1 = in.pos.xy / sz + imWaterN.xy * (0.02 * saturate(thick * 0.5) / max(1.0, dist * 0.08));
 			uint2 p1 = uint2(clamp(uv1 * sz, float2(0.0), sz - 1.0));
 			float du1 = imUnderDepth.read(p1);
 			// (only toward something that's under the water too: never toward a thing in front of it)
 			if (du1 < in.pos.z) dst = imUnder.read(p1).rgb;
 			else dst = imUnder.read(pi).rgb;
-			float edge = 1.0 - smoothstep(0.03, 0.35, thick);
+			// (foam only on a real shore: where the bed comes up shallow, not along every line where the surface meets a wall (thin
+			// bright lines round blocks in a lush cave's pools); patchy, faint, and only under the open sky)
+			float edge = smoothstep(0.02, 0.08, thick) * (1.0 - smoothstep(0.08, 0.4, thick));
 			float fn = imValueNoise((in.imPos.xz + imf.world.xz) * 3.0 + imf.world.w * 0.4);
-			foam = edge * smoothstep(0.35, 0.7, fn + edge * 0.3) * (1.0 - smoothstep(24.0, 48.0, dist)) * 0.55;
+			float skyF = saturate(in.imLight.y * 1.4 - 0.4);
+			foam = edge * smoothstep(0.45, 0.75, fn) * (1.0 - smoothstep(16.0, 32.0, dist)) * 0.3 * skyF;
 		} else {
 			dst = imUnder.read(pi).rgb;
 		}

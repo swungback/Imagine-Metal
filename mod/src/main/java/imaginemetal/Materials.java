@@ -93,8 +93,8 @@ public final class Materials {
 		try {
 			if (state.is(BlockTags.LEAVES)) return 2;
 			String name = state.getBlock().toString().toLowerCase(java.util.Locale.ROOT);
-			// (vines lie flat on a wall: swaying, they cut into it)
-			if (name.contains(":vine}")) return 0;
+			// (vines lie flat on a wall: a sway of their own, small across the wall so they never cut into it (3: terrain.metal))
+			if (name.contains(":vine}")) return 3;
 			if (name.contains("weeping_vines") || name.contains("twisting_vines")) return 2;
 			boolean plant = state.is(BlockTags.FLOWERS) || state.is(BlockTags.SAPLINGS) || state.is(BlockTags.CROPS)
 				|| state.is(BlockTags.REPLACEABLE_BY_TREES) || name.contains("grass}") || name.contains("fern") || name.contains("bush")
