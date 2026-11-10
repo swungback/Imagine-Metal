@@ -1548,7 +1548,7 @@ constant bool F_ORACLE_SET [[function_constant(17)]];
 constant bool F_ORACLE = is_function_constant_defined(F_ORACLE_SET) && F_ORACLE_SET;
 
 struct VOut {
-	float4 pos [[position]];
+	float4 pos [[position, invariant]];  // (invariant: the cutout pre-pass and its colour pass (depth EQUAL) link different fragment stages; without it the vertex stages could round the position differently: holes and flicker in leaves)
 	float sphericalVertexDistance [[function_constant(F_VARY)]];
 	float cylindricalVertexDistance [[function_constant(F_RICH)]];
 	float4 vertexColor [[function_constant(F_FLOATCOLOR)]];

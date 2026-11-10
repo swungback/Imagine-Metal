@@ -25,6 +25,9 @@
 static id<MTLCounterSampleBuffer> imtBuf[IMT_SLOTS];
 static _Atomic int imtBusy[IMT_SLOTS];
 static unsigned char imtTagOf[IMT_SLOTS][IMT_GROUPS];
+// the GPU's clock when the slot was taken: a sample buffer keeps what earlier uses wrote wherever this one wrote nothing (a stage that
+// didn't run), so anything older than this is stale (it made encoders look hundreds of ms long)
+static MTLTimestamp imtBase[IMT_SLOTS];
 static int imtSlot = -1;   // the slot this submit samples into (-1: this submit isn't sampled)
 static int imtCount;       // groups used in it
 static int imtOn;          // set by Java (Perf): sampling on
@@ -171,6 +174,7 @@ void imt_commit(Enc *enc, id<MTLCommandBuffer> c) {
 	imtTag = IMT_MISC;  // (the next submit's first passes: uploads, the lightmap, until the level's own say otherwise)
 	if (imtSlot >= 0) {
 		int slot = imtSlot, n = imtCount;
+		MTLTimestamp base = imtBase[slot];
 		imtSlot = -1;
 		if (n == 0) {
 			atomic_store(&imtBusy[slot], 0);
@@ -189,7 +193,7 @@ void imt_commit(Enc *enc, id<MTLCommandBuffer> c) {
 						uint64_t a = UINT64_MAX, b = 0;
 						for (int k = 0; k < 4; k++) {
 							uint64_t t = ts[g * 4 + k].timestamp;
-							if (t == MTLCounterErrorValue || t == 0) continue;
+							if (t == MTLCounterErrorValue || t == 0 || t < base) continue;
 							if (t < a) a = t;
 							if (t > b) b = t;
 						}
@@ -220,6 +224,8 @@ void imt_commit(Enc *enc, id<MTLCommandBuffer> c) {
 			if (atomic_compare_exchange_strong(&imtBusy[i], &expect, 1)) {
 				imtSlot = i;
 				imtCount = 0;
+				MTLTimestamp cpuNow;
+				[imtDevice sampleTimestamps:&cpuNow gpuTimestamp:&imtBase[i]];
 				break;
 			}
 		}
