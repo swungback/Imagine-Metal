@@ -11,6 +11,21 @@ Where things stand, for picking the work up in a new conversation.
   are chat lines in the log (`[CHAT] <herningstang> ...`) just before each screenshot.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
 
+## 21:00 jungle benchmark on 1d653de (timing now usable with everything on) and the cuts made from it (d810a0d, deployed)
+- Everything on 40 fps / 25.0 ms; GPU total 24-25 ms = the frame (passes + idle add up; idle 0.1). Terrain's number moves with
+  the frame for each feature (normals -3.6 vs -4.2, PBR -2.1 vs -2.1, leaf pre-pass +5.8 vs +5.8): trusted.
+- Shaders off FAILED the check (GPU 18.1 ms in a 7.3 ms frame, terrain 16.4): with GPU headroom the next frames run under a
+  sampled one. Fix in d810a0d: the submit after a lead/sampled one waits for it (MTLEvent, imt_cmd_begin). Re-check.
+- Everything on: terrain 18.2 (timing step: leaf colour 9.3, solid + rest 6.7, leaf depth 1.15), shadow maps 1.4, resolve 1.2,
+  shafts 0.9, reflection copies 0.8, taa 0.7, sky 0.5, light grid 0.4.
+- Feature costs (fps): shadows 5.8 (incl. mob shadows 1.8: IM_FC_MOBSHADOWS needs IM_FC_SHADOWS), coloured light 4.9,
+  normals 4.2, PBR 2.1, shafts 2.0, sky/air 1.7, TAA 1.2. They sum past terrain's share: register pressure of the uber-shader.
+- Decision (told Jack): cheaper exact cuts first, deferred later only if terrain stays > ~11 ms. Done in d810a0d:
+  coloured light = 2 hardware samples of filter-weighted copies (light.metal filt/open, textures 29/30, imBlockLightF; entities
+  keep the 8-read imBlockLight); generated normals share the centre-texel read (1-3 reads, exact).
+- Next candidates: contact (mob) shadows only near entities (needs entity spheres in ImFrame); far cascade every other frame
+  (keep its world-space matrix, re-derive camera-relative); then the deferred split if needed.
+
 ## Pass timing rewritten 2026-11-10 ~21:00 (1d653de, deployed to the instance; needs a restart, then the benchmark in the jungle)
 - Two faults in the old numbers: (1) encoders overlap and wait behind each other, so first-to-last spans summed to ~2x the
   frame; (2) the GPU runs frames into each other, so a sampled frame's first encoders waited behind the PREVIOUS frame's work:
