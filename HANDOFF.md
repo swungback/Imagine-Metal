@@ -11,9 +11,9 @@ Where things stand, for picking the work up in a new conversation.
   are chat lines in the log (`[CHAT] <herningstang> ...`) just before each screenshot.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
 
-## START HERE: shadow maps made cheaper (2026-11-10 ~22:00; NOT in game yet: check `git log origin/main` for whether it's pushed)
+## START HERE: shadow maps made cheaper (fe99d1a, CI green, jar deployed to the instance 22:20; not yet tested in game)
 - Step 1 of the 21:29 list, Java only (Shadows.java, OwnTerrain.setSlot/beginFrame0, Settings, Benchmark); no shader or native
-  change. Compiled only against stubs in the Claude session: CI is the first real build.
+  change.
 - Far cascade kept (Settings.shadowFarCache, -Dimaginemetal.shadowFarCache=false): drawn again only when (a) its own light step
   turns (RUN_STEP x floor(range / 32): 0.005 at range 160, about once a second at noon, every 2-3 frames at a low sun), (b) the
   camera is 8 blocks (summed over axes) from where it was drawn, (c) a section in its box changed (OwnTerrain.setSlot ->
