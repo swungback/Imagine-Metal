@@ -202,6 +202,9 @@ Own *mco_new(Ctx *ctx, const char *source, int compact, int fat, int cpuClip, ch
 		MTLCompileOptions *o = [[MTLCompileOptions new] autorelease];
 		o.languageVersion = MTLLanguageVersion3_0;
 		o.mathMode = MTLMathModeFast;  // as the backend compiles the game's own shaders
+		// (Imagine Metal: the cutout depth pre-pass draws with depth EQUAL against its colour pass: every variant of own_vs must put
+		// a vertex at exactly the same depth, or leaves flicker and get holes)
+		if (@available(macOS 11.0, *)) o.preserveInvariance = YES;
 		NSError *e = nil;
 		id<MTLLibrary> lib = [ctx->device newLibraryWithSource:[NSString stringWithUTF8String:source] options:o error:&e];
 		if (!lib) {
