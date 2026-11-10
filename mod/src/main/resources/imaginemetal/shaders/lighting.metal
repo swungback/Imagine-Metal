@@ -1365,6 +1365,16 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 		float3 hh = f.held.rgb / max(max(max(f.held.r, f.held.g), f.held.b), 1e-3);
 		radiance += base * hh * (0.55 * f.held.w * f.minLight.w);
 	}
+	if (kind < 0.5 && !particle) {
+		// mobs (no PBR of their own): a soft sheen from the sun and nearby lights on their lighter texels, so a mob's shape reads
+		// in the light instead of a flat cut-out; the darker texels stay matte
+		float3 V = -normalize(p);
+		float3 H = normalize(V + f.lightDir.xyz);
+		float shineM = smoothstep(0.15, 0.7, imLuma(base)) * 0.35;
+		float spM = pow(saturate(dot(n, H)), 12.0) * sun * saturate(nl * 3.0);
+		float rimM = pow(1.0 - saturate(dot(n, V)), 3.0) * 0.5;
+		radiance += base * (f.lightColor.rgb * spM + (ambient + torch) * rimM) * (shineM * f.minLight.w);
+	}
 	if (kind > 1.5 && kind < 2.5 && !particle) {
 		// armour (Reimagined gives it a metal's smoothness by the texture's brightness): a sharp sun highlight and the sky's light
 		// mirrored, stronger at a grazing angle, both tinted by the metal's own colour; dull cloth and leather barely
