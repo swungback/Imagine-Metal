@@ -11,6 +11,17 @@ Where things stand, for picking the work up in a new conversation.
   are chat lines in the log (`[CHAT] <herningstang> ...`) just before each screenshot.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
 
+## 20:31 jungle benchmark on 20823cd (same spot, RD16, 1440x900): leaves no longer reported flickering
+- Everything on 35 fps / 28.4 ms (was 28.5 fps / 35 ms at 18:58). Shaders off (live) 136 fps / 7.4 ms: ~21 ms a frame is ours.
+- Leaf pre-pass works: "leaf depth pre-pass off" was 6.9 ms slower. Shadows off saves 6.9 ms, generated normals 2.9; everything
+  else within noise (+-3 ms: "wet off" -3.5 and "glass reflections off" -2.6 are drift, not real costs).
+- The per-pass numbers are NOT usable yet: they add up to ~54 ms while the frame is 28 ms, and with shaders off they still show
+  terrain 23 ms at a 7.4 ms frame; present 13 ms and hand+gui 13 ms are impossible for those passes. An encoder's first-to-last
+  stage sample includes time it waits behind the encoders before it (Apple overlaps and queues them), so spans overlap.
+  Next: attribute by end-to-end deltas in submission order (each encoder = its last end sample minus the previous encoder's last
+  end sample, across pre + main command buffers), which partitions the frame and can't sum past it; check that the parts add up
+  to the span and that shaders-off terrain comes out around a few ms. Only then decide the deferred rewrite.
+
 ## 20:14 test of 2411150: leaves flickered with holes (sky through them, 20.14.32) and the pass timing read 200-600 ms per tag
 - Fixed in 20823cd (deployed): VOut.pos [[position, invariant]] (preserveInvariance only covers outputs marked invariant; the
   pre-pass and the EQUAL colour pass link different fragment stages, so their vertex stages rounded differently). Timing: a slot's
