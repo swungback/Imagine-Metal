@@ -404,7 +404,7 @@ public final class ImagineFrame {
 		put(TM_A, TM_D, TM_B, TM_C);
 		// saturation, vibrance: gentle (measured against Reimagined's frames, more crushed the blue out of grass and leaves)
 		put(1.04f, 0.08f, 0f, 0f);
-		BUF.putInt(dim).putInt(Settings.debug).putInt(1).putInt(frame++);
+		BUF.putInt(dim).putInt(Settings.debug).putInt(Live.isOff() ? 0 : 1).putInt(frame++);  // (z 0: plain lighting, shaders off live)
 		// how far underground the player is (by the sky light at their eyes, eased so walking into a cave fades) and how much it's
 		// night: the picture's grade (Bloom's resolve) darkens the dark parts more in both
 		long now = System.nanoTime();

@@ -76,6 +76,8 @@ public final class Settings {
 	}
 
 	public static void save() {
+		// (the shaders switched off live: put back first, so the file keeps the real settings)
+		if (Live.isOff()) Live.setOff(false);
 		Map<String, String> v = new LinkedHashMap<>();
 		v.put("imaginemetal.retina", String.valueOf(retina));
 		v.put("imaginemetal.terrain", String.valueOf(terrain));

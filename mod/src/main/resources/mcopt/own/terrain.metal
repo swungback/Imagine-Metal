@@ -2373,7 +2373,9 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 		float3 vc = getColor(in).rgb;
 		bool tinted = max(max(vc.r, vc.g), vc.b) - min(min(vc.r, vc.g), vc.b) > 0.08 && vc.b >= vc.r;
 		still = still || (tinted && !portal);
-		imKind = still || flow ? (imf.water.x > 0.5 ? 1u : 0u) : portal || imf.water.y < 0.5 ? 0u : 2u;
+		// (an opaque texel isn't glass: a resource pack's or a mod's block whose sprite has soft edges lands in this layer whole,
+		// and was lit as glass, see-through tinted and mirror-like; it is shaded as any surface instead)
+		imKind = still || flow ? (imf.water.x > 0.5 ? 1u : 0u) : portal || imf.water.y < 0.5 || texel.a > 0.95 ? 0u : 2u;
 		imPortal = portal;
 		bool sl;
 		float3 fnT = imFaceNormal(in.imPos, sl);

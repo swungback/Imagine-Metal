@@ -40,6 +40,12 @@ public final class Materials {
 	private static final String[] FOLIAGE_NAMES = {"leaves", "grass", "fern", "vine", "azalea", "moss", "bush", "sapling", "dripleaf",
 		"lily_pad", "kelp", "seagrass"};
 
+	private static final String[] MOD_METAL = {"steel", "brass", "bronze", "tin_block", "silver_block", "zinc", "nickel", "aluminum", "titanium",
+		"metal", "machine", "casing", "pipe", "tank", "gear", "_plate}", "plating"};
+	private static final String[] MOD_GEM = {"crystal", "ruby", "sapphire", "topaz", "jade", "gem", "glass", "dragon_scale"};
+	private static final String[] MOD_STONE = {"marble", "slate", "limestone", "rock", "brick", "tile", "pillar", "cobble"};
+	private static final String[] MOD_WOOD = {"wood", "plank", "log}", "beam", "shelf", "crate"};
+
 	/** the sound a block makes -> the family it belongs to (SoundType's constants by name, looked up once) */
 	private static final java.util.Map<SoundType, Byte> BY_SOUND = new java.util.IdentityHashMap<>();
 
@@ -180,6 +186,11 @@ public final class Materials {
 		if (any(name, STONE_NAMES)) return STONE;
 		if (any(name, WOOD_NAMES)) return WOOD;
 		if (any(name, FOLIAGE_NAMES)) return FOLIAGE;
+		// (modded blocks by the words their names use, before their sound: steel and brass machines, marble, crystals)
+		if (any(name, MOD_METAL)) return METAL;
+		if (any(name, MOD_GEM)) return GEM;
+		if (any(name, MOD_STONE)) return STONE;
+		if (any(name, MOD_WOOD)) return WOOD;
 		Byte bySound = BY_SOUND.get(state.getSoundType());
 		return bySound != null ? bySound : NONE;
 	}

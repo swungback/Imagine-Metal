@@ -824,7 +824,13 @@ static inline float imDither(float2 pixel, constant ImFrame &f) {
 static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint mat, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp,
 	texture3d<float> lvol, sampler lsamp, texture3d<float> seeds, texture2d<float> pbrN, texture2d<float> pbrS, float2 uv, float4 rect, texture2d<float> atlas, texture2d<float> hc, depth2d<float> hd, sampler hs,
 	depth2d<float> ud) {
-	if (f.flags.z == 0) return albedo * (0.2 + 0.8 * max(light.x, light.y)); // the engine hasn't filled a frame yet
+	// (the engine hasn't filled a frame yet, or the shaders are switched off live: lit plainly, close to vanilla's lightmap)
+	if (f.flags.z == 0) {
+		float lb = light.x, ls = light.y * mix(0.2, 1.0, f.blockColor.w);
+		float3 lm = max(float3(lb) * float3(1.0, 0.9, 0.75), float3(ls));
+		if (f.flags.x != 0) lm = max(lm, float3(0.3));  // (the Nether and the End: no sky light, vanilla's ambient)
+		return albedo * max(lm * lm * (3.0 - 2.0 * lm), float3(0.04));
+	}
 	// (the End has no sky light in Minecraft: everything there counts as open to its sky, so its light (Reimagined's lavender,
 	// or the black hole's) reaches the islands, the shadow maps deciding where)
 	if (f.flags.x == 2) light.y = 1.0;
