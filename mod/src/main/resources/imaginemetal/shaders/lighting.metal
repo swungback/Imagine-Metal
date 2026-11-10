@@ -275,7 +275,8 @@ static float imEmission(uint cls, float3 tex) {
 	float sat = hi - lo;
 	switch (cls) {
 		// (hot cores: the brightest texels far past white, so the bloom haloes them, the darker ones lower so the texture reads)
-		case IM_MAT_EMITTER: return 3.4 * l * l * l + 0.4 * l;
+		// (only the bright parts far past white: the whole block glowing turned a jack o'lantern's pumpkin skin white too)
+		case IM_MAT_EMITTER: return 3.2 * smoothstep(0.42, 0.95, l) * l + 0.2 * l;
 		case IM_MAT_GLOW_GEM: return 0.0;  // (crying obsidian: its veins only, imShade)
 		case IM_MAT_LAVA: return 1.35 + 3.0 * l * l;  // (Reimagined's: brighter where the texture is, its hot spots near white)
 		case IM_MAT_FLAME: return 4.0 * smoothstep(0.62, 0.92, hi) * smoothstep(0.15, 0.4, sat);
@@ -576,12 +577,15 @@ static float3 imAirFog(float3 p, float skyLight, constant ImFrame &f, thread flo
 	float3 sc = 2.0 * (rs + ms) * iso * f.ambientUp.rgb;
 	// (Photon's four scattering orders: the first with its full phase, the other three, nearly even by then, folded into one
 	// even term; one phase evaluation instead of four)
-	float ph = 0.7 * imHg(LoV, 0.5) + 0.3 * imHg(LoV, -0.2);
+	float ph = 0.7 * imHg(LoV, 0.4) + 0.3 * imHg(LoV, -0.2);
 	float phMulti = 0.5 * (0.7 * imHg(LoV, 0.35) + 0.3 * imHg(LoV, -0.14)) + 0.375 * iso;
 	sc += (rs * (1.875 * iso) + ms * (ph + phMulti)) * f.lightColor.rgb;
 	sc *= max(skyLight, f.fogParams.z);
 	float sy = f.sunDir.y + 0.02;
-	sc *= 1.0 + 0.75 * saturate((exp(-300.0 * sy * sy) - 0.05) / 0.95);  // (Photon: brighter in the early morning and evening)
+	sc *= 1.0 + 0.35 * saturate((exp(-300.0 * sy * sy) - 0.05) / 0.95);  // (Photon: brighter in the early morning and evening)
+	// (a soft ceiling: the glow toward a low sun never washes the land out to a flat sheet)
+	float sm = max(max(sc.r, sc.g), sc.b), cap = 0.5 * max(max(f.lightColor.r, f.lightColor.g), f.lightColor.b) + 0.05;
+	if (sm > 1e-4) sc *= cap * (1.0 - exp(-sm / cap)) / sm;
 	return max(sc, 0.0);
 }
 
@@ -620,7 +624,35 @@ static inline float imValueNoise(float2 q) {
 
 // Contact shadows toward the sun from the last frame's depth: what the screen showed between this point and the sun, up to 3 blocks
 // away, shades it. Mobs, players and items aren't drawn into the shadow map, so this is their shadow on the ground beside them.
-static float imContactShadow(float3 p, float3 n, constant ImFrame &f, depth2d<float> hd, float dither) {
+// Is the screen's surface at sp (camera-relative) something the sun's shadow maps already hold (terrain), or not (a mob, an item,
+// the selection outline)? Terrain's own shadows come from the maps; a second, screen-space copy of them showed as ghostly grey
+// "3D" doubles of plants and ledges a little off their real shadows.
+static bool imInShadowMap(float3 sp, constant ImFrame &f, depth2d_array<float> smap) {
+	float4 c = f.shadowNear * float4(sp, 1.0);
+	uint slice = 0;
+	float4x4 m = f.shadowNear;
+	if (max(abs(c.x), abs(c.y)) > 0.95 || c.z <= 0.0 || c.z >= 1.0) {
+		c = f.shadowFar * float4(sp, 1.0);
+		slice = 1;
+		m = f.shadowFar;
+		if (max(abs(c.x), abs(c.y)) > 0.97 || c.z <= 0.0 || c.z >= 1.0) return true;  // (no map here: leave it to the maps' fallback)
+	}
+	float2 uv = float2(0.5 + 0.5 * c.x, 0.5 - 0.5 * c.y);
+	float2 sz = float2(smap.get_width(), smap.get_height());
+	uint2 t = uint2(clamp(uv, 0.0, 0.9999) * sz);
+	// (the nearest caster around it, the smallest depth (the maps keep the nearest to the sun): a texel's neighbours too, so a
+	// block's edge isn't taken for something else)
+	float md = smap.read(t, slice);
+	md = min(md, smap.read(uint2(min(t + uint2(1, 0), uint2(sz) - 1)), slice));
+	md = min(md, smap.read(uint2(min(t + uint2(0, 1), uint2(sz) - 1)), slice));
+	md = min(md, smap.read(uint2(t.x > 0 ? t.x - 1 : 0, t.y), slice));
+	md = min(md, smap.read(uint2(t.x, t.y > 0 ? t.y - 1 : 0), slice));
+	float zs = length(float3(m[0][2], m[1][2], m[2][2]));  // (light-depth units a block)
+	// (closer to the sun than every caster there by more than a third of a block: not in the maps)
+	return c.z > md - zs * 0.35;
+}
+
+static float imContactShadow(float3 p, float3 n, constant ImFrame &f, depth2d<float> hd, float dither, depth2d_array<float> smap) {
 	float dist = length(p);
 	if (dist > 40.0) return 1.0;
 	float3 q = p + f.histShift.xyz + n * (0.04 + dist * 0.003);
@@ -634,11 +666,24 @@ static float imContactShadow(float3 p, float3 n, constant ImFrame &f, depth2d<fl
 		if (c.w <= 0.05) break;
 		float2 ndc = c.xy / c.w;
 		if (any(abs(ndc) > 1.0)) break;
-		float d = hd.read(uint2(clamp(ndc * 0.5 + 0.5, 0.0, 0.9999) * size));
+		float2 suv = clamp(ndc * 0.5 + 0.5, 0.0, 0.9999);
+		float d = hd.read(uint2(suv * size));
 		float4 sp = f.histClipInv * float4(ndc, d, 1.0);
-		float diff = length(r) - length(sp.xyz / sp.w);
+		float3 spp = sp.xyz / sp.w;
+		float diff = length(r) - length(spp);
+		float lim = 0.12 + length(r) * 0.005;
 		// (just behind a surface the screen shows: something is between here and the sun; far behind is only passing behind it)
-		if (diff > 0.12 + length(r) * 0.005 && diff < 0.9) {
+		if (diff > lim && diff < 0.9) {
+			// (something thin, a pixel or two across, the selection outline's lines, a fishing line, isn't a shadow caster: the
+			// screen two pixels to either side must hold it too)
+			float2 o = 2.0 / size;
+			float da = hd.read(uint2(clamp(suv + o, 0.0, 0.9999) * size)), db = hd.read(uint2(clamp(suv - o, 0.0, 0.9999) * size));
+			float df = min(min(d, da), db);  // (reversed Z: the farthest of the three)
+			float4 sf = f.histClipInv * float4(ndc, df, 1.0);
+			float difff = length(r) - length(sf.xyz / sf.w);
+			if (difff <= lim) continue;
+			// (terrain is in the sun's shadow maps, which shadow it already: only what they don't hold casts here)
+			if (imInShadowMap(spp - f.histShift.xyz, f, smap)) continue;
 			occ = 1.0 - float(i) / 12.0;
 			break;
 		}
@@ -748,7 +793,8 @@ static inline float imDither(float2 pixel, constant ImFrame &f) {
 }
 
 static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint mat, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp,
-	texture3d<float> lvol, sampler lsamp, texture3d<float> seeds, texture2d<float> pbrN, texture2d<float> pbrS, float2 uv, float4 rect, texture2d<float> atlas, texture2d<float> hc, depth2d<float> hd, sampler hs) {
+	texture3d<float> lvol, sampler lsamp, texture3d<float> seeds, texture2d<float> pbrN, texture2d<float> pbrS, float2 uv, float4 rect, texture2d<float> atlas, texture2d<float> hc, depth2d<float> hd, sampler hs,
+	depth2d<float> ud) {
 	if (f.flags.z == 0) return albedo * (0.2 + 0.8 * max(light.x, light.y)); // the engine hasn't filled a frame yet
 	// (the End has no sky light in Minecraft: everything there counts as open to its sky, so its light (Reimagined's lavender,
 	// or the black hole's) reaches the islands, the shadow maps deciding where)
@@ -917,11 +963,16 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// off regardless, so a cave never catches sunlight through an imprecision of the map.
 	float2 sm = imShadow(p, n, pixel, f, smap, cmp);
 	float open = smoothstep(0.45, 0.9, sky);
-	float sun = mix(open, sm.x, sm.y) * (f.water.z > 0.5 && f.flags.x == 0 ? 0.3 + 0.7 * smoothstep(0.0, 0.6, sky) : smoothstep(0.0, 0.07, sky));
+	float sun = mix(open, sm.x, sm.y);
+	// (under water the light is scattered: shadows there are soft and shallow, not the hard dark shapes cast on dry land)
+	if (f.water.z > 0.5 && f.flags.x == 0) sun = (0.45 + 0.55 * sun) * (0.3 + 0.7 * smoothstep(0.0, 0.6, sky));
+	else sun *= smoothstep(0.0, 0.07, sky);
 	// mobs' and items' shadows (they aren't in the shadow map): a short trace toward the sun through the last frame's depth
 	// (a fixed step pattern, no per-pixel jitter: the jitter, against the last frame's depth of grass and petals, was a crawling
 	// grain over the ground)
-	if (f.toggles.z > 0.5 && sun > 0.02 && f.histShift.w > 0.5 && kind == 0u) sun *= imContactShadow(p, n, f, hd, 0.5);
+	// (the trace reads the depth from before the water was drawn when there is one: the water's surface over shallows isn't
+	// something between the seabed and the sun)
+	if (f.toggles.z > 0.5 && sun > 0.02 && f.histShift.w > 0.5 && kind == 0u) sun *= f.pbrPack.z > 0.5 ? imContactShadow(p, n, f, ud, 0.5, smap) : imContactShadow(p, n, f, hd, 0.5, smap);
 	// caustics (eyes under water: what you see is under it too): the waves above focus the sunlight into a moving net of bright
 	// lines on everything it reaches, from two drifting noises' crossings, along the light's direction
 	if (f.water.z > 0.5 && f.flags.x == 0 && sun > 0.0) {
@@ -1177,7 +1228,12 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// light given off: on top of the tone-mapped light, unclamped (the picture is HDR: Bloom's resolve maps it to the screen)
 	float3 ecol = pow(max(tex, 0.0), 2.2);
 	// (lava: its darker crust a deep red-orange, only its hot spots running to yellow-white, as Reimagined's)
-	if (cls == IM_MAT_LAVA) ecol *= mix(float3(1.0, 0.55, 0.38), float3(1.0, 0.9, 0.8), smoothstep(0.55, 0.95, imLuma(tex)));
+	// (a ramp by brightness instead of the texture's own colour: its red crust under the bloom's white haze read pink)
+	if (cls == IM_MAT_LAVA) {
+		float ll = imLuma(tex);
+		float3 crust = float3(0.85, 0.2, 0.025), mid = float3(1.0, 0.42, 0.05), hot = float3(1.0, 0.8, 0.35);
+		ecol = mix(mix(crust, mid, smoothstep(0.25, 0.55, ll)), hot, smoothstep(0.6, 0.95, ll)) * (0.35 + 0.65 * ll);
+	}
 	if (cls == IM_MAT_ORE || cls == IM_MAT_NETHER_ORE) {
 		// (Reimagined's glowing ores: each speck's own colour made deeper (colour x colour^k: redstone's red pure, diamond's
 		// cyan, emerald's green), then glowing well past white so the bloom gives every speck a halo; the stone stays dark)
@@ -1219,7 +1275,10 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 	float wrap = particle ? 0.6 : max(nl + 0.4, 0.0) * (1.0 / 1.4);
 	float2 sm = imShadow(p, n, float2(0.0), f, smap, cmp);
 	float open = smoothstep(0.45, 0.9, sky);
-	float sun = mix(open, sm.x, sm.y) * (f.water.z > 0.5 && f.flags.x == 0 ? 0.3 + 0.7 * smoothstep(0.0, 0.6, sky) : smoothstep(0.0, 0.07, sky));
+	float sun = mix(open, sm.x, sm.y);
+	// (under water the light is scattered: shadows there are soft and shallow, not the hard dark shapes cast on dry land)
+	if (f.water.z > 0.5 && f.flags.x == 0) sun = (0.45 + 0.55 * sun) * (0.3 + 0.7 * smoothstep(0.0, 0.6, sky));
+	else sun *= smoothstep(0.0, 0.07, sky);
 	float3 direct = f.lightColor.rgb * (wrap * sun);
 	float ny = particle ? 0.6 : n.y;
 	float3 ambient = mix(f.ambientDown.rgb, f.ambientUp.rgb, ny * 0.5 + 0.5) * skyF;
@@ -1227,6 +1286,15 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 	if (f.water.z > 0.5 && f.flags.x == 0) ambient += float3(0.04, 0.09, 0.12) * mix(0.12, 1.0, f.nightMiddle.w);
 	float4 bl = imBlockLight(p, particle ? float3(0.0, 1.0, 0.0) : n, f, lvol, lsamp);
 	float3 torch = bl.rgb * imBlockCurve(max(block, bl.a)) * (1.0 - 0.25 * f.blockColor.w * smoothstep(0.5, 1.0, sky));
+	if (!particle && f.lightVol.w > 0.5) {
+		// (block light with a direction: the grid's light in front of the face against behind it, so the side of a mob toward
+		// a torch is lit and the far side falls off, as the terrain's bumps are shaded by it; lit evenly they read flat)
+		float lf = imBlockLight(p + n * 0.45, n, f, lvol, lsamp).a, lb = imBlockLight(p - n * 0.45, -n, f, lvol, lsamp).a;
+		float dirL = saturate(0.5 + (lf - lb) * 5.0);
+		torch *= mix(0.45, 1.25, dirL);
+		// (and the grid's own light where Minecraft's level at the mob is lower: a mob a few blocks from a lantern isn't dark)
+		torch = max(torch, bl.rgb * imBlockCurve(saturate(max(lf, bl.a) - 1.0 / 15.0)) * mix(0.45, 1.25, dirL));
+	}
 	if (f.held.w > 0.0) {
 		float hl = saturate(min(f.held.w + 4.0 / 15.0, 1.0) - length(p) / 15.0);
 		if (hl > 0.0) {
@@ -1248,7 +1316,9 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 	}
 	// (shaded by which way the face points, as the terrain's blocks are: tops full, sides a little less, undersides darker; mobs
 	// lit evenly from every side read flat, cut-outs)
-	float face = particle ? 1.0 : (n.y >= 0.0 ? 1.0 : 1.0 + 0.4 * n.y) * (1.0 + 0.05 * abs(n.z) - 0.12 * abs(n.x));
+	float face = particle ? 1.0 : (n.y >= 0.0 ? 1.0 : 1.0 + 0.5 * n.y) * (1.0 + 0.05 * abs(n.z) - 0.16 * abs(n.x));
+	// (in the dark a mob keeps a faint outline: a little of the cave's floor light from the side facing the viewer)
+	if (!particle && !hand) lit += f.minLight.rgb * (0.6 * saturate(dot(n, -normalize(p))));
 	float3 radiance = base * lit * face * f.minLight.w;
 	// (the hand holding a light: lit by it on top of the day, so a torch in the hand shows on the arm even in sunlight; in the
 	// light's colour)
@@ -1261,13 +1331,15 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 		// mirrored, stronger at a grazing angle, both tinted by the metal's own colour; dull cloth and leather barely
 		float3 V = -normalize(p);
 		float3 H = normalize(V + f.lightDir.xyz);
-		float shine = smoothstep(0.03, 0.3, imLuma(base));
-		float sp = pow(saturate(dot(n, H)), 24.0) * 3.5 * sun * saturate(nl * 4.0);
+		float shine = smoothstep(0.02, 0.2, imLuma(base));
+		float sp = pow(saturate(dot(n, H)), 32.0) * 5.0 * sun * saturate(nl * 4.0);
 		float3 R = reflect(-V, n);
-		float fres = pow(1.0 - saturate(dot(n, V)), 4.0);
-		float3 env = mix(f.ambientDown.rgb, f.ambientUp.rgb, R.y * 0.5 + 0.5) * skyF + torch * 0.5;
+		float fres = pow(1.0 - saturate(dot(n, V)), 3.0);
+		float3 env = mix(f.ambientDown.rgb, f.ambientUp.rgb, R.y * 0.5 + 0.5) * skyF * 1.4 + torch * 0.9;
 		float3 tintM = base / max(max(max(base.r, base.g), base.b), 0.05);
-		radiance += tintM * (f.lightColor.rgb * sp + env * (0.12 + 0.6 * fres)) * (shine * f.minLight.w);
+		// (a torch or lantern near it makes its own highlight, as the sun does: armour shines indoors too)
+		float tsp = pow(saturate(dot(n, V)), 6.0) * 0.6;
+		radiance += tintM * (f.lightColor.rgb * sp + env * (0.25 + 0.9 * fres) + torch * tsp) * (shine * f.minLight.w);
 	}
 	float3 c = imGrade(imTonemap(radiance, f.tonemap), f);
 	// items in the world that give off light (a lava bucket's lava, a torch's flame, glowstone dust, blaze rods): their hot,

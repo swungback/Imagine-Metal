@@ -39,7 +39,7 @@ public final class Haze {
 
 	// Photon's defaults: {r, g, b (sRGB), density per block}
 	private static final float[] TEMPERATE = {0.31f, 0.67f, 1.00f, 0.0005f};
-	private static final float[] ARID = {0.86f, 0.78f, 0.74f, 0.0003f};  // (a warm, dusty haze: the pale blue one made the desert cold)
+	private static final float[] ARID = {0.80f, 0.80f, 0.84f, 0.0003f};  // (a light, dusty haze, neither cold blue nor yellow)
 	private static final float[] SNOWY = {0.50f, 0.81f, 1.00f, 0.0010f};
 	private static final float[] TAIGA = {0.31f, 0.85f, 1.00f, 0.0006f};
 	private static final float[] JUNGLE = {0.40f, 0.95f, 1.00f, 0.0013f};
@@ -55,7 +55,9 @@ public final class Haze {
 	static final float[] look = {1f, 1f, 1f, 1f, 1f, 1f, 0f};
 	private static final float[] lookTarget = {1f, 1f, 1f, 1f, 1f, 1f, 0f};
 	private static final float[] LOOK_TEMPERATE = {1.04f, 1.0f, 0.92f, 0.95f, 1.0f, 1.06f, 0.15f};
-	private static final float[] LOOK_DRY = {1.07f, 0.99f, 0.84f, 1.02f, 0.85f, 0.63f, 0.65f};
+	// (warm sun, but the shade kept cool and nearly the sky's: pulled most of the way to the sun's own yellow, the whole desert
+	// came out one flat piss-yellow, its shadows no different from its light)
+	private static final float[] LOOK_DRY = {1.05f, 1.0f, 0.9f, 0.94f, 0.97f, 1.06f, 0.15f};
 	private static final float[] LOOK_JUNGLE = {1.03f, 1.0f, 0.88f, 0.86f, 1.04f, 0.78f, 0.35f};
 	private static final float[] LOOK_SWAMP = {1.0f, 0.98f, 0.85f, 0.8f, 0.95f, 0.72f, 0.45f};
 	private static final float[] LOOK_TAIGA = {1.0f, 0.98f, 0.95f, 0.84f, 0.99f, 1.08f, 0.25f};
@@ -145,7 +147,8 @@ public final class Haze {
 		float noon = sunY > 0f ? 1f - me : 0f, midnight = sunY < 0f ? 1f - me : 0f;
 		float bh = sunY + 0.07283f;
 		float blueHour = Math.clamp(((float) Math.exp(-190f * bh * bh) - 0.05f) / 0.95f, 0f, 1f);
-		float m = 0.0070f * sunrise + 0.0001f * noon + 0.0050f * sunset + 0.0050f * midnight + 0.0020f * blueHour + humidMie;
+		// (Photon's dawn mist halved: by a river at sunrise, looking toward the sun, it whited the whole screen out pink)
+		float m = 0.0035f * sunrise + 0.0001f * noon + 0.0025f * sunset + 0.0040f * midnight + 0.0015f * blueHour + humidMie * 0.7f;
 		return m + (0.030f - m) * rain;
 	}
 }

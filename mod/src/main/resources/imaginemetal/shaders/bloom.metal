@@ -474,7 +474,9 @@ fragment float4 im_bloom_ao(ImBloomOut in [[stage_in]], depth2d<float> depth [[t
 	float2 uv = in.uv, t = 2.0 / size;
 	float d;
 	float3 P = imbPos(depth, uv, size, p, d);
-	if (d <= 0.00001 || length(P) > 128.0) return float4(1.0);  // (the sky; and past 128 blocks the occlusion has faded out)
+	// (the sky; and past 48 blocks: at a distance its half-block reach is a pixel or two, and it only smudged blocks together,
+	// grey halos along every sand step seen from a mountain)
+	if (d <= 0.00001 || length(P) > 48.0) return float4(1.0);
 	float dd;
 	float3 px = imbPos(depth, uv + float2(t.x, 0.0), size, p, dd) - P, nx = P - imbPos(depth, uv - float2(t.x, 0.0), size, p, dd);
 	float3 py = imbPos(depth, uv + float2(0.0, t.y), size, p, dd) - P, ny = P - imbPos(depth, uv - float2(0.0, t.y), size, p, dd);
@@ -511,7 +513,7 @@ fragment float4 im_bloom_ao(ImBloomOut in [[stage_in]], depth2d<float> depth [[t
 	ao *= ao;  // (deeper in the corners)
 	// (ground seen at a very low angle: the normal from the depth is least reliable there, so less occlusion)
 	ao = mix(1.0, ao, smoothstep(0.05, 0.25, abs(dot(N, P / max(dist, 1e-3)))));
-	ao = mix(1.0, ao, 1.0 - smoothstep(64.0, 128.0, dist));
+	ao = mix(1.0, ao, 1.0 - smoothstep(20.0, 48.0, dist));
 	return float4(ao, 0.0, 0.0, 1.0);
 }
 
@@ -590,11 +592,12 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 			float3 q = dir * (stepL * (float(i) + j)) - f.lightVol.xyz;
 			float4 l = lvol.sample(lfs, q * inv);
 			if (l.a <= 0.0) continue;
+			// (a^6: only the air right around a light glows, a ball of it; a^4 lit whole corridors and the column of air over a torch)
 			float a2 = l.a * l.a;
-			acc += l.rgb / max(max(max(l.r, l.g), l.b), 1e-3) * (a2 * a2);
+			acc += l.rgb / max(max(max(l.r, l.g), l.b), 1e-3) * (a2 * a2 * a2);
 		}
 		// (a soft glow round the lights: at three times this it filled whole rooms and caverns)
-		c += acc * (stepL * 0.016) * (1.0 - 0.6 * smoothstep(0.4, 1.2, imbLuma(c)));
+		c += acc * (stepL * 0.02) * (1.0 - 0.6 * smoothstep(0.4, 1.2, imbLuma(c)));
 	}
 	if (fx.z > 0.5) {
 		float d = depth.read(uint2(clamp(in.uv, 0.0, 0.9999) * float2(depth.get_width(), depth.get_height())));
@@ -744,7 +747,7 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 	float3 o = pow(saturate(c), 1.0 / 2.2);
 	// Reimagined's vignette (final.glsl VIGNETTE_R, on by default): the corners a little darker, less where it's bright
 	float2 vc = in.uv - 0.5;
-	o *= 1.0 - 0.4 * dot(vc, vc) * (1.0 - dot(o, float3(0.2126, 0.7152, 0.0722)));
+	o *= 1.0 - 0.25 * dot(vc, vc) * (1.0 - dot(o, float3(0.2126, 0.7152, 0.0722)));  // (0.25: at 0.4 a torch near the edge of the screen looked dim)
 	// (a triangular dither of one 8-bit step: smooth gradients on walls and in the sky without bands; with TAA it's done on its
 	// output, the screen)
 	if (p.taa.w < 0.5) o += imbDither8(in.pos.xy);
@@ -790,8 +793,9 @@ fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur 
 	m1 /= 9.0;
 	m2 /= 9.0;
 	float3 sd = sqrt(max(m2 - m1 * m1, 0.0));
-	mn = max(mn, m1 - 1.25 * sd);
-	mx = min(mx, m1 + 1.25 * sd);
+	// (1.0: a mob walking over grass a little way off left a trail at 1.25)
+	mn = max(mn, m1 - 1.0 * sd);
+	mx = min(mx, m1 + 1.0 * sd);
 	float2 uv = in.uv - p.taa.xy;  // (this pixel without the jitter)
 	float4 w = p.clipInv * float4(uv * 2.0 - 1.0, dmin <= 0.00001 ? 0.0001 : dmin, 1.0);
 	float3 P = w.xyz / w.w;
@@ -801,11 +805,13 @@ fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur 
 		float2 puv = pc.xy / pc.w * 0.5 + 0.5;
 		if (all(puv > 0.0) && all(puv < 1.0)) {
 			// (the history was drawn with the last frame's offset: it is read where that put this point)
-			float3 h = imbCatmull(hist, s, puv + p.taaPrev.xy);
-			h = clamp(h, mn, mx);
+			float3 hc = imbCatmull(hist, s, puv + p.taaPrev.xy);
+			float3 h = clamp(hc, mn, mx);
 			// (less history where the picture moved a lot on screen: sharper in motion)
 			float moved = length((puv - in.uv) * float2(size));
-			float k = mix(0.88, 0.7, saturate(moved / 12.0));
+			float k = mix(0.86, 0.6, saturate(moved / 8.0));
+			// (and less where the history had to be pulled in a lot: something moved there that the camera's motion doesn't explain)
+			k *= 1.0 - 0.6 * saturate(length(hc - h) / max(imbLuma(m1) * 0.5, 0.02));
 			res = mix(c, h, k);
 			// (a light sharpen against what's left of the softness, on the screen only: fed back into the history it sharpened
 			// the already sharpened picture every frame, the finest grain growing until the colour box stopped it, a crawling

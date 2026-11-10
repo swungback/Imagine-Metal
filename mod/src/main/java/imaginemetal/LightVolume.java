@@ -162,6 +162,7 @@ public final class LightVolume {
 
 	private static long state;
 	private static boolean failed, have;
+	private static int catchUp;
 	private static int ox, oy, oz, lastX, lastY, lastZ;
 	private static Object level;
 	private static ByteBuffer seeds, section;
@@ -234,13 +235,23 @@ public final class LightVolume {
 				fillAll();
 				ImNative.lightUpload(state, 0, 0, 0, SX, SY, SZ, MemoryUtil.memAddress(seeds));
 				DIRTY.clear();
+				catchUp = 8;
 			} else {
 				Long k;
 				int budget = 64;  // sections rewritten a frame (a burst of recompiles spreads over a few frames)
-				while (budget-- > 0 && (k = DIRTY.poll()) != null) rewrite(k);
+				boolean any = false;
+				while (budget-- > 0 && (k = DIRTY.poll()) != null) any |= rewrite(k);
+				if (any) catchUp = Math.max(catchUp, 5);
 			}
+			dynamicLights(moved);
 			boolean reset = !have || Math.abs(dx) >= SX || Math.abs(dy) >= SY || Math.abs(dz) >= SZ;
 			ImNative.lightStep(MetalBridge.enc(encoder), state, dx, dy, dz, reset);
+			// (the light spreads a block a step: after the grid moves or sections change, a few more steps a frame for a few frames,
+			// so newly reached lights fill their room in a handful of frames instead of creeping in over a second, blotchy)
+			if (catchUp > 0) {
+				catchUp--;
+				for (int i = 0; i < 3; i++) ImNative.lightStep(MetalBridge.enc(encoder), state, 0, 0, 0, false);
+			}
 			lastX = ox;
 			lastY = oy;
 			lastZ = oz;
@@ -249,6 +260,95 @@ public final class LightVolume {
 			failed = true;
 			System.out.println("[Imagine Metal] coloured light off: " + t);
 		}
+	}
+
+	// ---- moving lights (dropped light items, burning mobs, mobs holding lights) ----
+
+	private static final int DYN_MAX = 24;
+	/** Last frame's moving-light voxels (grid index), to be put back as the terrain has them when the light moves on. */
+	private static final int[] dynPrev = new int[DYN_MAX], dynNow = new int[DYN_MAX];
+	private static int dynPrevCount;
+	private static ByteBuffer voxel;
+
+	/**
+	 * Moving lights as seeds in the grid, rewritten every frame where they are now (the voxels they left get the terrain's seed
+	 * back): a torch dropped on the floor, a blaze, a burning zombie, a skeleton holding a lantern light the world around them
+	 * in their colour, spreading as any light does.
+	 */
+	private static void dynamicLights(boolean moved) {
+		if (voxel == null) voxel = MemoryUtil.memAlloc(4);
+		long vb = MemoryUtil.memAddress(voxel), full = MemoryUtil.memAddress(seeds);
+		int n = 0;
+		var level = Minecraft.getInstance().level;
+		if (level != null && Settings.heldLight) {
+			Vec3 cam = Minecraft.getInstance().gameRenderer.mainCamera().position();
+			var player = Minecraft.getInstance().player;
+			for (var e : level.entitiesForRendering()) {
+				if (n >= DYN_MAX) break;
+				if (e == player || e.isRemoved()) continue;
+				double ddx = e.getX() - cam.x, ddy = e.getY() - cam.y, ddz = e.getZ() - cam.z;
+				if (ddx * ddx + ddy * ddy + ddz * ddz > 48.0 * 48.0) continue;
+				int light = 0;
+				float[] col = null;
+				if (e instanceof net.minecraft.world.entity.item.ItemEntity ie) {
+					BlockState bs = lightOf(ie.getItem());
+					if (bs != null) {
+						light = bs.getLightEmission();
+						col = LightColors.of(bs);
+					}
+				} else if (e instanceof net.minecraft.world.entity.LivingEntity le) {
+					for (var hand : net.minecraft.world.InteractionHand.values()) {
+						BlockState bs = lightOf(le.getItemInHand(hand));
+						if (bs != null && bs.getLightEmission() > light) {
+							light = bs.getLightEmission();
+							col = LightColors.of(bs);
+						}
+					}
+				}
+				if (e.isOnFire()) {
+					if (light < 12) {
+						light = 12;
+						col = LightColors.of(net.minecraft.world.level.block.Blocks.FIRE.defaultBlockState());
+					}
+				}
+				if (light <= 0 || col == null) continue;
+				int vx = (int) Math.floor(e.getX()) - ox, vy = (int) Math.floor(e.getY() + Math.min(e.getBbHeight() * 0.5, 0.6)) - oy,
+					vz = (int) Math.floor(e.getZ()) - oz;
+				if (vx < 0 || vy < 0 || vz < 0 || vx >= SX || vy >= SY || vz >= SZ) continue;
+				int idx = (vz * SY + vy) * SX + vx;
+				// (not inside a solid block: the light would be stopped where it starts)
+				if ((MemoryUtil.memGetByte(full + (long) idx * 4 + 3) & 128) != 0) continue;
+				// (a little below the placed block's own strength: these are small things, and they move)
+				int lv = Math.min(light + 2, 15);
+				MemoryUtil.memPutByte(vb, (byte) Math.round(col[0] * 255f));
+				MemoryUtil.memPutByte(vb + 1, (byte) Math.round(col[1] * 255f));
+				MemoryUtil.memPutByte(vb + 2, (byte) Math.round(col[2] * 255f));
+				MemoryUtil.memPutByte(vb + 3, (byte) lv);
+				ImNative.lightUpload(state, vx, vy, vz, 1, 1, 1, vb);
+				dynNow[n++] = idx;
+			}
+		}
+		// (the voxels left behind: the terrain's seed again; after a full refill they already are)
+		if (!moved) {
+			outer:
+			for (int i = 0; i < dynPrevCount; i++) {
+				int idx = dynPrev[i];
+				for (int j = 0; j < n; j++) if (dynNow[j] == idx) continue outer;
+				MemoryUtil.memPutInt(vb, MemoryUtil.memGetInt(full + (long) idx * 4));
+				ImNative.lightUpload(state, idx % SX, idx / SX % SY, idx / (SX * SY), 1, 1, 1, vb);
+			}
+		}
+		System.arraycopy(dynNow, 0, dynPrev, 0, n);
+		dynPrevCount = n;
+	}
+
+	/** The block an item stack places, when that block gives off light (a lava bucket counts as lava). */
+	private static BlockState lightOf(net.minecraft.world.item.ItemStack stack) {
+		if (stack == null || stack.isEmpty()) return null;
+		if (stack.getItem() == net.minecraft.world.item.Items.LAVA_BUCKET) return net.minecraft.world.level.block.Blocks.LAVA.defaultBlockState();
+		if (!(stack.getItem() instanceof net.minecraft.world.item.BlockItem bi)) return null;
+		BlockState bs = bi.getBlock().defaultBlockState();
+		return bs.getLightEmission() > 0 ? bs : null;
 	}
 
 	private static void fillAll() {
@@ -273,13 +373,13 @@ public final class LightVolume {
 		}
 	}
 
-	/** One recompiled section, if it's inside the grid: its 16^3 voxels rewritten. */
-	private static void rewrite(long k) {
+	/** One recompiled section, if it's inside the grid: its 16^3 voxels rewritten (true). */
+	private static boolean rewrite(long k) {
 		int sx = (int) (k >> 42), sy = (int) (k << 22 >> 44), sz = (int) (k << 42 >> 42);
 		int cx = sx - (ox >> 4), cy = sy - (oy >> 4), cz = sz - (oz >> 4);
-		if (cx < 0 || cy < 0 || cz < 0 || cx >= SX / 16 || cy >= SY / 16 || cz >= SZ / 16) return;
+		if (cx < 0 || cy < 0 || cz < 0 || cx >= SX / 16 || cy >= SY / 16 || cz >= SZ / 16) return false;
 		SectionLight s = SECTIONS.get(k);
-		if (s == null) return;
+		if (s == null) return false;
 		long base = MemoryUtil.memAddress(section);
 		MemoryUtil.memSet(base, 0, 16 * 16 * 16 * 4);
 		write(s, base, 0, 0, 0, 16, 16);
@@ -291,6 +391,7 @@ public final class LightVolume {
 				MemoryUtil.memCopy(base + ((long) (z * 16 + y) * 16) * 4, full + ((long) ((cz * 16 + z) * SY + cy * 16 + y) * SX + cx * 16) * 4, 16 * 4);
 			}
 		}
+		return true;
 	}
 
 	/** s's voxels into the box at base (w x h x ..., 4 bytes a voxel) with the section's corner at (x0, y0, z0). */

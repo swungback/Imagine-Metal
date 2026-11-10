@@ -35,7 +35,8 @@ public final class EntityShade {
 		// wireframe, nor the order-independent transparency's own passes, whose blending and outputs are their own)
 		String n = name.toLowerCase(java.util.Locale.ROOT);
 		if (n.contains("glint")) return glint(name, vs, fs);
-		if (n.equals("minecraft:pipeline/lines") || n.endsWith("pipeline/lines")) return outline(name, vs, fs);
+		// (the selection outline: Minecraft's lines, and in 26.x the block outline's own pipelines too)
+		if (n.endsWith("pipeline/lines") || n.endsWith("pipeline/lines_translucent") || n.contains("block_outline")) return outline(name, vs, fs);
 		if (Settings.portals && (n.contains("end_portal") || n.contains("end_gateway"))) return endPortal(name, vs, fs);
 		for (String skip : SKIP) if (n.contains(skip)) return null;
 		boolean wanted = false;
@@ -68,7 +69,8 @@ public final class EntityShade {
 			Matcher m = FS_MAIN.matcher(fs);
 			if (!m.find() || !fs.contains("out.fragColor")) return null;
 			String f = fs.substring(0, m.end()) + ", constant float4& imOn [[buffer(25)]]" + fs.substring(m.end());
-			f = beforeLastReturn(f, "    out.fragColor.xyz *= imOn.x > 0.5 && imOn.x < 1.5 ? 2.6 : 1.5;");
+			// (a touch: at 2.6 the glint's purple took over the whole item, a netherite sword in the hand looked purple)
+			f = beforeLastReturn(f, "    out.fragColor.xyz *= imOn.x > 0.5 && imOn.x < 1.5 ? 1.25 : 1.0;");
 			if (f == null) return null;
 			System.out.println("[Imagine Metal] glint glow: " + name);
 			return new String[] {vs, f};

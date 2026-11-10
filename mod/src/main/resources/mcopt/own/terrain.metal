@@ -1564,6 +1564,11 @@ struct VOut {
 	float2 imLight [[function_constant(F_VARY)]];
 	uint imMat [[flat]] [[function_constant(F_VARY)]];  // the face's material byte (OwnMaterials: bits 0-3 class, 4-7 upper corners)
 	float4 imRect [[flat]] [[function_constant(F_VARY)]]; // the face's texture rectangle in the atlas (uv min, max; 0 = unknown)
+	// the face's four corners' light levels (x block, y sky; a byte a corner, as uv2) and where in the face this is (0..1 each way;
+	// x < 0: not known, imLight as interpolated): blended over the whole face at once instead of over its two triangles apart,
+	// which showed the quad's diagonal as a seam wherever the corners differ (obsidian by a portal, a wall by a torch)
+	float2 imQuv [[function_constant(F_VARY)]];
+	uint2 imQL [[flat]] [[function_constant(F_VARY)]];
 #endif
 };
 
@@ -1616,6 +1621,7 @@ constant bool CPU_CLIP [[function_constant(3)]];
 
 #ifdef IM_SHADE
 static float2 ownUv(uint vi, device const void *arenaRaw);
+static short2 ownUv2(uint vi, device const void *arenaRaw);
 #endif
 static VOut ownVertex(uint vi, int3 origin, int uploadMs, constant DrawFrame &df, device const void *arenaRaw, constant Projection &proj,
 	constant Globals &g, constant Terrain &t, texture2d<float> lightmap, sampler lightSampler, thread float3 &rel);
@@ -1846,6 +1852,16 @@ vertex VOut own_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant Dr
 	if (!QUADS && !F_POSONLY) {
 		float2 uvo = ownUv(vi ^ 2u, arenaRaw);
 		ov.imRect = float4(min(ov.texCoord0, uvo), max(ov.texCoord0, uvo));
+		// (the four corners' light, and this corner's place: 0 (0,0), 1 (0,1), 2 (1,1), 3 (1,0) around the quad)
+		uint q0 = vi & ~3u, qb = 0u, qs = 0u;
+		for (uint k = 0; k < 4u; k++) {
+			short2 l = ownUv2(q0 | k, arenaRaw);
+			qb |= (uint(clamp(int(l.x), 0, 255)) & 255u) << (8u * k);
+			qs |= (uint(clamp(int(l.y), 0, 255)) & 255u) << (8u * k);
+		}
+		ov.imQL = uint2(qb, qs);
+		uint ck = vi & 3u;
+		ov.imQuv = float2(ck >= 2u ? 1.0 : 0.0, (ck == 1u || ck == 2u) ? 1.0 : 0.0);
 	}
 #endif
 	if (F_FV) {
@@ -1892,6 +1908,20 @@ static float2 ownUv(uint vi, device const void *arenaRaw) {
 		return float2(c.u, c.v) / 65536.0;
 	}
 	return float2(((device const Vtx *) arenaRaw)[vi].uv0);
+}
+
+// (Imagine Metal) the light levels alone of vertex vi (uv2), as ownVertex decodes them
+static short2 ownUv2(uint vi, device const void *arenaRaw) {
+	if (OWN_REC && COMPACT && !TRANSLUCENT) return ownQrec(arenaRaw, vi >> 2, vi & 3).uv2;
+	if (COMPACT && F_TIGHT) {
+		uint w = ((device const uint4 *) arenaRaw)[vi].y;
+		return short2(uchar(w >> 16), uchar(w >> 24));
+	}
+	if (COMPACT) {
+		CVtx c = ((device const CVtx *) arenaRaw)[vi];
+		return short2(c.lu, c.lv);
+	}
+	return ((device const Vtx *) arenaRaw)[vi].uv2;
 }
 #endif
 
@@ -1956,6 +1986,8 @@ static VOut ownShade(Vtx v, int3 origin, int uploadMs, constant DrawFrame &df, c
 	o.imLight = saturate(float2(int2(v.uv2)) / 240.0);
 	o.imMat = 0;  // (own_vs fills it in where the unit has material bytes)
 	o.imRect = float4(0);  // (own_vs fills it in)
+	o.imQuv = float2(-1.0);  // (own_vs fills it in where it knows the quad)
+	o.imQL = uint2(0);
 #else
 	float2 luv = clamp(float2(int2(v.uv2)) / 256.0 + 0.5 / 16.0, float2(0.5 / 16.0), float2(15.5 / 16.0));
 	putColor(o, VS_MODE == 1 ? float4(v.color) / 255.0 : float4(v.color) / 255.0 * lightmap.sample(lightSampler, luv, level(0.0)));
@@ -2289,7 +2321,7 @@ constant float CUTOUT_LIMIT [[function_constant(5)]];  // vanilla's ALPHA_CUTOUT
 static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, constant Fog &fog, texture2d<float> atlas, sampler atlasSampler
 #ifdef IM_SHADE
 	, constant ImFrame &imf, depth2d_array<float> imShadowMap, sampler imShadowCmp, texture3d<float> imLightVol, sampler imLightSampler, texture3d<float> imSeeds, texture2d<float> imPbrN, texture2d<float> imPbrS
-	, texture2d<float> imHistColor, depth2d<float> imHistDepth, sampler imHistSampler, thread float3 &imTint, thread float3 &imWaterN
+	, texture2d<float> imHistColor, depth2d<float> imHistDepth, sampler imHistSampler, thread float3 &imTint, thread float3 &imWaterN, depth2d<float> imUnderDepth
 #endif
 	) {
 #ifdef OWN_TPROBE
@@ -2308,10 +2340,11 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 #ifdef IM_SHADE
 	// (the fade-in of new chunks goes with the fog, after the lighting: toward the same colour the fog uses)
 	float imFade = 0.0;
-	if (F_RICH) {
-		imFade = 1.0 - in.chunkVisibility;
-		color.a = mix(fog.FogColor.a * color.a, color.a, in.chunkVisibility);
-	}
+	if (F_RICH) imFade = 1.0 - in.chunkVisibility;
+	// (the alpha is the texture's own: blocks' vertex colours are opaque in vanilla, and the fade-in is a colour fade above. Taking
+	// the vertex alpha and the fade's alpha mix let translucent block quads (stained glass, the nether portal) and some cutout ones
+	// (the copper torch) come out with almost none: glass showed only its tint, the portal and the torch not at all)
+	color.a = texel.a;
 #else
 	if (F_RICH) color = mix(fog.FogColor * float4(1, 1, 1, color.a), color, in.chunkVisibility);
 #endif
@@ -2354,14 +2387,17 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 				// Here only the surface's own share: its ripples faintly, and more at a grazing angle
 				float3 wn = wc / max(max(wc.r, max(wc.g, wc.b)), 1e-3);
 				wn = mix(wn, float3(0.25, 0.8, 0.9), 0.2);
-				float tl = dot(texel.rgb, float3(0.299, 0.587, 0.114));
+				float tl = mix(0.62, dot(texel.rgb, float3(0.299, 0.587, 0.114)), 0.35);
 				color.rgb = wn * (0.34 + 0.3 * tl);
 				color.a = mix(0.05 + 0.1 * tl * tl, 1.0, fr * fr * 0.9);
 			} else {
 				// Reimagined (water.glsl, its own style): the texture squared, tinted by the biome's water colour (its green kept up),
 				// a little warmer; nearly opaque where deep, clear up close, opaque at a grazing angle
 				float3 wq3 = sqrt(wc) * float3(1.0, 0.9, 0.85);
-				color.rgb = texel.rgb * texel.rgb * wq3 * 1.25;
+				// (the texture's speckle calmed: its light texels, squared, read as white streaks like rain over the whole sea from
+				// above; most of it kept as a soft ripple, pulled toward the texture's mean)
+				float3 tq = mix(float3(0.62), texel.rgb, 0.35);
+				color.rgb = tq * tq * wq3 * 1.25;
 				float a = 1.0 - (1.0 - color.a) * (1.0 - color.a);
 				color.a = a * (0.3 + 0.35 * smoothstep(4.0, 48.0, length(in.imPos)));
 				color.a = mix(color.a, 1.0, fr * fr);
@@ -2398,8 +2434,15 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 			imTint = mix(gt, float3(1.0), saturate(far * far));
 		}
 	}
-	color.rgb = imShade(color.rgb, texel.rgb, in.imPos, in.imLight, in.imMat | (imKind << 8), in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imSeeds, imPbrN, imPbrS,
-		in.texCoord0, in.imRect, atlas, imHistColor, imHistDepth, imHistSampler); // (Imagine Metal)
+	float2 imLightQ = in.imLight;
+	if (in.imQuv.x > -0.5) {
+		float2 st = saturate(in.imQuv);
+		float4 qb = float4(in.imQL.x & 255u, (in.imQL.x >> 8) & 255u, (in.imQL.x >> 16) & 255u, in.imQL.x >> 24);
+		float4 qs = float4(in.imQL.y & 255u, (in.imQL.y >> 8) & 255u, (in.imQL.y >> 16) & 255u, in.imQL.y >> 24);
+		imLightQ = saturate(float2(mix(mix(qb.x, qb.y, st.y), mix(qb.w, qb.z, st.y), st.x), mix(mix(qs.x, qs.y, st.y), mix(qs.w, qs.z, st.y), st.x)) / 240.0);
+	}
+	color.rgb = imShade(color.rgb, texel.rgb, in.imPos, imLightQ, in.imMat | (imKind << 8), in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imSeeds, imPbrN, imPbrS,
+		in.texCoord0, in.imRect, atlas, imHistColor, imHistDepth, imHistSampler, imUnderDepth); // (Imagine Metal)
 	if (imPortal && imf.extra.x > 0.5 && imf.portalRect.z > imf.portalRect.x) color = imPortalLook(in.texCoord0, in.imPos, texel, atlas, imf);
 	float3 imFogColor = fog.FogColor.rgb;
 	float imFog = fogValue * fog.FogColor.a;
@@ -2421,6 +2464,12 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 		float dist = length(in.imPos);
 		imFog = saturate(dist / imf.nether.w);
 		imFogColor = pow(imf.nether.rgb, 1.0 / 2.2);
+		// (lava glows through the haze: a lava sea far off keeps its orange and its currents instead of fading into a flat sheet
+		// of the haze's colour (pink in the crimson forest); the haze over it only half as thick, and lit by it)
+		if (!(CUTOUT && CUTOUT_LIMIT < 0.2) && (in.imMat & 15u) == 2u) {
+			imFog *= 0.5;
+			imFogColor = mix(imFogColor, color.rgb, 0.35);
+		}
 	} else if (imf.flags.x == 2 && imf.nether.w < 0.0) {
 		// the End (Reimagined's border fog there): the far islands fade into its violet sky toward the edge of the render
 		// distance (in place of Minecraft's black)
@@ -2445,6 +2494,10 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 		imFog = 1.0 - exp(-dist * dist);
 		// (bluer and a little brighter than the plain colour: Reimagined's water reads blue, ours came out teal-grey)
 		float3 wfc = pow(max(fog.FogColor.rgb, 1e-3), float3(0.33, 0.21, 0.26)) * 0.24 * float3(0.8, 1.0, 1.3);
+		// (the hue held at Reimagined's blue-green, only its brightness from Minecraft's colour: at dusk Minecraft mixes the sky's
+		// purple into it and under the sea turned a dull grey-violet)
+		float wl = dot(wfc, float3(0.2126, 0.7152, 0.0722));
+		wfc = mix(wfc, float3(0.16, 0.62, 0.95) * (wl / 0.5348), 0.75);
 		imFogColor = pow(imPresent(wfc, imf), 1.0 / 2.2);
 	}
 	imFog = 1.0 - (1.0 - imFog) * (1.0 - imFade);
@@ -2460,12 +2513,13 @@ fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]],
 	, constant ImFrame &imf [[buffer(30)]], depth2d_array<float> imShadowMap [[texture(20)]], sampler imShadowCmp [[sampler(13)]]
 	, texture3d<float> imLightVol [[texture(21)]], sampler imLightSampler [[sampler(12)]], texture3d<float> imSeeds [[texture(24)]], texture2d<float> imPbrN [[texture(27)]], texture2d<float> imPbrS [[texture(28)]]
 	, texture2d<float> imHistColor [[texture(22)]], depth2d<float> imHistDepth [[texture(23)]], sampler imHistSampler [[sampler(11)]]
+	, depth2d<float> imUnderDepth [[texture(26)]]
 #endif
 	) {
 #ifdef IM_SHADE
 	float3 imTint = float3(1.0), imWaterN = float3(0.0);
 	return ownFsBody(in, g, t, fog, atlas, atlasSampler, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imSeeds, imPbrN, imPbrS, imHistColor, imHistDepth,
-		imHistSampler, imTint, imWaterN);
+		imHistSampler, imTint, imWaterN, imUnderDepth);
 #else
 	return ownFsBody(in, g, t, fog, atlas, atlasSampler);
 #endif
@@ -2484,7 +2538,7 @@ fragment float4 own_fs_tr(VOut in [[stage_in]], float4 imDst [[color(0)]], const
 	) {
 	float3 imTint = float3(1.0), imWaterN = float3(0.0);
 	float4 c = ownFsBody(in, g, t, fog, atlas, atlasSampler, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imSeeds, imPbrN, imPbrS, imHistColor, imHistDepth,
-		imHistSampler, imTint, imWaterN);
+		imHistSampler, imTint, imWaterN, imUnderDepth);
 	float a = saturate(c.a);
 	float3 dst = imDst.rgb;
 	float3 behind;
@@ -2619,9 +2673,14 @@ fragment float4 own_fs_flat(VOut in [[stage_in]]) {
 fragment void own_fs_alpha(VOut in [[stage_in]], constant Globals &g [[buffer(22)]], constant Terrain &t [[buffer(23)]], constant Fog &fog [[buffer(24)]],
 	texture2d<float> atlas [[texture(16)]], sampler atlasSampler [[sampler(14)]]) {
 	float2 pixelSize = 1.0f / float2(t.TextureSize);
-	float a = (g.UseRgss == 1 ? sampleRGSS(atlas, atlasSampler, in.texCoord0, pixelSize) : sampleNearest(atlas, atlasSampler, in.texCoord0, pixelSize)).a
-		* getColor(in).a;
+	float a = (g.UseRgss == 1 ? sampleRGSS(atlas, atlasSampler, in.texCoord0, pixelSize) : sampleNearest(atlas, atlasSampler, in.texCoord0, pixelSize)).a;
+#ifdef IM_SHADE
+	// (the same decision as ownFsBody's with Imagine Metal: the texture's alpha alone. A pre-pass that kept a fragment the colour
+	// pass then dropped left the block's depth with the colour behind it: the block see-through)
+#else
+	a *= getColor(in).a;
 	if (F_RICH) a = mix(fog.FogColor.a * a, a, in.chunkVisibility);
+#endif
 	if (a < CUTOUT_LIMIT) discard_fragment();
 }
 

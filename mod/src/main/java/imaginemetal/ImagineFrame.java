@@ -206,7 +206,8 @@ public final class ImagineFrame {
 			}
 			float[] sunsetTint = {1.21f, 0.92f, 0.76f};
 			for (int i = 0; i < 3; i++) {
-				float dayAmb = (float) Math.pow(Math.max(skyc[i], 0f), 1.65) * 0.52f * mix(1f, sunsetTint[i], golden);
+				// (0.42: the shade a little darker against the sun, so a sunny day reads as sun and shadow, not evenly lit)
+				float dayAmb = (float) Math.pow(Math.max(skyc[i], 0f), 1.65) * 0.42f * mix(1f, sunsetTint[i], golden);
 				up[i] = mix(NIGHT_SKY[i] * Settings.nightBrightness, dayAmb, day);
 			}
 			// (rain: Reimagined's rain ambient, a light blue-grey, brighter than the clear sky's shadows: an overcast day is evenly lit;
@@ -426,7 +427,8 @@ public final class ImagineFrame {
 		LightVolume.prepare();
 		var cam = Minecraft.getInstance().gameRenderer.mainCamera().position();
 		put((float) (LightVolume.originX() - cam.x), (float) (LightVolume.originY() - cam.y), (float) (LightVolume.originZ() - cam.z), LightVolume.valid() ? 1f : 0f);
-		put(LightVolume.SX, LightVolume.SY, LightVolume.SZ, Settings.normals);
+		// (the generated normals at 0.6 of the setting: at full strength every light texel had a dark blue line under it)
+		put(LightVolume.SX, LightVolume.SY, LightVolume.SZ, Settings.normals * 0.6f);
 		// the sky and the haze (ours only in the overworld with the eyes in air: in water, lava or snow Minecraft's fog stays)
 		boolean ourFog = dim == 0 && Settings.sky && camera.fogType == net.minecraft.world.level.material.FogType.NONE;
 		shaftOn = ourFog;
@@ -523,7 +525,8 @@ public final class ImagineFrame {
 		put(Settings.coated ? 1f : 0f, Settings.lightFog && Settings.coloredLight ? 1f : 0f, Settings.mobShadows && Settings.shadows ? 1f : 0f,
 			Settings.waterFx && Settings.waterStyle > 0 && Reflections.underReady ? 1f : 0f);
 		put(endFlashDir[0], endFlashDir[1], endFlashDir[2], dim == 2 ? endFlash : 0f);
-		put(PbrAtlas.on && Settings.pbrPack ? 1f : 0f, Settings.parallax ? 1f : 0f, 0f, 0f);
+		// (z: the depth before the translucent pass, captured last frame, is bound at texture 26 for the mob shadows' trace)
+		put(PbrAtlas.on && Settings.pbrPack ? 1f : 0f, Settings.parallax ? 1f : 0f, Reflections.underDepthReady ? 1f : 0f, 0f);
 		if (BUF.position() != SIZE) throw new IllegalStateException("ImFrame is " + BUF.position() + " bytes, not " + SIZE);
 	}
 

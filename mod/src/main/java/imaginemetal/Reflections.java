@@ -47,7 +47,13 @@ public final class Reflections {
 
 	/** Before the translucent pass: the opaque picture and depth, for water's refraction and shore foam (ImFrame.toggles.w). */
 	public static void captureUnder() {
-		if (state == 0 || underFailed || !Settings.waterFx || Settings.waterStyle == 0 || !Engine.TERRAIN) return;
+		boolean water = Settings.waterFx && Settings.waterStyle > 0;
+		// (the depth alone is also wanted by the mob shadows: their trace reads the depth before the water was drawn, so the
+		// water's surface over shallows doesn't count as something between the seabed and the sun: dark straight-edged patches)
+		if (state == 0 || underFailed || !(water || Settings.mobShadows) || !Engine.TERRAIN) {
+			underDepthReady = false;
+			return;
+		}
 		try {
 			Object encoder = MetalBridge.encoder(((FrontendCommandEncoder) RenderSystem.getDevice().createCommandEncoder()).backend());
 			if (encoder == null) return;
@@ -59,17 +65,23 @@ public final class Reflections {
 			MetalBridge.flushClear(encoder, depth);
 			try (MemoryStack stack = MemoryStack.stackPush()) {
 				long err = stack.ncalloc(1, 1024, 1);
-				if (ImNative.underCapture(MetalBridge.enc(encoder), state, MetalBridge.textureHandle(color), MetalBridge.textureHandle(depth), err, 1024) != 0)
+				if (ImNative.underCapture(MetalBridge.enc(encoder), state, water ? MetalBridge.textureHandle(color) : 0L, MetalBridge.textureHandle(depth), err, 1024) != 0)
 					throw new IllegalStateException(MemoryUtil.memUTF8(err));
 			}
-			underReady = true;
+			underReady = water;
+			underDepthReady = true;
+			if (!underLogged) {
+				underLogged = true;
+				System.out.println("[Imagine Metal] under-water copy taken (" + (water ? "colour and depth" : "depth") + ")");
+			}
 		} catch (Throwable t) {
 			underFailed = true;
 			System.out.println("[Imagine Metal] water refraction off: " + t);
 		}
 	}
 
-	static volatile boolean underReady;
+	static volatile boolean underReady, underDepthReady;
+	private static boolean underLogged;
 
 	/** After the level's passes, before the bloom: the picture and depth become the next frame's history. */
 	public static void capture() {

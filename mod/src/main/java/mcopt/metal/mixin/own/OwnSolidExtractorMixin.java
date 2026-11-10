@@ -22,8 +22,14 @@ abstract class OwnSolidExtractorMixin {
 	 */
 	@Inject(method = "setLevel", at = @At("RETURN"))
 	private void mcopt$ownLevelGone(net.minecraft.client.multiplayer.ClientLevel level, CallbackInfo ci) {
-		if (level != null) return;
+		// (Imagine Metal) and on a change of dimension too: the last dimension's sections stayed drawn where the new one had nothing
+		// yet, floating pieces of the Overworld over the End's islands. The new level's sections are all compiled anew anyway.
+		if (level != null && level == mcopt$lastLevel) return;
+		mcopt$lastLevel = level;
 		mcopt.metal.own.OwnTerrain own = mcopt.metal.own.OwnTerrain.get();
 		if (own != null) own.disposeAll();
 	}
+
+	@org.spongepowered.asm.mixin.Unique
+	private static net.minecraft.client.multiplayer.ClientLevel mcopt$lastLevel;
 }

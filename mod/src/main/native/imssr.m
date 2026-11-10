@@ -90,9 +90,10 @@ void mc_im_under_bind(id<MTLTexture> color, id<MTLTexture> depth);  // mcown.m
 int im_under_capture(Enc *enc, ImSsr *s, id<MTLTexture> color, id<MTLTexture> depth, char *err, int errCap) {
 	// (a pass still open on the encoder is closed by mc_frame_cmd, as for the history: skipping here left the copy never taken,
 	// and the water read an empty texture, black, as what's under it)
-	if (!s || !color || !depth) return 0;
+	// (color nil: the depth alone, for the mob shadows' trace)
+	if (!s || !depth) return 0;
 	@autoreleasepool {
-		if (!s->under || s->under.width != color.width || s->under.height != color.height || s->under.pixelFormat != color.pixelFormat) {
+		if (color && (!s->under || s->under.width != color.width || s->under.height != color.height || s->under.pixelFormat != color.pixelFormat) {
 			[s->under release];
 			MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:color.pixelFormat width:color.width
 				height:color.height mipmapped:NO];
@@ -100,6 +101,10 @@ int im_under_capture(Enc *enc, ImSsr *s, id<MTLTexture> color, id<MTLTexture> de
 			td.usage = MTLTextureUsageShaderRead;
 			s->under = [s->device newTextureWithDescriptor:td];
 			s->under.label = @"Imagine Metal under the water";
+		}
+		if (color && !s->under) {
+			snprintf(err, (size_t) errCap, "under-water texture could not be created");
+			return 1;
 		}
 		if (!s->underDepth || s->underDepth.width != depth.width || s->underDepth.height != depth.height || s->underDepth.pixelFormat != depth.pixelFormat) {
 			[s->underDepth release];
@@ -110,16 +115,17 @@ int im_under_capture(Enc *enc, ImSsr *s, id<MTLTexture> color, id<MTLTexture> de
 			s->underDepth = [s->device newTextureWithDescriptor:td];
 			s->underDepth.label = @"Imagine Metal under the water depth";
 		}
-		if (!s->under || !s->underDepth) {
-			snprintf(err, (size_t) errCap, "under-water textures could not be created");
+		if (!s->underDepth) {
+			snprintf(err, (size_t) errCap, "under-water depth could not be created");
 			return 1;
 		}
 		id<MTLCommandBuffer> cmd = mc_frame_cmd(enc);
 		id<MTLBlitCommandEncoder> b = [cmd blitCommandEncoder];
 		b.label = @"Imagine Metal under the water";
 		MTLOrigin o = {0, 0, 0};
-		[b copyFromTexture:color sourceSlice:0 sourceLevel:0 sourceOrigin:o sourceSize:MTLSizeMake(color.width, color.height, 1)
-			toTexture:s->under destinationSlice:0 destinationLevel:0 destinationOrigin:o];
+		if (color)
+			[b copyFromTexture:color sourceSlice:0 sourceLevel:0 sourceOrigin:o sourceSize:MTLSizeMake(color.width, color.height, 1)
+				toTexture:s->under destinationSlice:0 destinationLevel:0 destinationOrigin:o];
 		[b copyFromTexture:depth sourceSlice:0 sourceLevel:0 sourceOrigin:o sourceSize:MTLSizeMake(depth.width, depth.height, 1)
 			toTexture:s->underDepth destinationSlice:0 destinationLevel:0 destinationOrigin:o];
 		[b endEncoding];

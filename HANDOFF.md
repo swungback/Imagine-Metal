@@ -1,4 +1,4 @@
-# Imagine Metal: handoff (2026-11-05)
+# Imagine Metal: handoff (2026-11-10)
 
 Where things stand, for picking the work up in a new conversation.
 
@@ -10,6 +10,31 @@ Where things stand, for picking the work up in a new conversation.
 - Jack's settings: `config/imaginemetal.properties` in that instance. Screenshots and `logs/latest.log` there too. His notes
   are chat lines in the log (`[CHAT] <herningstang> ...`) just before each screenshot.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
+
+## Pushed 2026-11-10 (from Jack's 11-05 and 11-06..08 notes; not yet confirmed in game)
+- Terrain alpha from the texture alone (vertex alpha x the fade mix hid the portal and copper torch, glass showed only tint).
+- Water texture speckle calmed; under-water sun shadows soft; the pre-water depth (texture 26) for contact shadows.
+- Contact shadows count only what the sun's shadow maps don't hold (imInShadowMap): no ghost "3D" plant doubles; thin lines
+  (selection outline) need the screen 2 px either side to hold them.
+- Light grid: extra spread steps after moves/changes (catchUp); moving lights (dropped light items, mobs holding lights, burning
+  mobs) as seeds rewritten each frame (LightVolume.dynamicLights).
+- Mobs: directional block light from the grid in front/behind the face, faint outline in the dark.
+- Dimension change releases the old level's sections (OwnSolidExtractorMixin).
+- Nether haze half as thick over lava, lit by it.
+- Vertex light blended over the whole quad (imQuv/imQL, own_vs): the quad-diagonal seam (obsidian triangle, wall by a torch).
+- Dry biome look: shade cool, not yellow (the "piss" desert). Day ambient 0.52 -> 0.42 for sun/shade contrast.
+- Generated normals at 0.6 of the setting. Vines don't wave. Emitters glow only in bright parts (jack o'lantern).
+- Lava a brightness ramp (crust red-orange, hot yellow), not pink. Armour shinier, torch highlight. Glint x1.25 (purple sword).
+- Outline patch also matches lines_translucent and block_outline pipelines (style setting didn't change it).
+- AO near only (fades 20-48 blocks). TAA: clip 1.0 sd, less history where rejected. Underwater fog hue held blue-green.
+- Dawn mist halved, forward glow softer, soft ceiling on air glow (pink whiteout by the river at sunrise). Vignette 0.25.
+- Light fog a^6 (a ball round a light, not a column of air).
+
+## Still open
+- End portal vanishing when backing away; water refraction shifting the selection outline; "running water looks off";
+  cave fog wanted ("no cave fog"); FPS over water.
+- Jack's instance on 11-09: our jar renamed .disabled; GaelQuinta's metal-shaders and Distant Horizons added (both conflict
+  with ours: only one Metal backend at a time).
 
 ## Fixed today (in the current jar, not yet confirmed in game)
 - Water depth mode: the under-water copy was never taken (imssr.m skipped it while a pass was open). Now copies; thickness from

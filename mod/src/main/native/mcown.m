@@ -882,10 +882,8 @@ drawCall:
 		[r setFragmentSamplerState:imLightSampler atIndex:12];
 		if (imSeedTex) [r setFragmentTexture:imSeedTex atIndex:24];
 	}
-	if (imUnderTex) {
-		[r setFragmentTexture:imUnderTex atIndex:25];
-		[r setFragmentTexture:imUnderDepthTex atIndex:26];
-	}
+	if (imUnderTex) [r setFragmentTexture:imUnderTex atIndex:25];
+	if (imUnderDepthTex) [r setFragmentTexture:imUnderDepthTex atIndex:26];
 	if (imPbrN) {
 		[r setFragmentTexture:imPbrN atIndex:27];
 		[r setFragmentTexture:imPbrS atIndex:28];
