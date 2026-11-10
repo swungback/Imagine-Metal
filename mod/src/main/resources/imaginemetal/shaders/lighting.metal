@@ -1044,8 +1044,9 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			float hlum = imLuma(hh);
 			hh = max(hlum + (hh - hlum) * 1.35, 0.0);
 			float3 hc = hh * (max(max(f.blockColor.r, f.blockColor.g), f.blockColor.b) / max(max(max(hh.r, hh.g), hh.b), 1e-3));
-			float facing = 0.6 + 0.4 * saturate(dot(N, -normalize(p)));
-			torch = max(torch, hc * imBlockCurve(hl) * facing * (1.0 - 0.25 * f.blockColor.w * smoothstep(0.5, 1.0, sky)));
+			// (as bright as a placed torch at the same distance: a held one lit a cave about half as much as the same torch dropped)
+			float facing = 0.8 + 0.2 * saturate(dot(N, -normalize(p)));
+			torch = max(torch, hc * imBlockCurve(hl) * (facing * 1.5) * (1.0 - 0.25 * f.blockColor.w * smoothstep(0.5, 1.0, sky)));
 		}
 	}
 

@@ -673,6 +673,8 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 				float2 o = float2((k & 1) != 0 ? 0.7 : -0.7, (k & 2) != 0 ? 0.7 : -0.7) * pt;
 				blur += imbLinear(pic.sample(ms, in.uv + o, level(3.5)).rgb) * 0.15 + imbLinear(pic.sample(ms, in.uv + o * 2.5, level(5.0)).rgb) * 0.1;
 			}
+			// (in a cave (grade.z negative) the fog is a dark one: the blurred picture of a lit cavern made a bright grey veil)
+			if (p.grade.z < 0.0) blur *= mix(1.0, 0.3, saturate(-p.grade.z));
 			c = mix(c, blur, k / (1.0 + k));
 		}
 	}
@@ -747,7 +749,8 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 	// turns toward white, so lava reads yellow-hot instead of a flat orange)
 	float lum2 = dot(c, float3(0.2126, 0.7152, 0.0722));
 	float m = max(max(c.r, c.g), c.b);
-	c = mix(c, float3(m), smoothstep(0.8, 3.0, lum2) * 0.55);
+	// (less of it, and only far past white: lava's bright texels read as white specks, "acne")
+	c = mix(c, float3(m), smoothstep(1.5, 4.0, lum2) * 0.3);
 	m = max(max(c.r, c.g), c.b);
 	const float t = 0.88;
 	if (m > t) c *= (t + (1.0 - t) * (m - t) / ((m - t) + (1.0 - t))) / m;

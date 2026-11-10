@@ -58,13 +58,14 @@ public final class Haze {
 	// (warm sun, but the shade kept cool and nearly the sky's: pulled most of the way to the sun's own yellow, the whole desert
 	// came out one flat piss-yellow, its shadows no different from its light)
 	private static final float[] LOOK_DRY = {1.05f, 1.0f, 0.9f, 0.94f, 0.97f, 1.06f, 0.15f};
-	private static final float[] LOOK_JUNGLE = {1.03f, 1.0f, 0.88f, 0.86f, 1.04f, 0.78f, 0.35f};
+	// (the shade a warm olive green, not the sky's blue pulled toward green: stone in a jungle's shade read teal-cyan)
+	private static final float[] LOOK_JUNGLE = {1.03f, 1.0f, 0.88f, 0.98f, 1.04f, 0.72f, 0.4f};
 	private static final float[] LOOK_SWAMP = {1.0f, 0.98f, 0.85f, 0.8f, 0.95f, 0.72f, 0.45f};
 	private static final float[] LOOK_TAIGA = {1.0f, 0.98f, 0.95f, 0.84f, 0.99f, 1.08f, 0.25f};
 	private static final float[] LOOK_SNOWY = {0.97f, 0.99f, 1.04f, 0.84f, 0.99f, 1.25f, 0.3f};
 	private static final float[] LOOK_CHERRY = {1.04f, 0.97f, 0.97f, 1.1f, 0.92f, 1.06f, 0.35f};
 	private static final float[] LOOK_PALE = {0.95f, 0.95f, 0.97f, 0.95f, 0.96f, 0.98f, 0.6f};
-	private static final float[] LOOK_DARK_FOREST = {1.02f, 1.0f, 0.9f, 0.86f, 1.0f, 0.82f, 0.3f};
+	private static final float[] LOOK_DARK_FOREST = {1.02f, 1.0f, 0.9f, 0.95f, 1.0f, 0.78f, 0.35f};
 	private static final float[] LOOK_MUSHROOM = {1.02f, 0.98f, 1.0f, 1.05f, 0.9f, 1.12f, 0.3f};
 	private static final float[] LOOK_WATER = {1.02f, 1.0f, 0.95f, 0.9f, 1.02f, 1.1f, 0.2f};
 

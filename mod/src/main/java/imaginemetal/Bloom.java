@@ -153,9 +153,10 @@ public final class Bloom {
 				float fogK = 0f;
 				if (ImagineFrame.underwater) fogK = 1.4f;
 				else if (ImagineFrame.shaftOn || ImagineFrame.cave > 0f)
-					fogK = (ImagineFrame.shaftRain * ImagineFrame.shaftRain * 0.8f + ImagineFrame.night * 0.3f) * (1f - ImagineFrame.cave) + ImagineFrame.cave * 0.6f;  // (cave 1.4: a lit cavern, a lush cave's glow berries, turned to a grey veil)
+					fogK = (ImagineFrame.shaftRain * ImagineFrame.shaftRain * 0.8f + ImagineFrame.night * 0.3f) * (1f - ImagineFrame.cave) + ImagineFrame.cave * 0.9f;  // (cave 1.4 and bright: a lit cavern turned to a grey veil; now darker, below)
 				// (the Nether: Reimagined's strongest, 14, over the view range)
-				float fogMode = ImagineFrame.underwater ? 1f : 0f;
+				// (negative: in a cave, how much: the fog there darkens toward the dark instead of glowing grey, Photon's caves)
+				float fogMode = ImagineFrame.underwater ? 1f : ImagineFrame.cave > 0.01f ? -ImagineFrame.cave : 0f;
 				if (ImagineFrame.dimNow == 1) {
 					fogK = 1.4f;
 					fogMode = 2f + Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f;
