@@ -114,6 +114,39 @@ Where things stand, for picking the work up in a new conversation.
 - Nebula band axis (0.8, 0.2, 0.55): crosses the moon's path instead of lying along it; a bit brighter.
 - Far canopy: foliage receivers past 26-40 blocks get shadows softened toward the sky (far map blotches).
 
+## Perf diagnosis 2026-11-10 evening (Jack's 18:58 jungle benchmark, ~1099 107 -56, render distance 16, 1440x900)
+- Shaders off (live) 108 fps / 9.2 ms; everything on 29 fps / 35 ms: ~26 ms a frame is ours. The cutout depth pre-pass was
+  already on in that jar (ffc606f) and didn't fix it. Jack: over 100 fps with shadows "when the mod was more basic".
+- Per feature, after allowing for drift (aurora, stars and nether storm "saved" 3.5 ms each by day in a jungle: the one
+  reference at the start was stale): shadows ~4-7 ms, our sky and air ~3-6, haze ~1-5, everything else 2 ms or less. No single
+  feature explains 26 ms. Reading: the cost is the structure. imShade is a ~700-line uber-shader run inside the terrain (and
+  translucent) fragment stage, every feature compiled in and switched by runtime flags, so register pressure and texture
+  fetches stay high whatever is off; plus the always-on passes (HDR, sky, shafts/bloom chain, TAA).
+- Benchmark is now A/B: an "everything on" window before and after every step, each step against their average (pushed).
+- Old builds for a same-spot comparison (CI artifacts, Jack downloads them from the Actions runs while logged in; publishing
+  releases from branches is blocked in Claude sessions): branch perf-check-nov05 (6f99f5c, run 42873033549, FPS 70-115 era)
+  and perf-check-nov04 (89f72c9, run 42873033681, shadows and the basics). Delete the branches when done.
+- Jack's instance JvmArgs now: -XX:+UseZGC -XX:+ZGenerational -Dmcopt.own.prepass=true (the flag is redundant: default on).
+
+### Plan (start in a fresh chat)
+1. Measure per pass on the GPU: MTLCounterSampleBuffer timestamps at stage boundaries for each encoder (shadow maps, terrain
+   solid, cutout + pre-pass, translucent, entities, sky, shafts/bloom chain, TAA, resolve) printed in the perf line. The
+   current "gpu" number (60-87 ms at 28 fps) is a command buffer's start-to-end and can't be trusted.
+2. Deferred opaque lighting: terrain and cutout write a small G-buffer (albedo, octahedral normal + material byte, light
+   levels + AO); one full-screen lighting pass shades each pixel once (Apple: keep it in tile memory with imageblocks if the
+   pass structure allows). Translucent stays forward with a lighter path.
+3. Function constants per feature so what's off isn't compiled in; split rarely-used paths (End, Nether, portals, parallax
+   packs) into their own specializations.
+4. Compare against the nov04/nov05 builds at the same spot before adding anything new.
+
+### Jack's 18:57 look notes
+- "Bamboo cooked", far terrain blurry/low-res and smudgy, terracotta one flat colour at distance (worse than his usual half-res
+  Sodium Extra setup at the same 1440x900). Suspects: vanilla 26.x texture filtering RGSS (F3 "Filtering: RGSS"), TAA history,
+  air haze flattening distant contrast.
+- Overall "flat and mid, atmosphere missing": canopy reads one saturated green with no visible shadowing (91b78b1 softens far
+  foliage shadows toward the sky; day ambient 0.42), no sense of depth/air. Needs a side-by-side with Reimagined after the
+  rewrite, and Jack's input on colour grading (he asked to be asked).
+
 ## Still open after the first round
 - Moon "line there??" (15.09.24): a faint vertical band from the moon straight down the sky, sharp left edge. Probable cause
   fixed: the shafts switched hard between the near map, the far map and the eye's brightness at each map's edge, and a map's

@@ -11,6 +11,9 @@ import java.util.Map;
  * the frame time measured, then everything is put back exactly as it was (every live setting snapshotted, Live.snapshot). The
  * results go to the log and the chat, the most expensive first: which feature costs how many milliseconds a frame here, on this
  * Mac, so the optimizing goes where the time actually goes.
+ * Every feature step is measured between two "everything on" windows and compared with their average: the frame time drifts
+ * by several ms over a few minutes (chunks finishing, the Mac warming up), and one reference at the start made features that do
+ * nothing here (aurora, stars by day) look like 3.5 ms each.
  */
 public final class Benchmark {
 	private record Step(String name, Runnable off) {
@@ -19,7 +22,8 @@ public final class Benchmark {
 	private record Result(String name, double fps, double ms) {
 	}
 
-	private static final double SETTLE = 2.0, MEASURE = 5.0;  // (longer: 3 s windows swung by a few fps either way)
+	private static final double SETTLE = 1.5, MEASURE = 4.0;  // (3 s windows swung by a few fps either way)
+	private static final String REF = "everything on";
 	private static List<Step> steps;
 	private static int index;
 	private static long stepStart, frames, measureStart;
@@ -71,6 +75,15 @@ public final class Benchmark {
 			Settings.nebula = Settings.shootingStars = false;
 		}));
 		steps.add(new Step("shaders off (live, near vanilla)", () -> Live.setOff(true)));
+		List<Step> ab = new ArrayList<>();
+		for (Step st : steps) {
+			if (!ab.isEmpty() || !st.name().equals(REF)) ab.add(new Step(REF, () -> {
+			}));
+			if (!st.name().equals(REF)) ab.add(st);
+		}
+		ab.add(new Step(REF, () -> {
+		}));
+		steps = ab;
 		index = -1;
 		results.clear();
 		say("Benchmark: stand still and don't touch anything, about " + Math.round(steps.size() * (SETTLE + MEASURE)) + " seconds...", true);
@@ -115,13 +128,29 @@ public final class Benchmark {
 		steps = null;
 		restore();
 		if (results.isEmpty()) return;
-		Result base = results.get(0);
-		List<Result> rest = new ArrayList<>(results.subList(1, results.size()));
-		rest.sort((a, b) -> Double.compare(a.ms, b.ms));  // (the biggest saving first)
-		say(String.format(Locale.ROOT, "benchmark: everything on %.0f fps (%.1f ms a frame). Cost of each feature:", base.fps, base.ms), true);
+		// each feature against the average of the "everything on" windows either side of it
+		List<Result> rest = new ArrayList<>();
+		double refSum = 0.0;
+		int refN = 0;
+		for (int i = 0; i < results.size(); i++) {
+			Result r = results.get(i);
+			if (r.name.equals(REF)) {
+				refSum += r.ms;
+				refN++;
+				continue;
+			}
+			double before = i > 0 && results.get(i - 1).name.equals(REF) ? results.get(i - 1).ms : Double.NaN;
+			double after = i + 1 < results.size() && results.get(i + 1).name.equals(REF) ? results.get(i + 1).ms : before;
+			if (Double.isNaN(before)) before = after;
+			if (Double.isNaN(before)) continue;
+			rest.add(new Result(r.name, r.fps, (before + after) * 0.5 - r.ms));  // (ms here: the saving)
+		}
+		rest.sort((a, b) -> Double.compare(b.ms, a.ms));  // (the biggest saving first)
+		double base = refN > 0 ? refSum / refN : results.get(0).ms;
+		say(String.format(Locale.ROOT, "benchmark: everything on %.0f fps (%.1f ms a frame, averaged). Cost of each feature:", 1000.0 / base, base), true);
 		int shown = 0;
 		for (Result r : rest) {
-			String line = String.format(Locale.ROOT, "  %-36s %+5.1f ms  (%.0f fps)", r.name, base.ms - r.ms, r.fps);
+			String line = String.format(Locale.ROOT, "  %-36s %+5.1f ms  (%.0f fps)", r.name, r.ms, r.fps);
 			System.out.println("[Imagine Metal] benchmark: " + line);
 			if (shown++ < 10) Live.chat(line.trim());
 		}
