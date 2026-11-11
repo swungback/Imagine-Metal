@@ -1,4 +1,4 @@
-# Imagine Metal: handoff (2026-11-11, ~16:50)
+# Imagine Metal: handoff (2026-11-11, ~17:30)
 
 Where things stand, for picking the work up in a new conversation.
 
@@ -11,9 +11,52 @@ Where things stand, for picking the work up in a new conversation.
   are chat lines in the log (`[CHAT] <herningstang> ...`) just before each screenshot.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
 
-## START HERE: 2026-11-11 16:50, Build A2 (fixes after Jack's first test of Build A), NOT yet tested in game
-Build A2 = 606707a + 2d CI fix (ci/entity_check.py must call imShadeEntity as EntityShade does: it has a copy of the patch), CI
-green, jar deployed to the instance 16:48 (game closed). Jack tested Build A (7ce03ed) 16:02-16:30. It ran (HDR 1158x724 at 67 % of 1728x1080). His notes and what A2 does about them:
+## START HERE: 2026-11-11 17:30, Jack tested A2; next is Build B = PERFORMANCE (plan below). New chat starts here.
+A2 (606707a + CI fix) ran 16:54-17:07. Jack: "perfomance still ass, think bro think. how do we optimize??? what are we doing
+wrong?? ... its for apple silicon only so we can use that to advantage". He is frustrated: wants a real plan, then results.
+### His A2 feedback (screenshots 16.58.46 .. 17.06.45)
+- "still blurry i feel, not as much shimmer but still a little"; "very blur fest" (river, 17.03.32); "mobs look pretty wrong
+  n pixelated and blurry" (17.01.18): mobs aren't jittered but the TAAU treats them as if (known limit, see Build A notes).
+- Shadow pop-in: "still fade in but its better much better". Leave the 30..96 band. Far shadow cache can go back ON.
+- Water reflection: nothing wrong, he was only asked to look. Closed.
+- "do shadows stretch this much irl" (17.05.32, low morning sun): yes, told him (length = height / tan(sun height)).
+- "underwater still dark under certain point" + "when i look at the water": it is the view FROM ABOVE the water (17.05.57
+  feet y 64.2, 17.06.04 eye just over the surface): seabed deeper than ~5 blocks is flat dark teal with hard block-stepped
+  edges; the same sand from under water (17.06.00) is bright. My reading (NOT verified): the seabed's own sky light falls 1
+  per block of water, and only with the eyes under water do the floors apply (skyF >= 0.22 etc., lighting.metal f.water.z);
+  from above nothing lifts it, times the water's absorption. Fix idea: where the light is sampled for a face in water (mesher,
+  mcopt/metal/own/OwnBlockRenderer or wherever the packed light comes from), take the sky light of the top of the water
+  column, minus ~depth/4; then both views agree and it's smooth. The mob navy fog and the cave switch (A2) he didn't comment on.
+### Why it is slow: the numbers (Build A benchmark, jungle spot, M1 8-core GPU, world 1158x724 -> 1728x1080, 47 fps / 21.3 ms)
+- Passes (they sum to the frame here, so usable): terrain 13.7 (leaves' colour 8.0, other terrain 4.7, leaf depth 1.0),
+  shadow maps 3.3-4.5, taa 1.1, resolve 0.7, shafts 0.6, clouds 0.5, reflection copies 0.5, culling 0.4, sky 0.4.
+- Terrain pass at 100 % scale (1728x1080, 2.23x the pixels): 18.9 vs 13.7. So terrain = ~9.5 ms that does NOT depend on the
+  resolution + ~4.2 ms that does. Shaders off the WHOLE frame is 7.8 ms at full size, so the 9.5 isn't vertex work: it is the
+  heavy fragment shader run per small triangle (2x2 quads for sub-pixel leaf faces, helper pixels run the full shader) and on
+  alpha-tested leaves. Render distance 16 -> 8: +4.5 ms, same story (and fewer shadow casters).
+- Feature costs: shadows 4.5, generated normals 3.9 (imGenNormal: several atlas taps + maths per fragment), sky and air 3.0
+  (imSkyColor per fragment for the haze colour), PBR 2.7, coloured light 1.3, far shadow cache ON would give 1.6.
+- Gael's pack on the same Mac: ~150 fps with shading. His docs (on Jack's Mac, ~/minecraft-metal-shaders/docs/shader-bible.md
+  E12, docs/research/apple-gpu.md 2.1): material data BAKED into atlases at stitch time (1 fetch per fragment), sky from a LUT,
+  far cascade cached, and "single-pass TBDR deferred, memoryless G-buffer" as the Apple-specific design (his M3).
+### Build B plan (told to Jack in this order; one test round per build)
+B1 (small, safe, ~5-7 ms hoped): far shadow cache ON by default; air haze/sky colour out of the terrain fragment shader (a
+  sky LUT, or the haze applied once per pixel in the resolve from depth); generated normals + material params baked into an
+  atlas-layout texture at resource load (slot imPbrN/imPbrS exist: texture 27/28, labPBR path) so the fragment does one fetch;
+  shadow casters: leaves solid (no alpha test) in the far cascade, near cascade maybe every 2nd frame.
+B2 (the structural one): deferred lighting in ONE render pass on Apple's tile memory: terrain writes a small G-buffer
+  (albedo+class, normal+light levels, params; memoryless attachments), then one full-screen lighting draw in the same pass reads
+  it with [[color(n)]] (programmable blending). Lighting then runs once per screen pixel whatever the triangle count: kills
+  the 9.5 ms resolution-independent part. Water/glass/translucent stay forward after it. Needs: Hdr/pass descriptor with extra
+  attachments (mcopt MetalRenderPass / mcown.m pipelines), ownFsBody split into "material" and "light". Entities: either write
+  the G-buffer too (EntityShade patch) or stay forward.
+B3 (image quality at 67 %): jitter in the projection for everything (Gael's ShadeTaaCameraMixin way) so mobs are sharp, then
+  either finish our TAAU (age + depth test) or MetalFX temporal scaler (Apple's, needs motion vectors: from depth for the world).
+  half precision in the lighting maths where safe.
+Also open: the seabed-from-above darkness (above). Estimates given to Jack: B1 ~47 -> ~60, B2 -> ~75-90 at the jungle spot,
+flagged as estimates. DON'T promise more.
+### Build A2 as written (for reference)
+Jack's notes on Build A and what A2 did about them:
 - "shit looks blurry", "blurry without taa [sub-pixel offset off] and shimmering with it", "leaves look jittery all around",
   "look how pixelated", "blur fest here fr". Measured on his 16.13.53 / 16.14.05 pair: offset ON was SOFTER than off (mean
   gradient 5.8 vs 6.6), so the TAAU wasn't adding detail. Signs re-checked by reading (own_vs flips y before the offset; uv runs
