@@ -1,4 +1,4 @@
-# Imagine Metal: handoff (2026-11-11, ~01:30)
+# Imagine Metal: handoff (2026-11-11, ~15:35)
 
 Where things stand, for picking the work up in a new conversation.
 
@@ -11,7 +11,39 @@ Where things stand, for picking the work up in a new conversation.
   are chat lines in the log (`[CHAT] <herningstang> ...`) just before each screenshot.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
 
-## START HERE: overnight 2026-11-11 (written ~01:30; build db9ee42, CI green)
+## START HERE: 2026-11-11 15:35, after Jack's tests of the overnight build (afe4983, deployed 14:47)
+Jack's words today: "lets optimize then". He wants Gael-like fps, our look. Answer his questions BEFORE working when he asks any.
+### Measured today (jungle spot: /tp 1099.5 107 -55.5, RD16, 1440x900, both shadow experiments off)
+- Benchmark: everything on 37-39 fps (26 ms). shaders off 131 fps; shadows off +6.3 ms; sky and air +4.0; generated normals
+  +3.8; PBR +3.7; coloured light +1.7; far shadow cache ON +1.1 (41 fps); near view cull ON +0.2; leaf pre-pass off -6.0.
+- Whole-frame render scale (HDR size from the log): 100 % 1440x900 = 38 fps (26.0 ms); 75 % 1080x676 = 50-55 fps (~19 ms);
+  67 % 964x604 = 55-58 fps (~17.5 ms; Jack: "looks like shit", expected: no upscaler, HUD scaled too).
+  Fit: frame = ~10.7 ms fixed + ~11.8 ms per megapixel. So ~60 % per-pixel, ~40 % fixed at 100 %. (I had told him "almost
+  all per-pixel": too strong, corrected.) The fixed part: shadow-map drawing (~4-6 ms) + geometry.
+- DON'T trust the per-pass GPU ms in absolute terms: with shaders off the frame is 7.6 ms yet the sampled passes say
+  "terrain 16.29". The sampled frames run in a slower mode. Use fps / frame ms for conclusions, the passes only for ratios.
+- Debug view "Shadow maps" (his 15.02.19 screenshot, experiments off): both cascades full of shadow detail far out. So the
+  maps are fine and the pop-in is the foliage softening (smoothstep(26, 40) x 0.45 on IM_MAT_FOLIAGE incl. grass blocks) plus
+  the low-sun lift. He hasn't said whether the far cache changed the pop-in (asked at 15:10, unanswered).
+- His Gael instance (instances/metal shaders/minecraft/config/mcopt.properties): mcopt.shade.resolution=67%,
+  mcopt.shade.output=1080, preset balanced. As I read it: world shaded at ~1158x724 (0.84 MP), TAA-upscaled to 1080p.
+  Ours shades 1.30 MP. His "metal testing" instance also has mcopt.metal.framegen=true.
+### Plan agreed with Jack (estimates I gave him at the jungle spot: 38 -> ~50 -> ~58 -> ~62-65 -> ~68-72 fps)
+Build A (next):
+1. Pop-in: stretch the foliage softening band (26..40 -> much longer, e.g. 30..90) so shadows ease in; consider leaves only.
+2. Proper render scale, matching his Gael setup: final image and HUD at 1080p-equivalent, world shaded at ~67-75 % and
+   upscaled by the TAA. Hdr.java already swaps the main target's colour for our HDR image during the level: scale that
+   image AND the depth, keep the projection jitter, resolve/upscale in Bloom's map into the full-size 8-bit image; mip bias
+   log2(scale); sharpen. Reference: GaelQuinta docs/dev/TAAU.md. Remove or keep tonight's whole-frame renderScale as a debug.
+   NOTE "output 1080": today retina=false gives a 1440x900 framebuffer; 1080 output means a 1728x1080 framebuffer for the
+   GUI (WindowMixin/Resolution), world at 0.67 of that.
+3. Add a "render distance 8" step to the benchmark (I estimated RD 16 -> 8 saves 2-3 ms; Jack doubts it; measure).
+Build B: shadow maps cheaper (near cascade every frame is the cost; far cache back on once pop-in is settled); fog and sky
+  from a LUT like Gael's skyLut; half precision where safe; normals and PBR cheaper at distance.
+Later: Distant Horizons style far terrain (he wants render distance to matter), frame generation (MetalFX) as the last step.
+He asked "all at once?": told him no, two builds, one test round each.
+
+## Overnight 2026-11-11 (written ~01:30; build db9ee42; superseded above where they differ)
 - NOT DEPLOYED: Jack's Mac went offline (asleep) before the build finished, so the instance still has 6f65e15 (near view cull
   off, far cache ON). First thing next session: download the dev release jar, check it (unzip -p ... Benchmark.class | strings |
   grep 'experimental, off'), copy to instances/Imagine metal/minecraft/mods/imagine-metal-0.1.0.jar with the game closed.
