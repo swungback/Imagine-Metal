@@ -189,6 +189,17 @@ final class ImNative {
 		}
 	}
 
+	private static final MethodHandle BLOOM_FX = fn("im_bloom_fx", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT, JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT), false);
+
+	/** (the MetalFX build) Apple's temporal scaler this frame, and the signs it is given the jitter and the motion with. */
+	static void bloomFx(long state, int on, float jx, float jy, float mx, float my) {
+		try {
+			BLOOM_FX.invokeExact(state, on, jx, jy, mx, my);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
 	static void bloomTaa(long state, float jx, float jy, float on) {
 		try {
 			BLOOM_TAA.invokeExact(state, jx, jy, on);

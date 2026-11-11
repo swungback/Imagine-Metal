@@ -55,7 +55,7 @@ public final class EntityShade {
 			if (!lm && !particle) return null;
 			if (!fs.contains("out.fragColor") || !vs.contains("in.Position")) return null;
 			String v = patchVs(vs, particle);
-			String f = v == null ? null : patchFs(fs, n.contains("armor") ? "2.0" : n.contains("item") ? "1.0" : "0.0");
+			String f = v == null ? null : patchFs(fs, n.contains("armor") ? "2.0" : n.contains("item") ? "1.0" : "0.0", !n.contains("translucent") && !particle);
 			if (v == null || f == null) {
 				System.out.println("[Imagine Metal] entity light: " + name + " left as Minecraft's (its shader isn't the shape expected)");
 				return null;
@@ -197,7 +197,7 @@ public final class EntityShade {
 		return v;
 	}
 
-	private static String patchFs(String fs, String kind) {
+	private static String patchFs(String fs, String kind, boolean mark) {
 		Matcher m = FS_MAIN.matcher(fs);
 		if (!m.find()) return null;
 		String f = fs.substring(0, m.end()) + ", constant float4& imOn [[buffer(25)]], constant ImFrame& imf [[buffer(30)]]"
@@ -220,7 +220,11 @@ public final class EntityShade {
 		f = beforeLastReturn(f, "    if (imOn.x > 0.5 && imOn.x < 1.5) out.fragColor.xyz = imShadeEntity(out.fragColor.xyz, in.imPos, in.imNrm, in.imLm, imf,"
 			+ " imShadowMap, imShadowCmp, imLightVol, imLightSampler, " + kind + ", " + vfog + ");\n"
 			+ "    else if (imOn.x > 1.5 && in.imHand > 0.5) out.fragColor.xyz = imShadeEntity(out.fragColor.xyz, float3(0.0, -0.4, 0.001),"
-			+ " float3(0.0), in.imLm, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, 3.0, float4(0.0));");
+			+ " float3(0.0), in.imLm, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, 3.0, float4(0.0));"
+			// (MetalFX: a mob's pixel marked in the frame's alpha, 0.96 (terrain: 1, a waving plant 0.98). Mobs move by themselves and
+			// have no motion vectors, so MetalFX's history smeared them (Jack's blurry whales, jittery cape); imbloom.m's motion pass
+			// turns the mark into its reactive mask. Only pipelines that don't blend: their alpha is written as it is)
+			+ (mark ? "\n    if (imOn.x > 0.5 && imOn.x < 1.5 && out.fragColor.w > 0.5) out.fragColor.w = 0.96;" : ""));
 		if (f == null) return null;
 		if (lighting == null) lighting = Engine.resource("/imaginemetal/shaders/lighting.metal");
 		return lighting + "\n// ---- Minecraft's shader (SPIRV-Cross), patched ----\n" + f;

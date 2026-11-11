@@ -238,6 +238,12 @@ public final class SettingsScreen extends OptionsSubScreen {
 					"fix4, not saved. Under water, the surface above you is lit and ripples, brighter than the water's fog, so you can see where the water ends. Off: as fix3 (the surface in the fog's own colour)."));
 				this.list.addBig(toggle("Near shadows follow the ground", Settings.shadowNearGround, v -> Settings.shadowNearGround = v,
 					"Build C2b, not saved. The sharp near shadow map centred on the ground under you, not on the camera: up high, looking toward a low sun, it ended ~17 blocks ahead and shadows popped in as you came closer. Off: as C2."));
+				this.list.addBig(toggle("MetalFX upscaler", Settings.metalfx, v -> Settings.metalfx = v,
+					"Not saved. Apple's temporal scaler in place of our own TAA. Off: our TAA, to compare."));
+				this.list.addSmall(toggle("MetalFX jitter flip X", Settings.metalfxFlipJX, v -> Settings.metalfxFlipJX = v, "Debug: the sign of the sub-pixel offset MetalFX is told, across."),
+					toggle("MetalFX jitter flip Y", Settings.metalfxFlipJY, v -> Settings.metalfxFlipJY = v, "Debug: the sign of the sub-pixel offset MetalFX is told, up and down."));
+				this.list.addSmall(toggle("MetalFX motion flip X", Settings.metalfxFlipMX, v -> Settings.metalfxFlipMX = v, "Debug: the sign of the motion MetalFX is told, across."),
+					toggle("MetalFX motion flip Y", Settings.metalfxFlipMY, v -> Settings.metalfxFlipMY = v, "Debug: the sign of the motion MetalFX is told, up and down."));
 				this.list.addBig(toggle("TAA sub-pixel offset", Settings.taaJitter, v -> Settings.taaJitter = v,
 					"Not saved. The terrain drawn a fraction of a pixel off in a new direction each frame, which the TAA averages into smooth edges and, with a render scale, into the full-size picture. Off to check whether a shimmer or wobble comes from it."));
 				String[] views = {"Off", "Light levels", "Normals", "Bloom glow only", "Coloured light grid", "Shadow maps"};

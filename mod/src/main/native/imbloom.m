@@ -23,6 +23,8 @@ typedef struct {
 	float taaPrev[4];     // TAA: xy the last frame's jitter in uv, z 1 = steadier far away
 } ImBloomParams;
 
+#import <MetalFX/MetalFX.h>
+
 id<MTLTexture> mc_im_ssr_depth(void);
 id<MTLTexture> mc_im_light_tex(void);  // mcown.m: the coloured light grid (light fog), nil before it exists  // mcown.m: this frame's depth copy (Reflections), nil before the first
 id<MTLTexture> mc_im_ssr_color(void);    // mcown.m: this frame's picture with its blurred mips (Reimagined's bloom fog reads it)
@@ -46,6 +48,15 @@ typedef struct {
 	MTLPixelFormat taaFormat;
 	id<MTLTexture> taaCur, taaHist[2];
 	int taaIdx, taaValid;
+	// (the MetalFX build) Apple's temporal scaler in place of our TAA pass: the world's frame, its depth and a motion texture in,
+	// the screen-size picture out (fxOut), copied to the screen. fxOn from Java each frame; fxSign: the jitter's and the motion's
+	// signs in x and y (debug switches until the right ones are tested).
+	id<MTLFXTemporalScaler> fx;
+	id<MTLTexture> fxMotion, fxOut, fxReactive;  // (fxReactive: mobs' pixels, from the frame's alpha mark; nil before macOS 14)
+	id<MTLRenderPipelineState> fxMotionPso, fxCopyPso;
+	MTLPixelFormat fxCopyFormat, fxDepthFormat;
+	int fxOn, fxFailed, fxSaid;
+	float fxSign[4];
 	float fog[3];             // im_bloom_fog: Reimagined's bloom fog strength, 1 = eyes under water, the rainbow's strength
 	id<MTLRenderPipelineState> ao;
 	id<MTLTexture> aoTex;     // the ambient occlusion at half size
@@ -203,6 +214,114 @@ void im_bloom_taa(ImBloom *b, float jx, float jy, float on) {
 	b->taaJitter[0] = jx;
 	b->taaJitter[1] = jy;
 	b->taaJitter[2] = on;
+}
+
+// (the MetalFX build) on: Apple's temporal scaler does the TAA and the scaling up this frame; the signs MetalFX is given the
+// jitter (jx, jy) and the motion (mx, my) with.
+void im_bloom_fx(ImBloom *b, int on, float jx, float jy, float mx, float my) {
+	if (!b) return;
+	b->fxOn = on;
+	b->fxSign[0] = jx;
+	b->fxSign[1] = jy;
+	b->fxSign[2] = mx;
+	b->fxSign[3] = my;
+}
+
+static id<MTLRenderPipelineState> imbFxPipeline(ImBloom *b, NSString *fn, MTLPixelFormat format, MTLPixelFormat format1) {
+	id<MTLFunction> vs = [[b->lib newFunctionWithName:@"im_bloom_vs"] autorelease];
+	id<MTLFunction> fs = [[b->lib newFunctionWithName:fn] autorelease];
+	if (!vs || !fs) return nil;
+	MTLRenderPipelineDescriptor *pd = [[MTLRenderPipelineDescriptor new] autorelease];
+	pd.label = fn;
+	pd.vertexFunction = vs;
+	pd.fragmentFunction = fs;
+	pd.colorAttachments[0].pixelFormat = format;
+	if (format1 != MTLPixelFormatInvalid) pd.colorAttachments[1].pixelFormat = format1;
+	return [b->device newRenderPipelineStateWithDescriptor:pd error:nil];
+}
+
+// The scaler and its textures for these sizes and formats, made when they change. 0 (said once, our TAA from then on) if MetalFX
+// can't be had.
+static int imbFxReady(ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst, id<MTLTexture> depth) {
+	if (b->fxFailed) return 0;
+	@autoreleasepool {
+		if (![MTLFXTemporalScalerDescriptor supportsDevice:b->device]) {
+			b->fxFailed = 1;
+			fprintf(stderr, "[Imagine Metal] MetalFX off: this GPU has no temporal scaler (our TAA instead)\n");
+			return 0;
+		}
+		if (!b->fx || b->fx.inputWidth != src.width || b->fx.inputHeight != src.height || b->fx.outputWidth != dst.width || b->fx.outputHeight != dst.height
+			|| b->fxDepthFormat != depth.pixelFormat) {
+			[b->fx release];
+			[b->fxMotion release];
+			[b->fxOut release];
+			[b->fxReactive release];
+			b->fxMotion = b->fxOut = b->fxReactive = nil;
+			MTLFXTemporalScalerDescriptor *d = [[MTLFXTemporalScalerDescriptor new] autorelease];
+			d.inputWidth = src.width;
+			d.inputHeight = src.height;
+			d.outputWidth = dst.width;
+			d.outputHeight = dst.height;
+			d.colorTextureFormat = src.pixelFormat;
+			d.depthTextureFormat = depth.pixelFormat;
+			d.motionTextureFormat = MTLPixelFormatRG16Float;
+			d.outputTextureFormat = MTLPixelFormatRGBA16Float;
+			d.autoExposureEnabled = NO;
+			BOOL reactive = NO;
+			if (@available(macOS 14.0, *)) {
+				d.reactiveMaskTextureEnabled = YES;
+				d.reactiveMaskTextureFormat = MTLPixelFormatR8Unorm;
+				reactive = YES;
+			}
+			b->fx = [d newTemporalScalerWithDevice:b->device];
+			b->fxDepthFormat = depth.pixelFormat;
+			if (b->fx) {
+				MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRG16Float width:src.width height:src.height mipmapped:NO];
+				td.storageMode = MTLStorageModePrivate;
+				td.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead | b->fx.motionTextureUsage;
+				b->fxMotion = [b->device newTextureWithDescriptor:td];
+				b->fxMotion.label = @"Imagine Metal MetalFX motion";
+				td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA16Float width:dst.width height:dst.height mipmapped:NO];
+				td.storageMode = MTLStorageModePrivate;
+				td.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead | b->fx.outputTextureUsage;
+				b->fxOut = [b->device newTextureWithDescriptor:td];
+				b->fxOut.label = @"Imagine Metal MetalFX output";
+				if (reactive) {
+					if (@available(macOS 14.0, *)) {
+						td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR8Unorm width:src.width height:src.height mipmapped:NO];
+						td.storageMode = MTLStorageModePrivate;
+						td.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead | b->fx.reactiveTextureUsage;
+						b->fxReactive = [b->device newTextureWithDescriptor:td];
+						b->fxReactive.label = @"Imagine Metal MetalFX reactive (mobs)";
+					}
+				}
+			}
+			[b->fxMotionPso release];
+			b->fxMotionPso = nil;
+			b->taaValid = 0;
+		}
+		if (!b->fxMotionPso) b->fxMotionPso = imbFxPipeline(b, b->fxReactive ? @"im_bloom_motion_r" : @"im_bloom_motion", MTLPixelFormatRG16Float,
+			b->fxReactive ? MTLPixelFormatR8Unorm : MTLPixelFormatInvalid);
+		if (!b->fxCopyPso || b->fxCopyFormat != dst.pixelFormat) {
+			[b->fxCopyPso release];
+			b->fxCopyPso = imbFxPipeline(b, @"im_bloom_fxcopy", dst.pixelFormat, MTLPixelFormatInvalid);
+			b->fxCopyFormat = dst.pixelFormat;
+		}
+		// (the scaler reads the frame and the depth as they are: they must allow what it needs of them)
+		if (!b->fx || !b->fxMotion || !b->fxOut || !b->fxMotionPso || !b->fxCopyPso || (src.usage & b->fx.colorTextureUsage) != b->fx.colorTextureUsage
+			|| (depth.usage & b->fx.depthTextureUsage) != b->fx.depthTextureUsage) {
+			b->fxFailed = 1;
+			fprintf(stderr, "[Imagine Metal] MetalFX off: the scaler could not be set up for %lux%lu -> %lux%lu (our TAA instead)\n", (unsigned long) src.width,
+				(unsigned long) src.height, (unsigned long) dst.width, (unsigned long) dst.height);
+			return 0;
+		}
+		if (!b->fxSaid) {
+			b->fxSaid = 1;
+			fprintf(stderr, "[Imagine Metal] MetalFX temporal scaler on (%lux%lu -> %lux%lu)%s\n", (unsigned long) src.width, (unsigned long) src.height,
+				(unsigned long) dst.width, (unsigned long) dst.height, b->fxReactive ? ", mobs reactive" : ", no reactive mask (macOS < 14)");
+		}
+	}
+	return 1;
 }
 
 static id<MTLRenderPipelineState> imbTaaPipeline(ImBloom *b, MTLPixelFormat format, char *err, int cap) {
@@ -502,7 +621,62 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 			imbPass3(cmd, post ? b->taaCur : dst, MTLLoadActionDontCare, post ? b->resolve16 : b->resolve, b->views[0], b->linear, &p, @"Imagine Metal HDR resolve", src,
 				shafts ? shafts : b->views[0], aoT ? aoT : b->views[0], fogOk ? hc : b->views[0], depthOk ? depth : nil, fogOk ? hs : nil,
 				frame, frameLen);
-			if (post) {
+			if (post && taaOn && b->fxOn && imbFxReady(b, b->taaCur, dst, depth)) {
+				// (the MetalFX build) the motion of every pixel since the last frame, from its depth and the two frames' transforms (the
+				// world as it stands: what moves by itself, mobs, isn't followed yet); Apple's scaler; its picture onto the screen
+				p.taa[0] = b->taaJitter[0];
+				p.taa[1] = b->taaJitter[1];
+				p.taa[2] = 0.0f;
+				p.taa[3] = (float) src.width / (float) dst.width;
+				MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+				rp.colorAttachments[0].texture = b->fxMotion;
+				rp.colorAttachments[0].loadAction = MTLLoadActionDontCare;
+				rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+				if (b->fxReactive) {
+					rp.colorAttachments[1].texture = b->fxReactive;
+					rp.colorAttachments[1].loadAction = MTLLoadActionDontCare;
+					rp.colorAttachments[1].storeAction = MTLStoreActionStore;
+				}
+				imt_rp(rp, IMT_TAA);
+				id<MTLRenderCommandEncoder> r = [cmd renderCommandEncoderWithDescriptor:rp];
+				r.label = @"Imagine Metal MetalFX motion";
+				[r setRenderPipelineState:b->fxMotionPso];
+				[r setCullMode:MTLCullModeNone];
+				[r setFragmentTexture:b->taaCur atIndex:0];
+				[r setFragmentTexture:depth atIndex:1];
+				[r setFragmentBytes:&p length:sizeof p atIndex:0];
+				[r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+				[r endEncoding];
+				b->fx.colorTexture = b->taaCur;
+				b->fx.depthTexture = depth;
+				b->fx.motionTexture = b->fxMotion;
+				b->fx.outputTexture = b->fxOut;
+				if (@available(macOS 14.0, *)) {
+					if (b->fxReactive) b->fx.reactiveMaskTexture = b->fxReactive;
+				}
+				b->fx.depthReversed = YES;
+				b->fx.motionVectorScaleX = b->fxSign[2];
+				b->fx.motionVectorScaleY = b->fxSign[3];
+				// (the jitter in the world frame's pixels: its uv offset times the frame's size)
+				b->fx.jitterOffsetX = b->fxSign[0] * b->taaJitter[0] * (float) src.width;
+				b->fx.jitterOffsetY = b->fxSign[1] * b->taaJitter[1] * (float) src.height;
+				b->fx.reset = b->taaValid ? NO : YES;
+				[b->fx encodeToCommandBuffer:cmd];
+				rp = [MTLRenderPassDescriptor renderPassDescriptor];
+				rp.colorAttachments[0].texture = dst;
+				rp.colorAttachments[0].loadAction = MTLLoadActionDontCare;
+				rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+				imt_rp(rp, IMT_TAA);
+				r = [cmd renderCommandEncoderWithDescriptor:rp];
+				r.label = @"Imagine Metal MetalFX to screen";
+				[r setViewport:(MTLViewport) {0, 0, (double) dst.width, (double) dst.height, 0, 1}];
+				[r setRenderPipelineState:b->fxCopyPso];
+				[r setCullMode:MTLCullModeNone];
+				[r setFragmentTexture:b->fxOut atIndex:0];
+				[r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+				[r endEncoding];
+				b->taaValid = 1;
+			} else if (post) {
 				id<MTLTexture> prev = b->taaHist[b->taaIdx], next = b->taaHist[b->taaIdx ^ 1];
 				// (xy: where the terrain was drawn off to this frame, in uv; z: 1 = blend with the history (TAA on and a history to
 				// use), 0 = this frame alone, scaled up; w: the world's size as a share of the screen's)

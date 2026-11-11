@@ -808,6 +808,47 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 	return float4(o, h.a);
 }
 
+// ---- the MetalFX build: Apple's temporal scaler in place of im_bloom_taa (imbloom.m) ----
+// Where each pixel of the world's frame was a frame ago, in that frame's pixels (toward the earlier place): its depth gives its
+// place in the world (the terrain's sub-pixel offset taken out), the last frame's transform where that was on screen. Only the
+// camera's motion: mobs and waving leaves move by themselves and aren't followed yet.
+static float4 imbMotion(float2 uv, depth2d<float> depth, constant ImBloomParams &p) {
+	float2 size = float2(depth.get_width(), depth.get_height());
+	float d = depth.read(uint2(clamp(uv, 0.0, 0.9999) * size));
+	float2 uvj = uv - p.taa.xy;
+	float4 w = p.clipInv * float4(uvj * 2.0 - 1.0, d <= 0.00001 ? 0.0001 : d, 1.0);
+	float4 c = p.prevClip * float4(w.xyz / w.w, 1.0);
+	float2 puv = c.w > 1e-5 ? c.xy / c.w * 0.5 + 0.5 : uvj;
+	return float4((puv - uvj) * size, 0.0, 0.0);
+}
+
+fragment float4 im_bloom_motion(ImBloomOut in [[stage_in]], depth2d<float> depth [[texture(1)]], constant ImBloomParams &p [[buffer(0)]]) {
+	return imbMotion(in.uv, depth, p);
+}
+
+// (with the reactive mask, macOS 14+) the same motion, and how little MetalFX should trust its history at each pixel: a mob's
+// (alpha 0.96 from EntityShade) mostly not, since it moved by itself and its motion here is only the camera's. Waving plants
+// (0.98) and the terrain (1) keep it.
+struct ImFxMotionOut {
+	float4 motion [[color(0)]];
+	float reactive [[color(1)]];
+};
+
+fragment ImFxMotionOut im_bloom_motion_r(ImBloomOut in [[stage_in]], texture2d<float> frame [[texture(0)]], depth2d<float> depth [[texture(1)]],
+	constant ImBloomParams &p [[buffer(0)]]) {
+	ImFxMotionOut o;
+	o.motion = imbMotion(in.uv, depth, p);
+	float a = frame.read(uint2(clamp(in.uv, 0.0, 0.9999) * float2(frame.get_width(), frame.get_height()))).a;
+	o.reactive = a > 0.95 && a < 0.97 ? 0.8 : 0.0;
+	return o;
+}
+
+// The scaler's picture onto the screen (the game's 8-bit image), with the dither the TAA's output had.
+fragment float4 im_bloom_fxcopy(ImBloomOut in [[stage_in]], texture2d<float> src [[texture(0)]]) {
+	float4 c = src.read(uint2(in.pos.xy));
+	return float4(saturate(c.rgb) + imbDither8(in.pos.xy), 1.0);
+}
+
 struct ImTaaOut {
 	float4 screen [[color(0)]];
 	float4 history [[color(1)]];
