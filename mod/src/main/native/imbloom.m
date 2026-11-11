@@ -456,9 +456,12 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 			p.grade[2] = b->fog[1];
 			p.grade[3] = depthOk && frame ? b->fog[2] : 0.0f;
 			p.texel[2] = depthOk ? 1.0f : 0.0f;  // (the resolve doesn't use the threshold: here, whether the depth is bound)
-			// TAA: the resolve into a frame of its own, then blended with the history into the screen
+			// TAA and the render scale: the resolve into a frame of its own (the world's size, which with a render scale is smaller
+			// than the screen's), then that brought to the screen: blended with the history (TAA), and scaled up where it is smaller
+			BOOL scaled = dst.width != src.width || dst.height != src.height;
 			BOOL taaOn = b->taaJitter[2] > 0.5f && depthOk;
-			if (taaOn) {
+			BOOL post = taaOn || scaled;
+			if (post) {
 				if (!b->taa || b->taaFormat != dst.pixelFormat) {
 					[b->taa release];
 					b->taa = imbTaaPipeline(b, dst.pixelFormat, err, errCap);
@@ -467,37 +470,46 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 					if (!b->taa) {
 						b->taaJitter[2] = 0.0f;
 						err[0] = 0;
-						taaOn = NO;
+						taaOn = post = NO;
 					}
 				}
 			}
-			if (taaOn && !b->resolve16) {
+			if (post && !b->resolve16) {
 				b->resolve16 = imbPipeline(b, @"im_bloom_resolve", MTLPixelFormatRGBA16Float, NO, err, errCap);
 				if (!b->resolve16) {
 					err[0] = 0;
 					b->taaJitter[2] = 0.0f;
-					taaOn = NO;
+					taaOn = post = NO;
 				}
 			}
-			if (taaOn && (!b->taaCur || b->taaCur.width != dst.width || b->taaCur.height != dst.height)) {
+			if (post && (!b->taaCur || b->taaCur.width != src.width || b->taaCur.height != src.height)) {
 				[b->taaCur release];
+				b->taaCur = imbTex(b, MTLPixelFormatRGBA16Float, src.width, src.height, @"Imagine Metal TAA frame");
+				b->taaValid = 0;
+			}
+			if (post && (!b->taaHist[0] || b->taaHist[0].width != dst.width || b->taaHist[0].height != dst.height)) {
 				[b->taaHist[0] release];
 				[b->taaHist[1] release];
-				b->taaCur = imbTex(b, MTLPixelFormatRGBA16Float, dst.width, dst.height, @"Imagine Metal TAA frame");
 				b->taaHist[0] = imbTex(b, MTLPixelFormatRGBA16Float, dst.width, dst.height, @"Imagine Metal TAA history");
 				b->taaHist[1] = imbTex(b, MTLPixelFormatRGBA16Float, dst.width, dst.height, @"Imagine Metal TAA history");
 				b->taaValid = 0;
 			}
-			p.taa[3] = taaOn ? 1.0f : 0.0f;  // (the resolve dithers only when it writes the screen itself)
+			if (post && (!b->taaCur || !b->taaHist[0] || !b->taaHist[1])) taaOn = post = NO;
+			p.taa[3] = post ? 1.0f : 0.0f;  // (the resolve dithers only when it writes the screen itself)
 			if (!taaOn) b->taaValid = 0;
-			imbPass3(cmd, taaOn ? b->taaCur : dst, MTLLoadActionDontCare, taaOn ? b->resolve16 : b->resolve, b->views[0], b->linear, &p, @"Imagine Metal HDR resolve", src,
+			// (without the second pass and with a render scale, the resolve writes the screen itself from the smaller picture: it
+			// reads it by the screen's uv)
+			imbPass3(cmd, post ? b->taaCur : dst, MTLLoadActionDontCare, post ? b->resolve16 : b->resolve, b->views[0], b->linear, &p, @"Imagine Metal HDR resolve", src,
 				shafts ? shafts : b->views[0], aoT ? aoT : b->views[0], fogOk ? hc : b->views[0], depthOk ? depth : nil, fogOk ? hs : nil,
 				frame, frameLen);
-			if (taaOn) {
+			if (post) {
 				id<MTLTexture> prev = b->taaHist[b->taaIdx], next = b->taaHist[b->taaIdx ^ 1];
+				// (xy: where the terrain was drawn off to this frame, in uv; z: 1 = blend with the history (TAA on and a history to
+				// use), 0 = this frame alone, scaled up; w: the world's size as a share of the screen's)
 				p.taa[0] = b->taaJitter[0];
 				p.taa[1] = b->taaJitter[1];
-				p.taa[2] = b->taaValid ? 1.0f : 0.0f;
+				p.taa[2] = taaOn && b->taaValid ? 1.0f : 0.0f;
+				p.taa[3] = (float) src.width / (float) dst.width;
 				p.taaPrev[0] = b->taaPrevJ[0];
 				p.taaPrev[1] = b->taaPrevJ[1];
 				b->taaPrevJ[0] = b->taaJitter[0];
@@ -517,13 +529,14 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 				[r setCullMode:MTLCullModeNone];
 				[r setFragmentTexture:b->taaCur atIndex:0];
 				[r setFragmentTexture:prev atIndex:1];
-				[r setFragmentTexture:depth atIndex:2];
+				// (none without this frame's depth: the shader doesn't read it then, taa.z is 0)
+				[r setFragmentTexture:depthOk ? depth : nil atIndex:2];
 				[r setFragmentSamplerState:b->linear atIndex:0];
 				[r setFragmentBytes:&p length:sizeof p atIndex:0];
 				[r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 				[r endEncoding];
 				b->taaIdx ^= 1;
-				b->taaValid = 1;
+				b->taaValid = taaOn ? 1 : 0;
 			}
 		}
 	}

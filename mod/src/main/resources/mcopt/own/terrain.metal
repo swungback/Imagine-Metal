@@ -2270,14 +2270,17 @@ static float4 sampleNearestG(texture2d<float> source, sampler s, float2 uv, floa
 	return source.sample(s, uv, gradient2d(du, dv));
 }
 
-static float4 sampleNearest(texture2d<float> source, sampler s, float2 uv, float2 pixelSize) {
+// lodScale (Imagine Metal's render scale, 1 without): the texture's detail level is chosen as if the picture had 1 / lodScale as
+// many pixels each way (the screen's, which the TAA rebuilds from the smaller frames), so textures stay as sharp as at full size.
+// Only the level: where a texel's edges fall between pixels is still this frame's own.
+static float4 sampleNearest(texture2d<float> source, sampler s, float2 uv, float2 pixelSize, float lodScale) {
 	float2 du = dfdx(uv);
 	float2 dv = dfdy(uv);
 	float2 texelScreenSize = sqrt(du * du + dv * dv);
-	return sampleNearestG(source, s, uv, pixelSize, du, dv, texelScreenSize);
+	return sampleNearestG(source, s, uv, pixelSize, du * lodScale, dv * lodScale, texelScreenSize);
 }
 
-static float4 sampleRGSS(texture2d<float> source, sampler s, float2 uv, float2 pixelSize) {
+static float4 sampleRGSS(texture2d<float> source, sampler s, float2 uv, float2 pixelSize, float lodScale) {
 	float2 du = dfdx(uv);
 	float2 dv = dfdy(uv);
 	float2 texelScreenSize = sqrt(du * du + dv * dv);
@@ -2291,7 +2294,7 @@ static float4 sampleRGSS(texture2d<float> source, sampler s, float2 uv, float2 p
 	float minDerivative = min(duLength, dvLength);
 	float maxDerivative = max(duLength, dvLength);
 	float effectiveDerivative = sqrt(minDerivative * maxDerivative);
-	float mipLevelExact = max(0.0, log2(effectiveDerivative / minPixelSize));
+	float mipLevelExact = max(0.0, log2(effectiveDerivative * lodScale / minPixelSize));
 	float mipLevelLow = floor(mipLevelExact);
 	float mipLevelHigh = mipLevelLow + 1.0;
 	float mipBlend = fract(mipLevelExact);
@@ -2306,7 +2309,7 @@ static float4 sampleRGSS(texture2d<float> source, sampler s, float2 uv, float2 p
 	rgssColorLow *= 0.25;
 	rgssColorHigh *= 0.25;
 	float4 rgssColor = mix(rgssColorLow, rgssColorHigh, mipBlend);
-	float4 nearestColor = sampleNearestG(source, s, uv, pixelSize, du, dv, texelScreenSize);
+	float4 nearestColor = sampleNearestG(source, s, uv, pixelSize, du * lodScale, dv * lodScale, texelScreenSize);
 	return mix(nearestColor, rgssColor, blendFactor);
 }
 
@@ -2335,10 +2338,16 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 	// colour, no fog and no fade mix)
 	if (OWN_TPROBE == 6 && CUTOUT && CUTOUT_LIMIT < 0.2) return atlas.sample(atlasSampler, in.texCoord0) * getColor(in);
 	if (OWN_TPROBE == 7 && CUTOUT && CUTOUT_LIMIT < 0.2)
-		return sampleNearest(atlas, atlasSampler, in.texCoord0, 1.0f / float2(t.TextureSize)) * getColor(in);
+		return sampleNearest(atlas, atlasSampler, in.texCoord0, 1.0f / float2(t.TextureSize), 1.0f) * getColor(in);
 #endif
 	float2 pixelSize = 1.0f / float2(t.TextureSize);
-	float4 texel = g.UseRgss == 1 ? sampleRGSS(atlas, atlasSampler, in.texCoord0, pixelSize) : sampleNearest(atlas, atlasSampler, in.texCoord0, pixelSize);
+#ifdef IM_SHADE
+	// (Imagine Metal's render scale: the texture's detail as at full size; own_fs_alpha takes the same, so both passes agree)
+	float imLod = imf.taa.w > 0.01 ? imf.taa.w : 1.0;
+#else
+	float imLod = 1.0;
+#endif
+	float4 texel = g.UseRgss == 1 ? sampleRGSS(atlas, atlasSampler, in.texCoord0, pixelSize, imLod) : sampleNearest(atlas, atlasSampler, in.texCoord0, pixelSize, imLod);
 	float4 color = texel * getColor(in);
 	// F_LEAN: the chunk visibility is 1 (mix(x, y, 1) is y), the render-distance fog value 0 (max(e, 0) is e for e >= 0)
 #ifdef IM_SHADE
@@ -2679,7 +2688,7 @@ fragment float4 own_fs_pos(VOut in [[stage_in]]) {
 fragment float4 own_fs_tex(VOut in [[stage_in]], constant Globals &g [[buffer(22)]], constant Terrain &t [[buffer(23)]],
 	texture2d<float> atlas [[texture(16)]], sampler atlasSampler [[sampler(14)]]) {
 	float2 pixelSize = 1.0f / float2(t.TextureSize);
-	return (g.UseRgss == 1 ? sampleRGSS(atlas, atlasSampler, in.texCoord0, pixelSize) : sampleNearest(atlas, atlasSampler, in.texCoord0, pixelSize))
+	return (g.UseRgss == 1 ? sampleRGSS(atlas, atlasSampler, in.texCoord0, pixelSize, 1.0f) : sampleNearest(atlas, atlasSampler, in.texCoord0, pixelSize, 1.0f))
 		* getColor(in);
 }
 
@@ -2688,7 +2697,7 @@ fragment float4 own_fs_tex(VOut in [[stage_in]], constant Globals &g [[buffer(22
 fragment float4 own_fs_nofade(VOut in [[stage_in]], constant Globals &g [[buffer(22)]], constant Terrain &t [[buffer(23)]], constant Fog &fog [[buffer(24)]],
 	texture2d<float> atlas [[texture(16)]], sampler atlasSampler [[sampler(14)]]) {
 	float2 pixelSize = 1.0f / float2(t.TextureSize);
-	float4 color = (g.UseRgss == 1 ? sampleRGSS(atlas, atlasSampler, in.texCoord0, pixelSize) : sampleNearest(atlas, atlasSampler, in.texCoord0, pixelSize))
+	float4 color = (g.UseRgss == 1 ? sampleRGSS(atlas, atlasSampler, in.texCoord0, pixelSize, 1.0f) : sampleNearest(atlas, atlasSampler, in.texCoord0, pixelSize, 1.0f))
 		* getColor(in);
 	float fogValue = linear_fog_value(in.sphericalVertexDistance, fog.FogEnvironmentalStart, fog.FogEnvironmentalEnd);
 	if (F_RICH) fogValue = max(fogValue, linear_fog_value(in.cylindricalVertexDistance, fog.FogRenderDistanceStart, fog.FogRenderDistanceEnd));
@@ -2699,7 +2708,7 @@ fragment float4 own_fs_nofade(VOut in [[stage_in]], constant Globals &g [[buffer
 fragment float4 own_fs_nofog(VOut in [[stage_in]], constant Globals &g [[buffer(22)]], constant Terrain &t [[buffer(23)]], constant Fog &fog [[buffer(24)]],
 	texture2d<float> atlas [[texture(16)]], sampler atlasSampler [[sampler(14)]]) {
 	float2 pixelSize = 1.0f / float2(t.TextureSize);
-	float4 color = (g.UseRgss == 1 ? sampleRGSS(atlas, atlasSampler, in.texCoord0, pixelSize) : sampleNearest(atlas, atlasSampler, in.texCoord0, pixelSize))
+	float4 color = (g.UseRgss == 1 ? sampleRGSS(atlas, atlasSampler, in.texCoord0, pixelSize, 1.0f) : sampleNearest(atlas, atlasSampler, in.texCoord0, pixelSize, 1.0f))
 		* getColor(in);
 	if (F_RICH) color = mix(fog.FogColor * float4(1, 1, 1, color.a), color, in.chunkVisibility);
 	return color;
@@ -2714,9 +2723,18 @@ fragment float4 own_fs_flat(VOut in [[stage_in]]) {
 // fade mix, against 0.5), depth only
 // (alpha only: the fade mix's alpha is mix(FogColor.a * a, a, visibility))
 fragment void own_fs_alpha(VOut in [[stage_in]], constant Globals &g [[buffer(22)]], constant Terrain &t [[buffer(23)]], constant Fog &fog [[buffer(24)]],
-	texture2d<float> atlas [[texture(16)]], sampler atlasSampler [[sampler(14)]]) {
+	texture2d<float> atlas [[texture(16)]], sampler atlasSampler [[sampler(14)]]
+#ifdef IM_SHADE
+	, constant ImFrame &imf [[buffer(30)]]
+#endif
+	) {
 	float2 pixelSize = 1.0f / float2(t.TextureSize);
-	float a = (g.UseRgss == 1 ? sampleRGSS(atlas, atlasSampler, in.texCoord0, pixelSize) : sampleNearest(atlas, atlasSampler, in.texCoord0, pixelSize)).a;
+#ifdef IM_SHADE
+	float imLod = imf.taa.w > 0.01 ? imf.taa.w : 1.0;  // (as ownFsBody's)
+#else
+	float imLod = 1.0;
+#endif
+	float a = (g.UseRgss == 1 ? sampleRGSS(atlas, atlasSampler, in.texCoord0, pixelSize, imLod) : sampleNearest(atlas, atlasSampler, in.texCoord0, pixelSize, imLod)).a;
 #ifdef IM_SHADE
 	// (the same decision as ownFsBody's with Imagine Metal: the texture's alpha alone. A pre-pass that kept a fragment the colour
 	// pass then dropped left the block's depth with the colour behind it: the block see-through)

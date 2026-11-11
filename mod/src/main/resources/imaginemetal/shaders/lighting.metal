@@ -59,7 +59,8 @@ struct ImFrame {
 	float4 portalRect;   // the nether portal's (not glass: it doesn't reflect)
 	float4 water;        // x water style (0 vanilla, 1 Reimagined, 2 Reimagined with waves), y 1 = glass reflections, z 1 = eyes in water,
 	                     // w how wet the world is (rain, eased; 0 in dry biomes or with the setting off)
-	float4 taa;          // TAA: xy this frame's sub-pixel jitter (Minecraft's clip units, y up), z 1 = on
+	float4 taa;          // TAA: xy this frame's sub-pixel jitter (Minecraft's clip units, y up), z 1 = on, w the render scale (the
+	                     // world's size as a share of the screen's, 1 = all of it)
 	float4 nether;       // the Nether's haze (Reimagined's netherColor as the terrain shows it, linear), w its full distance (0: not ours)
 	float4 extra;        // x 1 = portal effects, y 1 = sunlight coloured by stained glass, z 1 = an End portal near (endPortal), w 1 = night nebula
 	float4 endPortal;    // the End portal's rays (bloom.metal): xyz its middle, camera-relative; w the time (s)
@@ -1090,7 +1091,9 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	sun = mix(sun, max(sun, open * 0.55), lowSun);
 	// (leaves past the near shadow map: the far map's coarse texels speckled the canopy with blotchy dark patches, "shadows far
 	// look off"; there their shadows are softened toward the open sky)
-	if (cls == IM_MAT_FOLIAGE) sun = mix(sun, max(sun, open), 0.45 * smoothstep(26.0, 40.0, length(p)));
+	// (eased in over 30 to 96 blocks: over 26 to 40 the shadows on grass and leaves lost half their strength within 14 blocks,
+	// and walking or flying toward them read as shadows popping in)
+	if (cls == IM_MAT_FOLIAGE) sun = mix(sun, max(sun, open), 0.45 * smoothstep(30.0, 96.0, length(p)));
 	float3 direct = f.lightColor.rgb * (wrap * sun * (1.0 - 0.35 * lowSun));
 	if (IM_FC_GLASSSUN && IM_FC_COLORLIGHT && sun > 0.002 && f.extra.y > 0.5) direct *= imGlassTint(p, n, f, seeds);
 	// (and glow when the light is behind them: Reimagined's subsurface highlight, looking toward the sun through grass and leaves,

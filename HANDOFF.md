@@ -1,4 +1,4 @@
-# Imagine Metal: handoff (2026-11-11, ~15:35)
+# Imagine Metal: handoff (2026-11-11, ~16:30)
 
 Where things stand, for picking the work up in a new conversation.
 
@@ -11,9 +11,51 @@ Where things stand, for picking the work up in a new conversation.
   are chat lines in the log (`[CHAT] <herningstang> ...`) just before each screenshot.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
 
-## START HERE: 2026-11-11 15:35, after Jack's tests of the overnight build (afe4983, deployed 14:47)
-Jack's words today: "lets optimize then". He wants Gael-like fps, our look. Answer his questions BEFORE working when he asks any.
-### Measured today (jungle spot: /tp 1099.5 107 -55.5, RD16, 1440x900, both shadow experiments off)
+## START HERE: 2026-11-11 16:30, Build A written (render scale + pop-in), NOT yet tested in game
+New chat today (started from the project doc). Nothing below has been seen running: CI compiles it, Jack's eyes test it.
+### What Build A changed
+1. Pop-in: imShade's foliage softening band 26..40 -> 30..96 blocks (same 0.45 strength, still IM_MAT_FOLIAGE incl. grass
+   blocks and dirt). If far canopy blotches come back or shadows still pop: next is leaves only / lower strength.
+2. World-only render scale, live (Settings > Advanced > Speed > "Render scale", imaginemetal.renderScale, default 0.67; Jack's
+   file already had 0.67 from the old experiment):
+   - Hdr.begin: the HDR image is world(w, scale) x world(h, scale) (even, min 16) and the main target's DEPTH is swapped too
+     (RenderTargetAccessor depth setters) for one that size; Hdr.end puts both back. Every game pass sizes itself from its
+     attachments (RenderPassDescriptor's default render area; nobody calls withRenderArea), so the whole level draws small.
+     The level's own clear pass (LevelRenderer lambda$render$0) clears the swapped pair. Off (scale 1) with Minecraft's
+     improved transparency (its targets are made at RenderTarget.width/height and share the main depth) and without HDR.
+   - imbloom.m: resolve into taaCur at the WORLD size, then the TAA pass writes the screen (dst) and the history at SCREEN
+     size. The pass runs when TAA is on OR the sizes differ ("post"); taa.z 0 = no history: bilinear upscale of this frame.
+   - bloom.metal im_bloom_taa rewritten as TAAU: per screen pixel, 3x3 of the world frame around uv + jitter, Gaussian
+     (exp(-2.3 d^2)) reconstruction, variance box, history (now stored UNJITTERED at screen size, read at puv with no jitter
+     terms), current weight scaled by how near the nearest sample is (0.3..1 scaled, 0.6..1 at 100 %), history weight up to
+     0.93 when still with a scale, sharpen 0.3 clamped to the 3x3's min/max. im_bloom_resolve reads the HDR by uv.
+   - Terrain texture detail: sampleNearest / sampleRGSS take lodScale = ImFrame.taa.w (the render scale): gradients / mip
+     level as at full size. own_fs_alpha (leaf pre-pass) takes the same so its alpha test matches the colour pass (EQUAL).
+   - JITTER WAS DEAD BEFORE THIS BUILD: ImagineFrame.update ran before Hdr.begin and asked Hdr.active(), always false there,
+     so jitterX/Y were 0 and the "TAA" was a plain temporal blend. Now Hdr.usable(). So this build is the first with a moving
+     sub-pixel offset: N = clamp(round(8 / scale^2), 8, 32) Halton phases, in WORLD pixels. Only the terrain is jittered
+     (own_vs imJit); entities, sky, clouds, particles are not, so they sit up to half a world pixel off from where the TAA
+     assumes: expect slightly soft mob edges. If Jack sees shimmer/wobble: Settings > Advanced > Debug > "TAA sub-pixel
+     offset" (Settings.taaJitter, not saved) turns it off to check. Proper fix later: jitter in the projection (Gael's way).
+3. Output resolution: imaginemetal.output (default 1080, restart; Advanced > "Output resolution*": Window size / 1080p /
+   1440p). Resolution.target: framebuffer height = min(output, Retina height), width by the window's shape -> 1728x1080 on
+   his 1440x900 screen (0 = points, the old behaviour). The old whole-frame renderScale experiment is gone (Resolution.SCALE).
+   His guiScale is 4: at 1080 lines that is allowed (was capped to 3 at 900), so the HUD is ~11 % bigger.
+   So default now: screen 1728x1080, world 1158x724 (0.84 MP; was 1.30 MP), i.e. his Gael setup.
+4. Benchmark: "render scale 100% (every pixel drawn)" (a negative number = what the scale buys), and LAST "render distance 8"
+   (sets Minecraft's option, restore() puts it back; 4 s settle, the reference window after it waits 12 s and isn't used for
+   its delta). "Shaders off (live)" now also sets renderScale 100.
+### First things to check with Jack (in this order)
+- Does it start and draw at all (log: "[Imagine Metal] HDR on (1158x724, the world at 67 % of 1728x1080)").  If the world is
+  black/garbled or the game crashes on entering a world: set imaginemetal.renderScale=1 in the config (then only the TAA
+  rewrite and the jitter are new) and read latest.log.
+- Hand / held item: drawn after the level into the real full-size depth (cleared by render3dHud before the hand). The F3 3D
+  crosshair's depth integration (integrate3DHudDepth) now sees no world depth: ignore unless he notices.
+- Sharpness still and in motion, mob edges, leaves (pre-pass holes = lodScale mismatch, look at own_fs_alpha), water
+  reflections (they trace the world-size history), shafts/AO (half of the world size now: coarser).
+- Glowing-entity outlines, rain/particles, clouds, End/Nether (all draw into the swapped target; none tested).
+- fps at the jungle spot vs 38: estimate was ~50.
+### Measured earlier today (jungle spot: /tp 1099.5 107 -55.5, RD16, 1440x900, both shadow experiments off; build afe4983)
 - Benchmark: everything on 37-39 fps (26 ms). shaders off 131 fps; shadows off +6.3 ms; sky and air +4.0; generated normals
   +3.8; PBR +3.7; coloured light +1.7; far shadow cache ON +1.1 (41 fps); near view cull ON +0.2; leaf pre-pass off -6.0.
 - Whole-frame render scale (HDR size from the log): 100 % 1440x900 = 38 fps (26.0 ms); 75 % 1080x676 = 50-55 fps (~19 ms);
@@ -29,19 +71,16 @@ Jack's words today: "lets optimize then". He wants Gael-like fps, our look. Answ
   mcopt.shade.output=1080, preset balanced. As I read it: world shaded at ~1158x724 (0.84 MP), TAA-upscaled to 1080p.
   Ours shades 1.30 MP. His "metal testing" instance also has mcopt.metal.framegen=true.
 ### Plan agreed with Jack (estimates I gave him at the jungle spot: 38 -> ~50 -> ~58 -> ~62-65 -> ~68-72 fps)
-Build A (next):
-1. Pop-in: stretch the foliage softening band (26..40 -> much longer, e.g. 30..90) so shadows ease in; consider leaves only.
-2. Proper render scale, matching his Gael setup: final image and HUD at 1080p-equivalent, world shaded at ~67-75 % and
-   upscaled by the TAA. Hdr.java already swaps the main target's colour for our HDR image during the level: scale that
-   image AND the depth, keep the projection jitter, resolve/upscale in Bloom's map into the full-size 8-bit image; mip bias
-   log2(scale); sharpen. Reference: GaelQuinta docs/dev/TAAU.md. Remove or keep tonight's whole-frame renderScale as a debug.
-   NOTE "output 1080": today retina=false gives a 1440x900 framebuffer; 1080 output means a 1728x1080 framebuffer for the
-   GUI (WindowMixin/Resolution), world at 0.67 of that.
-3. Add a "render distance 8" step to the benchmark (I estimated RD 16 -> 8 saves 2-3 ms; Jack doubts it; measure).
+Build A: done above, one test round.
 Build B: shadow maps cheaper (near cascade every frame is the cost; far cache back on once pop-in is settled); fog and sky
-  from a LUT like Gael's skyLut; half precision where safe; normals and PBR cheaper at distance.
+  from a LUT like Gael's skyLut; half precision where safe; normals and PBR cheaper at distance. Also from Build A's test:
+  projection-level jitter (entities too) if mob edges are soft.
 Later: Distant Horizons style far terrain (he wants render distance to matter), frame generation (MetalFX) as the last step.
-He asked "all at once?": told him no, two builds, one test round each.
+He asked "all at once?": told him no, two builds, one test round each. "Lets optimize then": he wants Gael-like fps, our look.
+Answer his questions BEFORE working when he asks any.
+Tools note: Minecraft 26.3's client.jar is unobfuscated and downloadable in the cloud sandbox (piston-meta); `javap -p -c`
+  on it answers "what does the game do" questions (used for RenderTarget, RenderPassDescriptor, render3dHud). No JDK 25 or
+  Metal compiler in the sandbox: CI is the only compile.
 
 ## Overnight 2026-11-11 (written ~01:30; build db9ee42; superseded above where they differ)
 - NOT DEPLOYED: Jack's Mac went offline (asleep) before the build finished, so the instance still has 6f65e15 (near view cull

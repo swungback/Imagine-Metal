@@ -42,6 +42,8 @@ public final class ImagineFrame {
 	private static float wet;
 	/** this frame's TAA jitter (Minecraft's clip units, y up; Bloom un-jitters the history lookup with it) */
 	static float jitterX, jitterY;
+	/** this frame's render scale (Hdr.scale: the world's size on each axis as a share of the screen's; 1 = all of it) */
+	static float renderScale = 1f;
 	/** this frame's dimension (0 overworld, 1 Nether, 2 End) */
 	static int dimNow;
 	/** the Nether (Reimagined's netherColor, gamma), its haze as the terrain shows it (linear, tone-mapped) and its storm's colour */
@@ -492,18 +494,26 @@ public final class ImagineFrame {
 		rbTime = Math.clamp(rbTime - (float) Math.pow(noonF, 8) * 8f, 0f, 0.85f);
 		rainbow = dim != 0 ? 0f : rbTime * (float) Math.sqrt(Math.max(0f, afterRain - 0.333f) * 1.5f) * (1f - rain) * (1f - cave) * (camera.fogType == net.minecraft.world.level.material.FogType.NONE ? 1f : 0f);
 		put(Settings.waterStyle, Settings.glassReflections ? 1f : 0f, camera.fogType == net.minecraft.world.level.material.FogType.WATER ? 1f : 0f, wet);
-		// TAA: a Halton (2, 3) sub-pixel offset, a different one each frame of eight (within half a pixel each way)
-		boolean taaOn = Settings.taa && Hdr.active();
+		// TAA: a Halton (2, 3) sub-pixel offset, a different one each frame (within half a pixel each way, of the pixels the world
+		// is drawn with: fewer than the screen's with a render scale, and then over more frames, so that every screen pixel gets
+		// a sample near it: 8 frames at full size, 18 at 67 %)
+		// (Hdr.usable, not Hdr.active: the level's HDR image is switched in right after this, so active() was always false here and
+		// the offset never moved)
+		boolean taaOn = Settings.taa && Hdr.usable();
+		renderScale = Hdr.scale();
 		int tw = 1, th = 1;
 		var rt = Minecraft.getInstance().gameRenderer.mainRenderTarget();
 		if (rt != null) {
-			tw = Math.max(rt.width, 1);
-			th = Math.max(rt.height, 1);
+			tw = Math.max(Hdr.world(rt.width, renderScale), 1);
+			th = Math.max(Hdr.world(rt.height, renderScale), 1);
 		}
-		int hi = (frame & 7) + 1;
-		jitterX = taaOn ? (halton(hi, 2) - 0.5f) * 2f / tw : 0f;
-		jitterY = taaOn ? (halton(hi, 3) - 0.5f) * 2f / th : 0f;
-		put(jitterX, jitterY, taaOn ? 1f : 0f, 0f);
+		int phases = Math.clamp(Math.round(8f / (renderScale * renderScale)), 8, 32);
+		int hi = Math.floorMod(frame, phases) + 1;
+		boolean jitterOn = taaOn && Settings.taaJitter;
+		jitterX = jitterOn ? (halton(hi, 2) - 0.5f) * 2f / tw : 0f;
+		jitterY = jitterOn ? (halton(hi, 3) - 0.5f) * 2f / th : 0f;
+		// (w: the render scale, for the terrain's texture detail: its mip level chosen as if every screen pixel were drawn)
+		put(jitterX, jitterY, taaOn ? 1f : 0f, renderScale);
 		// the Nether's haze (Reimagined's border fog there: up to 256 blocks or the render distance, thickening evenly with the
 		// distance, in netherColor) and its storm (netherColor x 3), as the terrain's light ends up
 		netherHaze = dim == 1 && Settings.netherFog && camera.fogType == net.minecraft.world.level.material.FogType.NONE;

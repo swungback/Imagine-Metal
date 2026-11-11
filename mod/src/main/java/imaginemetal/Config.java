@@ -18,13 +18,15 @@ public final class Config {
 	private static final String DEFAULTS = """
 		# Imagine Metal settings. Edit, then restart the game.
 		#
-		# Resolution. false: the game draws at the window's size (a 1440x900 window draws 1440x900 pixels; the Mac scales it up
-		# to the Retina screen, as Sodium Extra's "Reduce resolution on macOS" does): 4x fewer pixels, much faster.
-		# true: every Retina pixel (2880x1800 for that window): sharper, much slower.
+		# Resolution. retina=true: every Retina pixel (2880x1800 for a 1440x900 window): sharpest, much slower.
+		# retina=false: the game's picture (hand, HUD, menus, and what the world is scaled up to) is "output" lines high, its
+		# width following the window (1080: 1728x1080 for a 1440x900 window); 0 = the window's own size (1440x900). The Mac
+		# scales it to the screen.
 		imaginemetal.retina=false
-		# Experiment (with retina=false): the share of the window's size the game draws at on each axis (0.5 to 1; 0.75 draws
-		# 1080x675 for a 1440x900 window). Fewer pixels to shade: faster, softer (menus and HUD too).
-		imaginemetal.renderScale=1
+		imaginemetal.output=1080
+		# The share of that size, on each axis, the world itself is drawn with (0.5 to 1; 0.67 is under half the pixels: much
+		# faster), brought up to the full picture by the TAA. The hand, HUD and menus stay sharp. Changes at once in game.
+		imaginemetal.renderScale=0.67
 		#
 		# Shadows from the sun and moon.
 		imaginemetal.shadows=true

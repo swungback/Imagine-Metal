@@ -9,9 +9,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * imaginemetal.retina=false: the game's framebuffer is the window's size in points instead of its Retina pixels, so everything
- * draws at a quarter of the pixels and the Mac scales the image up. Both ways the size reaches the game: the query (startup,
- * fullscreen changes) and the resize event. The target is the window's own size, so applying it twice changes nothing.
+ * imaginemetal.retina=false: the game's framebuffer is smaller than the window's Retina pixels (Resolution.target: 1080 lines by
+ * default, or the window's size in points) and the Mac scales the image up. Both ways the size reaches the game: the query
+ * (startup, fullscreen changes) and the resize event. Applying the target twice changes nothing.
  */
 @Mixin(Window.class)
 abstract class WindowMixin {
@@ -20,23 +20,17 @@ abstract class WindowMixin {
 		if (Resolution.RETINA) return;
 		Window w = (Window) (Object) this;
 		Window.FramebufferSize s = cir.getReturnValue();
-		int sw = w.getScreenWidth(), sh = w.getScreenHeight();
-		if (sw <= 0 || sh <= 0) return;
-		sw = Resolution.scaled(sw);
-		sh = Resolution.scaled(sh);
-		if (s.width() > sw || s.height() > sh) cir.setReturnValue(new Window.FramebufferSize(Math.min(s.width(), sw), Math.min(s.height(), sh)));
+		int[] t = Resolution.target(w.getScreenWidth(), w.getScreenHeight(), s.width(), s.height());
+		if (t != null) cir.setReturnValue(new Window.FramebufferSize(t[0], t[1]));
 	}
 
 	@Inject(method = "onFramebufferResize", at = @At("HEAD"), cancellable = true)
 	private void imaginemetal$resize(int newWidth, int newHeight, CallbackInfo ci) {
 		if (Resolution.RETINA) return;
 		Window w = (Window) (Object) this;
-		int sw = w.getScreenWidth(), sh = w.getScreenHeight();
-		if (sw <= 0 || sh <= 0) return;
-		sw = Resolution.scaled(sw);
-		sh = Resolution.scaled(sh);
-		if (newWidth <= sw && newHeight <= sh) return;
+		int[] t = Resolution.target(w.getScreenWidth(), w.getScreenHeight(), newWidth, newHeight);
+		if (t == null) return;
 		ci.cancel();
-		((WindowAccessor) (Object) this).imaginemetal$onFramebufferResize(Math.min(newWidth, sw), Math.min(newHeight, sh));
+		((WindowAccessor) (Object) this).imaginemetal$onFramebufferResize(t[0], t[1]);
 	}
 }

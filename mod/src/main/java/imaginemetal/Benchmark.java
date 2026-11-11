@@ -16,7 +16,11 @@ import java.util.Map;
  * nothing here (aurora, stars by day) look like 3.5 ms each.
  */
 public final class Benchmark {
-	private record Step(String name, Runnable off) {
+	/** settle: seconds to wait before measuring (0: SETTLE). */
+	private record Step(String name, Runnable off, double settle) {
+		Step(String name, Runnable off) {
+			this(name, off, 0.0);
+		}
 	}
 
 	private record Result(String name, double fps, double ms) {
@@ -32,6 +36,9 @@ public final class Benchmark {
 	private static final List<Result> results = new ArrayList<>();
 	private static Map<Field, Object> saved;
 	private static boolean wasOff;
+	/** The render distance step: Minecraft's own setting before it (-1: untouched). */
+	private static int savedDistance = -1;
+	private static final String DISTANCE = "render distance 8";
 	private static final double[] refPass = new double[PassTimes.TAGS];
 	private static double refPassFrame, refPassIdle;
 	private static int refPassN;
@@ -62,6 +69,7 @@ public final class Benchmark {
 		steps.add(new Step("generated normals off", () -> Settings.normals = 0f));
 		steps.add(new Step("parallax off", () -> Settings.parallax = false));
 		steps.add(new Step("TAA off", () -> Settings.taa = false));
+		steps.add(new Step("render scale 100% (every pixel drawn)", () -> Settings.renderScale = 100));
 		steps.add(new Step("coloured light off", () -> Settings.coloredLight = false));
 		steps.add(new Step("held light off", () -> Settings.heldLight = false));
 		steps.add(new Step("sunlight through glass off", () -> Settings.glassSun = false));
@@ -84,21 +92,27 @@ public final class Benchmark {
 			Settings.nebula = Settings.shootingStars = false;
 		}));
 		steps.add(new Step("shaders off (live, near vanilla)", () -> Live.setOff(true)));
+		// (last: the chunks beyond 8 are dropped and take a while to come back, so the reference window after it waits longer)
+		steps.add(new Step(DISTANCE, Benchmark::distance8, 4.0));
 		List<Step> ab = new ArrayList<>();
+		boolean slow = false;
 		for (Step st : steps) {
 			if (!ab.isEmpty() || !st.name().equals(REF)) ab.add(new Step(REF, () -> {
-			}));
+			}, slow ? 12.0 : 0.0));
 			if (!st.name().equals(REF)) ab.add(st);
+			slow = st.name().equals(DISTANCE);
 		}
 		ab.add(new Step(REF, () -> {
-		}));
+		}, slow ? 12.0 : 0.0));
 		steps = ab;
 		index = -1;
 		results.clear();
 		java.util.Arrays.fill(refPass, 0.0);
 		refPassFrame = refPassIdle = 0.0;
 		refPassN = 0;
-		say("Benchmark: stand still and don't touch anything, about " + Math.round(steps.size() * (SETTLE + MEASURE)) + " seconds...", true);
+		double total = 0.0;
+		for (Step st : steps) total += (st.settle() > 0.0 ? st.settle() : SETTLE) + MEASURE;
+		say("Benchmark: stand still and don't touch anything, about " + Math.round(total) + " seconds...", true);
 		next();
 	}
 
@@ -119,7 +133,8 @@ public final class Benchmark {
 		if (steps == null) return;
 		long now = System.nanoTime();
 		double t = (now - stepStart) / 1e9;
-		if (t < SETTLE) return;
+		double settle = steps.get(index).settle();
+		if (t < (settle > 0.0 ? settle : SETTLE)) return;
 		if (frames < 0) {
 			frames = 0;
 			measureStart = now;
@@ -168,6 +183,8 @@ public final class Benchmark {
 			double after = i + 1 < results.size() && results.get(i + 1).name.equals(REF) ? results.get(i + 1).ms : before;
 			if (Double.isNaN(before)) before = after;
 			if (Double.isNaN(before)) continue;
+			// (the render distance step: only the window before it; the one after may still be loading its chunks back)
+			if (r.name.equals(DISTANCE)) after = before;
 			rest.add(new Result(r.name, r.fps, (before + after) * 0.5 - r.ms));  // (ms here: the saving)
 		}
 		rest.sort((a, b) -> Double.compare(b.ms, a.ms));  // (the biggest saving first)
@@ -196,7 +213,27 @@ public final class Benchmark {
 		if (wasOff) Live.setOff(true);
 	}
 
+	/** The render distance step: Minecraft's render distance to 8 chunks (put back by restore). */
+	private static void distance8() {
+		try {
+			var o = net.minecraft.client.Minecraft.getInstance().options.renderDistance();
+			int now = o.get();
+			if (now <= 8) return;
+			savedDistance = now;
+			o.set(8);
+		} catch (Throwable t) {
+			System.out.println("[Imagine Metal] benchmark: render distance step skipped: " + t);
+		}
+	}
+
 	private static void restore() {
+		if (savedDistance > 0) {
+			try {
+				net.minecraft.client.Minecraft.getInstance().options.renderDistance().set(savedDistance);
+			} catch (Throwable ignored) {
+			}
+			savedDistance = -1;
+		}
 		PassTimes.splitTerrain = false;
 		if (Live.isOff()) Live.setOff(false);
 		Live.restore(saved);

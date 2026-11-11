@@ -28,7 +28,8 @@ struct ImBloomParams {
 	float4x4 clip;     // this frame's camera-relative world -> clip (y up: uv.y = ndc.y * 0.5 + 0.5), depth 0..1
 	float4x4 clipInv;
 	float4x4 prevClip; // the last frame's clip, from this frame's camera-relative world (the shafts' history)
-	float4 taa;        // TAA: xy this frame's jitter in uv, z 1 = the history is usable
+	float4 taa;        // TAA: xy this frame's jitter in uv, z 1 = the history is usable, w the world's size as a share of the screen's
+	                   // (the resolve: w 1 = the TAA pass follows and dithers)
 	float4 taaPrev;    // TAA: xy the last frame's jitter in uv
 };
 
@@ -571,12 +572,18 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 	constant ImBloomParams &p [[buffer(0)]], constant ImVlFrame &f [[buffer(1)]], texture3d<float> lvol [[texture(7)]]) {
 	float4 pp = ((constant float4 *) &f)[54];  // (ImFrame.endPortal, byte 864: w the time)
 	float4 fx = ((constant float4 *) &f)[53];  // (ImFrame.extra)
-	uint2 rp = uint2(in.pos.xy);
+	// (the picture's own pixel under this one: the same pixel when the target is the picture's size, as it is whenever the TAA
+	// pass follows; with a render scale and no such pass, the nearest of the smaller picture's)
+	float2 hsz = float2(hdr.get_width(), hdr.get_height());
+	float2 hp = in.uv * hsz;
+	uint2 rp = uint2(clamp(hp, float2(0.0), hsz - 1.0));
 	if (p.grade.z > 0.5 && p.grade.z < 1.5) {
 		// under water: the picture wavers gently (Reimagined's underwater distortion)
 		// (grade.z 1 only: the Nether's fog mode is 2 + its distance, and the waver ran there too, the whole Nether wobbling)
-		float2 wv = float2(sin(in.pos.y * 0.035 + pp.w * 2.1), cos(in.pos.x * 0.03 + pp.w * 1.7)) * 2.5;
-		rp = uint2(clamp(in.pos.xy + wv, float2(0.0), float2(hdr.get_width() - 1, hdr.get_height() - 1)));
+		// (in the picture's pixels at 900 lines, so the waver is the same size on screen at any render scale)
+		float wk = hsz.y / 900.0;
+		float2 wv = float2(sin(hp.y / wk * 0.035 + pp.w * 2.1), cos(hp.x / wk * 0.03 + pp.w * 1.7)) * 2.5 * wk;
+		rp = uint2(clamp(hp + wv, float2(0.0), hsz - 1.0));
 	}
 	float4 h = hdr.read(rp);
 	float3 c = imbLinear(h.rgb);
@@ -774,38 +781,55 @@ struct ImTaaOut {
 	float4 history [[color(1)]];
 };
 
-// TAA (the resolve's result, display-encoded): this frame's pixel blended with the last frames' at the same place in the world
-// (found through the depth and the last frame's transform), the history first held within the colours of this pixel's 3x3
-// neighbourhood (moving mobs and waving plants don't smear; what newly shows takes over at once). The terrain is drawn half a pixel
-// off in a new direction each frame, so over eight frames every edge is sampled across its pixel: smooth edges, and the grain of
-// the shafts, the AO and the reflections averaged away. Written to the screen and to the next frame's history.
+// TAA and the render scale's upscaling (the resolve's result, display-encoded), once per SCREEN pixel. cur is this frame's
+// picture at the world's size (the screen's, or smaller with a render scale); the history and the screen are full size.
+// The terrain is drawn a fraction of one of ITS pixels off in a new direction each frame (ImFrame.taa), so over the cycle its
+// samples land all over each screen pixel: blended over frames that gives smooth edges at full size, and with a render scale a
+// full-size picture out of smaller frames (each screen pixel takes more of the frames whose sample fell near it). The history
+// is found through the depth and the last frame's transform, and held within the colours of this frame's 3x3 neighbourhood
+// (moving mobs and waving plants don't smear; what newly shows takes over at once). Without a history (taa.z 0: TAA off, or
+// its first frame) the frame alone, scaled up. Written to the screen and to the next frame's history.
 fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur [[texture(0)]], texture2d<float> hist [[texture(1)]],
 	depth2d<float> depth [[texture(2)]], sampler s [[sampler(0)]], constant ImBloomParams &p [[buffer(0)]]) {
-	uint2 px = uint2(in.pos.xy);
-	uint2 size = uint2(cur.get_width(), cur.get_height());
-	float3 c = cur.read(px).rgb;
+	float2 csz = float2(cur.get_width(), cur.get_height());
+	float2 osz = float2(hist.get_width(), hist.get_height());
+	// this screen pixel's place in the world's picture: the frame holds the scene shifted by the jitter
+	float2 cuv = in.uv + p.taa.xy;
+	float2 cp = cuv * csz;  // (in its pixels; their centres at .5)
+	int2 ci = clamp(int2(floor(cp)), int2(0), int2(csz) - 1);
 	ImTaaOut o;
 	if (p.taa.z < 0.5) {
-		o.screen = float4(c, 1.0);
-		o.history = o.screen;
+		// (no history: this frame alone, read between its pixels)
+		float3 c0 = cur.sample(s, cuv).rgb;
+		o.screen = float4(c0 + imbDither8(in.pos.xy), 1.0);
+		o.history = float4(c0, 1.0);
 		return o;
 	}
-	// the neighbourhood's colour box, and the nearest depth in it (its edges follow the nearer object)
-	float3 mn = c, mx = c, m1 = c, m2 = c * c;
-	float dmin = depth.read(min(px, size - 1));
-	float wav = cur.read(px).a;  // (0.98: a waving plant, terrain.metal)
+	// the 3x3 of the frame's pixels around that place: this pixel's colour rebuilt from them (each counted by how near its
+	// centre is: a Gaussian about a pixel wide), their colour box, and the nearest depth (its edges follow the nearer object)
+	float2 d0 = (float2(ci) + 0.5) - cp;  // (the centre pixel's offset, within half a pixel)
+	float3 wx = exp(-2.3 * float3(d0.x - 1.0, d0.x, d0.x + 1.0) * float3(d0.x - 1.0, d0.x, d0.x + 1.0));
+	float3 wy = exp(-2.3 * float3(d0.y - 1.0, d0.y, d0.y + 1.0) * float3(d0.y - 1.0, d0.y, d0.y + 1.0));
+	float3 c = float3(0.0), m1 = float3(0.0), m2 = float3(0.0);
+	float3 mn = float3(1e9), mx = float3(-1e9);
+	float wsum = 0.0, dmin = 0.0, wav = 1.0;
 	for (int y = -1; y <= 1; y++)
 		for (int x = -1; x <= 1; x++) {
-			if (x == 0 && y == 0) continue;
-			uint2 q = uint2(clamp(int2(px) + int2(x, y), int2(0), int2(size) - 1));
-			float3 v = cur.read(q).rgb;
+			uint2 q = uint2(clamp(ci + int2(x, y), int2(0), int2(csz) - 1));
+			float4 v4 = cur.read(q);
+			float3 v = v4.rgb;
+			float w = wx[x + 1] * wy[y + 1];
+			c += v * w;
+			wsum += w;
 			mn = min(mn, v);
 			mx = max(mx, v);
-			wav = min(wav, cur.read(q).a);
 			m1 += v;
 			m2 += v * v;
+			wav = min(wav, v4.a);  // (0.98: a waving plant, terrain.metal)
 			dmin = max(dmin, depth.read(q));  // (reversed Z: the nearest is the largest)
 		}
+	c /= max(wsum, 1e-4);
+	float3 loC = mn, hiC = mx;  // (the plain box: the sharpen's limits)
 	// (variance clipping, tighter than the min/max box: less ghosting)
 	m1 /= 9.0;
 	m2 /= 9.0;
@@ -813,30 +837,40 @@ fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur 
 	// (1.0: a mob walking over grass a little way off left a trail at 1.25)
 	mn = max(mn, m1 - 1.0 * sd);
 	mx = min(mx, m1 + 1.0 * sd);
-	float2 uv = in.uv - p.taa.xy;  // (this pixel without the jitter)
-	float4 w = p.clipInv * float4(uv * 2.0 - 1.0, dmin <= 0.00001 ? 0.0001 : dmin, 1.0);
+	// (how near this frame's nearest sample is to this screen pixel: 1 on it, about 0.3 half a pixel off diagonally)
+	float nearW = wx[1] * wy[1];
+	float4 w = p.clipInv * float4(in.uv * 2.0 - 1.0, dmin <= 0.00001 ? 0.0001 : dmin, 1.0);
 	float3 P = w.xyz / w.w;
 	float4 pc = p.prevClip * float4(P, 1.0);
 	float3 res = c, shown = c;
 	if (pc.w > 0.05) {
 		float2 puv = pc.xy / pc.w * 0.5 + 0.5;
 		if (all(puv > 0.0) && all(puv < 1.0)) {
-			// (the history was drawn with the last frame's offset: it is read where that put this point)
-			float3 hc = imbCatmull(hist, s, puv + p.taaPrev.xy);
+			// (the history holds the picture without the jitter, at the screen's size)
+			float3 hc = imbCatmull(hist, s, puv);
 			float3 h = clamp(hc, mn, mx);
 			// (less history where the picture moved a lot on screen: sharper in motion)
-			float moved = length((puv - in.uv) * float2(size));
+			float moved = length((puv - in.uv) * osz);
 			float k = mix(0.86, 0.6, saturate(moved / 8.0));
+			// (with a render scale a still picture keeps more of it: each screen pixel only gets a near sample every few frames)
+			k = mix(k, max(k, 0.93), saturate((1.0 - p.taa.w) * 3.0) * (1.0 - saturate(moved / 2.0)));
 			// (and less where the history had to be pulled in a lot: something moved there that the camera's motion doesn't explain)
-			k *= 1.0 - 0.6 * saturate(length(hc - h) / max(imbLuma(m1) * 0.5, 0.02));
+			float off = saturate(length(hc - h) / max(imbLuma(m1) * 0.5, 0.02));
+			k *= 1.0 - 0.6 * off;
 			// (beside a waving plant much less history: the sway left ghost copies of grass on the sand)
 			if (wav < 0.99) k *= 0.35;
-			res = mix(c, h, k);
+			// (this frame counts by how near its sample fell: far from it, it's a guess between samples and the history knows
+			// better; where the history was rejected it has to do either way)
+			// (at full size less so: every pixel has a sample within its own area each frame)
+			float lo = mix(0.3, 0.6, saturate((p.taa.w - 0.67) * 3.0));
+			float a = (1.0 - k) * mix(mix(lo, 1.0, nearW), 1.0, off);
+			res = mix(h, c, a);
 			// (a light sharpen against what's left of the softness, on the screen only: fed back into the history it sharpened
 			// the already sharpened picture every frame, the finest grain growing until the colour box stopped it, a crawling
 			// static over walls and floors)
-			// (0.3: the softness TAA leaves read as a blurry picture at 0.15)
-			shown = max(res + (res - m1) * 0.3, 0.0);
+			// (0.3: the softness TAA leaves read as a blurry picture at 0.15; kept inside the neighbourhood's own colours, so with
+			// a render scale, where the neighbourhood is wider on screen, edges get no halos)
+			shown = clamp(res + (res - m1) * 0.3, min(loC, res), max(hiC, res));
 		}
 	}
 	o.screen = float4(shown + imbDither8(in.pos.xy), 1.0);

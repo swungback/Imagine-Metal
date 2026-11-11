@@ -22,7 +22,7 @@ public final class Live {
 	private static java.lang.reflect.Method getKey;
 
 	/** Fields that only take effect after a restart (or a chunk rebuild): never switched live. */
-	private static final java.util.Set<String> FIXED = java.util.Set.of("retina", "terrain", "shadowRes", "waving", "debug");
+	private static final java.util.Set<String> FIXED = java.util.Set.of("retina", "output", "terrain", "shadowRes", "waving", "debug");
 
 	private Live() {
 	}
@@ -71,6 +71,7 @@ public final class Live {
 			Settings.waterStyle = 0;
 			Settings.stars = 0;
 			Settings.normals = 0f;
+			Settings.renderScale = 100;  // (the plain picture at full size: no TAA to bring a smaller one up)
 			off = true;
 		} else {
 			off = false;

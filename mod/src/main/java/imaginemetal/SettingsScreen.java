@@ -171,14 +171,19 @@ public final class SettingsScreen extends OptionsSubScreen {
 						.withValues(1024, 2048, 4096)
 						.withTooltip(v -> Tooltip.create(Component.literal("Shadow map size: sharper leaf shadows with more. " + RESTART)))
 						.create(0, 0, 150, 20, Component.literal("Shadow detail*"), (b, v) -> Settings.shadowRes = v));
-				this.list.addBig(CycleButton.<Integer>builder(v -> Component.literal(v + "%"), nearestScale(Settings.renderScale))
-					.withValues(100, 85, 75, 67)
+				this.list.addBig(CycleButton.<Integer>builder(v -> Component.literal(v == 0 ? "Window size" : v + "p"), nearestOutput(Settings.output))
+					.withValues(0, 1080, 1440)
 					.withTooltip(v -> Tooltip.create(Component.literal(
-						"Experiment: draw the whole game at this share of the window's size and let the Mac scale it up. Fewer pixels to shade, so faster; softer, menus and HUD too. " + RESTART)))
-					.create(0, 0, 310, 20, Component.literal("Render scale*"), (b, v) -> Settings.renderScale = v));
+						"The size of the game's picture (hand, HUD, menus, and what the world is scaled up to): 1080 lines (1728x1080 on a 1440x900 screen), 1440, or the window's own size (1440x900). Not used with Retina resolution. " + RESTART)))
+					.create(0, 0, 310, 20, Component.literal("Output resolution*"), (b, v) -> Settings.output = v));
 				this.list.addBig(toggle("Imagine Metal lighting*", Settings.terrain, v -> Settings.terrain = v,
 					"Off: vanilla's lighting on the terrain, for comparing. " + RESTART));
 				this.list.addHeader(Component.literal("Speed"));
+				this.list.addBig(CycleButton.<Integer>builder(v -> Component.literal(v + "%"), nearestScale(Settings.renderScale))
+					.withValues(100, 85, 75, 67, 50)
+					.withTooltip(v -> Tooltip.create(Component.literal(
+						"The world is drawn at this share of the picture's size and brought up to full size by the TAA (keep TAA on). 67% shades under half the pixels: the biggest speed-up there is. The hand, the HUD and menus stay sharp. Changes at once.")))
+					.create(0, 0, 310, 20, Component.literal("Render scale"), (b, v) -> Settings.renderScale = v));
 				this.list.addBig(Button.builder(Component.literal("Run benchmark (stand still, ~1 minute)"), b -> {
 					Minecraft.getInstance().gui.setScreen(null);
 					Benchmark.start();
@@ -190,6 +195,8 @@ public final class SettingsScreen extends OptionsSubScreen {
 					"Experimental, not saved. The far shadow map is kept until the sun, the camera or the terrain changes, instead of drawn every other frame. Faster; suspected of shadows popping in."),
 					toggle("Near shadow view cull", Settings.shadowNearViewCull, v -> Settings.shadowNearViewCull = v,
 						"Experimental, not saved. The near shadow map leaves out what can't shadow anything on screen."));
+				this.list.addBig(toggle("TAA sub-pixel offset", Settings.taaJitter, v -> Settings.taaJitter = v,
+					"Not saved. The terrain drawn a fraction of a pixel off in a new direction each frame, which the TAA averages into smooth edges and, with a render scale, into the full-size picture. Off to check whether a shimmer or wobble comes from it."));
 				String[] views = {"Off", "Light levels", "Normals", "Bloom glow only", "Coloured light grid", "Shadow maps"};
 				this.list.addBig(CycleButton.<Integer>builder(v -> Component.literal(views[v]), Settings.debug)
 					.withValues(0, 1, 2, 3, 4, 5)
@@ -201,8 +208,12 @@ public final class SettingsScreen extends OptionsSubScreen {
 
 	private static int nearestScale(int percent) {
 		int best = 100;
-		for (int v : new int[] {100, 85, 75, 67}) if (Math.abs(v - percent) < Math.abs(best - percent)) best = v;
+		for (int v : new int[] {100, 85, 75, 67, 50}) if (Math.abs(v - percent) < Math.abs(best - percent)) best = v;
 		return best;
+	}
+
+	private static int nearestOutput(int lines) {
+		return lines <= 0 ? 0 : lines < 1260 ? 1080 : 1440;
 	}
 
 	private static AbstractWidget cycle(String name, String[] names, int value, Consumer<Integer> set, String tooltip) {

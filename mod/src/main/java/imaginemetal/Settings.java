@@ -38,6 +38,13 @@ public final class Settings {
 	public static volatile boolean wet = Engine.flag("imaginemetal.wet", true);
 	public static volatile boolean intenseDeepDark = Engine.flag("imaginemetal.intenseDeepDark", true);
 	public static volatile boolean taa = Engine.flag("imaginemetal.taa", true);
+	/**
+	 * The world's render scale in percent (Hdr.scale; live): the share of the screen's size, on each axis, the world is drawn
+	 * with (67: under half the pixels); the TAA brings it up to the screen's size. The hand, the HUD and menus are always full size.
+	 */
+	public static volatile int renderScale = Math.round(Config.number("imaginemetal.renderScale", 0.67f, 0.5f, 1f) * 100f);
+	/** The TAA's sub-pixel offset of the terrain (ImagineFrame.jitterX): not saved, a debug switch. -Dimaginemetal.taaJitter=false. */
+	public static volatile boolean taaJitter = Engine.flag("imaginemetal.taaJitter", true);
 	/** The cutout (leaves) depth pre-pass (mcopt OwnTerrain.leafPrepass): not saved; -Dmcopt.own.prepass=false starts with it off. */
 	public static volatile boolean leafPrepass = !"false".equalsIgnoreCase(System.getProperty("mcopt.own.prepass", "true"));
 	public static volatile boolean rainbows = Engine.flag("imaginemetal.rainbows", true);
@@ -82,8 +89,8 @@ public final class Settings {
 
 	// after a restart (what the game started with is in Resolution.RETINA, Engine.TERRAIN, Shadows.RES)
 	public static volatile boolean retina = Engine.flag("imaginemetal.retina", false);
-	/** Resolution.SCALE after a restart, in percent (100, 85, 75, 67). */
-	public static volatile int renderScale = Math.round(Config.number("imaginemetal.renderScale", 1f, 0.5f, 1f) * 100f);
+	/** Resolution.OUTPUT after a restart: the framebuffer's height in lines (0 = the window's size in points). */
+	public static volatile int output = (int) Config.number("imaginemetal.output", 1080, 0, 4320);
 	public static volatile boolean terrain = Engine.flag("imaginemetal.terrain", true);
 	public static volatile int shadowRes = (int) Config.number("imaginemetal.shadowRes", 2048, 512, 8192);
 
@@ -95,6 +102,7 @@ public final class Settings {
 		if (Live.isOff()) Live.setOff(false);
 		Map<String, String> v = new LinkedHashMap<>();
 		v.put("imaginemetal.retina", String.valueOf(retina));
+		v.put("imaginemetal.output", String.valueOf(output));
 		v.put("imaginemetal.renderScale", String.format(java.util.Locale.ROOT, "%.2f", renderScale / 100f));
 		v.put("imaginemetal.terrain", String.valueOf(terrain));
 		v.put("imaginemetal.shadows", String.valueOf(shadows));
