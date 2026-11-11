@@ -12,7 +12,8 @@ Where things stand, for picking the work up in a new conversation.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
 
 ## START HERE: 2026-11-11 16:30, Build A written (render scale + pop-in), NOT yet tested in game
-New chat today (started from the project doc). Nothing below has been seen running: CI compiles it, Jack's eyes test it.
+New chat today (started from the project doc). Build A = 7ce03ed, CI green, jar deployed to the instance 15:55 (game was
+closed). Nothing below has been seen running yet: Jack's eyes test it.
 ### What Build A changed
 1. Pop-in: imShade's foliage softening band 26..40 -> 30..96 blocks (same 0.45 strength, still IM_MAT_FOLIAGE incl. grass
    blocks and dirt). If far canopy blotches come back or shadows still pop: next is leaves only / lower strength.
