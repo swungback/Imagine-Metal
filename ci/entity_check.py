@@ -51,10 +51,21 @@ def patch_fs(fs):
         ', texture3d<float> imLightVol [[texture(21)]], sampler imLightSampler [[sampler(12)]]') + fs[m.end():]
     f = add_members(f, 'main0_in')
     if f is None: return None
+    # (EntityShade.patchFs: Minecraft's own fog, to take back out under water)
+    vfog = 'float4(0.0)'
+    m2 = FS_MAIN.search(f)
+    sig_end = f.find('{', m2.end()) if m2 else -1
+    fm = re.search(r'constant\s+Fog&\s+(\w+)', f[m2.end():sig_end]) if sig_end >= 0 else None
+    if fm and 'in.sphericalVertexDistance' in f and 'in.cylindricalVertexDistance' in f:
+        fg = fm.group(1)
+        vfog = ('float4(' + fg + '.FogColor.xyz, ' + fg + '.FogColor.w * max(imLinFog(in.sphericalVertexDistance, ' + fg + '.FogEnvironmentalStart, '
+            + fg + '.FogEnvironmentalEnd), imLinFog(in.cylindricalVertexDistance, ' + fg + '.FogRenderDistanceStart, ' + fg + '.FogRenderDistanceEnd)))')
+    else:
+        print('entity check: no fog found in a fragment shader (the under-water fix would be skipped for it)')
     f = before_last_return(f, '    if (imOn.x > 0.5 && imOn.x < 1.5) out.fragColor.xyz = imShadeEntity(out.fragColor.xyz, in.imPos, in.imNrm, in.imLm, imf,'
-        ' imShadowMap, imShadowCmp, imLightVol, imLightSampler, 0.0);\n'
+        ' imShadowMap, imShadowCmp, imLightVol, imLightSampler, 0.0, ' + vfog + ');\n'
         '    else if (imOn.x > 1.5 && in.imHand > 0.5) out.fragColor.xyz = imShadeEntity(out.fragColor.xyz, float3(0.0, -0.4, 0.001),'
-        ' float3(0.0), in.imLm, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, 3.0);')
+        ' float3(0.0), in.imLm, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, 3.0, float4(0.0));')
     if f is None: return None
     return lighting + '\n// ---- Minecraft\'s shader (SPIRV-Cross), patched ----\n' + f
 
