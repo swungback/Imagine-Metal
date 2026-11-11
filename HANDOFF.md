@@ -1,4 +1,4 @@
-# Imagine Metal: handoff (2026-11-11, ~17:10)
+# Imagine Metal: handoff (2026-11-11, ~16:50)
 
 Where things stand, for picking the work up in a new conversation.
 
@@ -11,8 +11,9 @@ Where things stand, for picking the work up in a new conversation.
   are chat lines in the log (`[CHAT] <herningstang> ...`) just before each screenshot.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
 
-## START HERE: 2026-11-11 17:10, Build A2 (fixes after Jack's first test of Build A), NOT yet tested in game
-Jack tested Build A (7ce03ed) 16:02-16:30. It ran (HDR 1158x724 at 67 % of 1728x1080). His notes and what A2 does about them:
+## START HERE: 2026-11-11 16:50, Build A2 (fixes after Jack's first test of Build A), NOT yet tested in game
+Build A2 = 606707a + 2d CI fix (ci/entity_check.py must call imShadeEntity as EntityShade does: it has a copy of the patch), CI
+green, jar deployed to the instance 16:48 (game closed). Jack tested Build A (7ce03ed) 16:02-16:30. It ran (HDR 1158x724 at 67 % of 1728x1080). His notes and what A2 does about them:
 - "shit looks blurry", "blurry without taa [sub-pixel offset off] and shimmering with it", "leaves look jittery all around",
   "look how pixelated", "blur fest here fr". Measured on his 16.13.53 / 16.14.05 pair: offset ON was SOFTER than off (mean
   gradient 5.8 vs 6.6), so the TAAU wasn't adding detail. Signs re-checked by reading (own_vs flips y before the offset; uv runs
