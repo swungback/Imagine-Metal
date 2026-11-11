@@ -23,7 +23,7 @@ struct ImFrame {
 	float4 blockColor;   // rgb torch light at level 15 (linear), w how much daylight there is 0..1 (torches give way to it)
 	float4 minLight;     // rgb the least light anything gets (caves), w exposure
 	float4 tonemap;      // Lottes 2016: y = x^a / (x^(a d) b + c); x a, y d, z b, w c
-	float4 grade;        // x saturation, y vibrance, zw 0
+	float4 grade;        // x saturation, y vibrance, z 1 = the generated normals' bevels are baked (texture 27), w 0
 	int4 flags;          // x dimension (0 overworld, 1 Nether, 2 End), y debug view, z 1 = the engine filled this frame, w frame index
 	float4 env;          // x how far underground the player is (0..1, eased), y how much it's night (0..1)
 	float4x4 shadowNear; // camera-relative world -> the near cascade's light clip (orthographic)
@@ -413,7 +413,8 @@ static inline float imGnDif(texture2d<float> atlas, float2 t, float lc) {
 	return clamp(d, -0.2, 0.2);
 }
 
-static float3 imGenNormal(texture2d<float> atlas, float2 uv, float4 rect, float strength, float2 texelsPerPixel, float3 col /* the texel, untinted */) {
+static float3 imGenNormal(texture2d<float> atlas, float2 uv, float4 rect, float strength, float2 texelsPerPixel, float3 col /* the texel, untinted */,
+	texture2d<float> bake, bool baked) {
 	float2 asz = float2(atlas.get_width(), atlas.get_height());
 	float2 lo = rect.xy * asz, hi = rect.zw * asz;
 	if (strength <= 0.0 || any(hi - lo < 2.0)) return float3(0, 0, 1);
@@ -430,6 +431,21 @@ static float3 imGenNormal(texture2d<float> atlas, float2 uv, float4 rect, float 
 	float2 tc = floor(t);
 	bool upIn = t.y + off.y < hi.y, rightIn = t.x + off.x < hi.x, downIn = t.y - off.y > lo.y, leftIn = t.x - off.x > lo.x;
 	bool upX = floor(t.y + off.y) != tc.y, rightX = floor(t.x + off.x) != tc.x, downX = floor(t.y - off.y) != tc.y, leftX = floor(t.x - off.x) != tc.x;
+	// (Build B1: the bevels baked per texel at load, PbrAtlas.bake: the texel's difference to each neighbour, one read of the bake in
+	// place of up to three of the atlas and their lengths; the neighbour is the next texel even where a far texel's step is longer.
+	// A texel that isn't baked (0: an animated sprite) is worked out as before, below.)
+	if (baked) {
+		float4 bk = bake.read(min(uint2(tc), uint2(bake.get_width() - 1, bake.get_height() - 1)), 0);
+		if (bk.r > 0.0) {
+			float4 dd = ((bk * 255.0 - 1.0) / 254.0 - 0.5) * 0.4;
+			if (upIn && upX) nm.y += dd.r;
+			if (rightIn && rightX) nm.x += dd.g;
+			if (downIn && downX) nm.y -= dd.b;
+			if (leftIn && leftX) nm.x -= dd.a;
+			nm = clamp(nm * (2.5 * strength) * fade, -1.0, 1.0);
+			return normalize(float3(nm, 1.0));
+		}
+	}
 	float dc = (upIn && !upX) || (rightIn && !rightX) || (downIn && !downX) || (leftIn && !leftX) ? imGnDif(atlas, t, lc) : 0.0;
 	if (upIn) nm.y += upX ? imGnDif(atlas, t + float2(0, off.y), lc) : dc;
 	if (rightIn) nm.x += rightX ? imGnDif(atlas, t + float2(off.x, 0), lc) : dc;
@@ -930,10 +946,12 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	float2 asz = float2(atlas.get_width(), atlas.get_height());
 	float2 tpp = (abs(duv1) + abs(duv2)) * asz;  // texels a pixel covers
 	uint cls = mat & 15u;
-	uint kind = mat >> 8;  // (the translucent pass: 1 water, 2 glass and other see-through blocks)
+	uint kind = (mat >> 8) & 255u;  // (the translucent pass: 1 water, 2 glass and other see-through blocks)
+	// (mat bit 16: an opaque fragment. With the air pass on (f.pbrPack.w) its haze is laid on later, once per pixel: air.metal)
+	bool airLater = (mat & 0x10000u) != 0u && f.pbrPack.w > 0.5;
 	float3 N = n;
 	if (IM_FC_NORMALS && f.lightSize.w > 0.0 && cls != IM_MAT_LAVA && !slanted && kind == 0u) {
-		float3 tn = imGenNormal(atlas, uv, rect, f.lightSize.w, tpp, tex);
+		float3 tn = imGenNormal(atlas, uv, rect, f.lightSize.w, tpp, tex, pbrN, f.grade.z > 0.5);
 		if (tn.z < 0.9999) {
 			float3 dp2perp = cross(dp2, n), dp1perp = cross(n, dp1);
 			float3 T = dp2perp * duv1.x + dp1perp * duv2.x;
@@ -1249,7 +1267,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// the air between the eye and the surface (Photon's air fog)
 	float3 airT = float3(1.0);
 	float3 airS = float3(0.0);
-	if (IM_FC_SKY && f.flags.y == 0) airS = imAirFog(p, sky, f, airT);
+	if (IM_FC_SKY && f.flags.y == 0 && !airLater) airS = imAirFog(p, sky, f, airT);
 	if (f.flags.y == 0) radiance = radiance * airT + airS * f.minLight.w;
 
 	if (f.flags.y == 1) return float3(light, 0.0);          // debug: light levels

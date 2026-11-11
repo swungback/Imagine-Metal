@@ -2463,7 +2463,7 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 		float4 qs = float4(in.imQL.y & 255u, (in.imQL.y >> 8) & 255u, (in.imQL.y >> 16) & 255u, in.imQL.y >> 24);
 		imLightQ = saturate(float2(mix(mix(qb.x, qb.y, st.y), mix(qb.w, qb.z, st.y), st.x), mix(mix(qs.x, qs.y, st.y), mix(qs.w, qs.z, st.y), st.x)) / 240.0);
 	}
-	color.rgb = imShade(color.rgb, texel.rgb, in.imPos, imLightQ, in.imMat | (imKind << 8), in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imLightFilt, imLightOpen, imSeeds, imPbrN, imPbrS,
+	color.rgb = imShade(color.rgb, texel.rgb, in.imPos, imLightQ, in.imMat | (imKind << 8) | (CUTOUT && CUTOUT_LIMIT < 0.2 ? 0u : 0x10000u), in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imLightFilt, imLightOpen, imSeeds, imPbrN, imPbrS,
 		in.texCoord0, in.imRect, atlas, imHistColor, imHistDepth, imHistSampler, imUnderDepth); // (Imagine Metal)
 	if (IM_FC_PORTALS && imPortal && imf.extra.x > 0.5 && imf.portalRect.z > imf.portalRect.x) color = imPortalLook(in.texCoord0, in.imPos, texel, atlas, imf);
 	// (the translucent pass has no material bytes, so a flame drawn in it (a resource pack's 3D torch, the copper torch: sprites with
@@ -2486,6 +2486,8 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 		bf *= bf;
 		bf *= bf;
 		imFog = 1.0 - exp(-3.0 * bf);
+		// (with the air pass on, the opaque world's border fade is laid on there, once per pixel: air.metal)
+		if (imf.pbrPack.w > 0.5 && !(CUTOUT && CUTOUT_LIMIT < 0.2)) imFog = 0.0;
 		if (max(imFog, imFade) > 0.001) imFogColor = pow(imPresent(imSkyColor(dir, imf, false), imf), 1.0 / 2.2);
 	} else if (imf.flags.x == 1 && imf.nether.w > 0.0) {
 		// the Nether (Reimagined's border fog there, mainFog.glsl): the biome's glowing haze, thickening evenly out to 256 blocks

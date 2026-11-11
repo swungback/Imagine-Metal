@@ -50,7 +50,9 @@ public final class Reflections {
 		boolean water = Settings.waterFx && Settings.waterStyle > 0;
 		// (the depth alone is also wanted by the mob shadows: their trace reads the depth before the water was drawn, so the
 		// water's surface over shallows doesn't count as something between the seabed and the sun: dark straight-edged patches)
-		if (state == 0 || underFailed || !(water || Settings.mobShadows) || !Engine.TERRAIN) {
+		boolean air = airPromised;
+		airPromised = false;
+		if (state == 0 || underFailed || !(water || Settings.mobShadows || air) || !Engine.TERRAIN) {
 			underDepthReady = false;
 			return;
 		}
@@ -65,10 +67,30 @@ public final class Reflections {
 			MetalBridge.flushClear(encoder, depth);
 			try (MemoryStack stack = MemoryStack.stackPush()) {
 				long err = stack.ncalloc(1, 1024, 1);
-				int rc = ImNative.underCapture(MetalBridge.enc(encoder), state, water ? MetalBridge.textureHandle(color) : 0L, MetalBridge.textureHandle(depth), err, 1024);
+				// (the air pass: this frame's terrain transform inverted, so a pixel's depth gives its place)
+				long airM = 0, lib = 0;
+				var own = mcopt.metal.own.OwnTerrain.get();
+				if (air && nowSet && own != null && Math.abs(clipNow.determinant()) > 1e-12f) {
+					airM = stack.ncalloc(4, 16, 4);
+					new Matrix4f(clipNow).invert().get(MemoryUtil.memFloatBuffer(airM, 16));
+					lib = ImNative.terrainLibrary(own.ownHandle());
+				}
+				int rc = ImNative.underCapture(MetalBridge.enc(encoder), state, water ? MetalBridge.textureHandle(color) : 0L, MetalBridge.textureHandle(depth),
+					airM != 0 && lib != 0 ? MetalBridge.textureHandle(color) : 0L, lib, airM, ImagineFrame.address(), ImagineFrame.SIZE, err, 1024);
 				if (rc == 1) throw new IllegalStateException(MemoryUtil.memUTF8(err));
 				// (2: the open pass was ended for the copy and reopened: its pipeline, buffers and scissor bound again)
-				if (rc == 2) MetalBridge.restorePass(encoder);
+				if ((rc & 2) != 0) MetalBridge.restorePass(encoder);
+				if ((rc & 4) != 0) {
+					airMisses = 0;
+					if (!airLogged) {
+						airLogged = true;
+						System.out.println("[Imagine Metal] air pass on (the haze once per pixel, after the opaque world)");
+					}
+				} else if (air && airM != 0 && lib != 0 && ++airMisses == 30) {
+					// (promised but not drawn for 30 frames: the terrain's own fragments take the air back)
+					airOff = true;
+					System.out.println("[Imagine Metal] air pass off (it could not be drawn): the haze stays in the terrain's shading");
+				}
 			}
 			underReady = water;
 			underDepthReady = true;
@@ -83,6 +105,26 @@ public final class Reflections {
 	}
 
 	static volatile boolean underReady, underDepthReady;
+	private static boolean airPromised, airOff, airLogged;
+	private static int airMisses;
+
+	/**
+	 * (ImagineFrame, as the frame's values are filled) whether the haze and the border fade are laid over the opaque world in the
+	 * air pass this frame (then the terrain's opaque fragments leave them out, ImFrame.pbrPack.w). Only when the copy before the
+	 * translucent pass can be taken: the state exists, classic transparency (the hook is in its pass).
+	 */
+	static boolean promiseAir(boolean ourFog) {
+		boolean ok = ourFog && Settings.airPass && Settings.debug == 0 && !Live.isOff() && !airOff && state != 0 && !underFailed && Engine.TERRAIN && !failed;
+		if (ok) {
+			try {
+				if (Minecraft.getInstance().gameRenderer.useImprovedTransparency()) ok = false;
+			} catch (Throwable t) {
+				ok = false;
+			}
+		}
+		airPromised = ok;
+		return ok;
+	}
 	private static boolean underLogged;
 
 	/** After the level's passes, before the bloom: the picture and depth become the next frame's history. */

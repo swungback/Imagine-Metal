@@ -81,6 +81,15 @@ public final class Shadows {
 	/** the first OwnTerrain frame whose section table holds the latest change inside the kept far cascade's box */
 	private static volatile long farChangeFrame;
 	private static boolean skipFar, farDrawnLast;
+	/**
+	 * The near cascade every other frame (Settings.shadowNearAlternate): the frame after it was drawn, the same map serves again,
+	 * its matrix moved by what the camera has moved since (as the kept far map's is). Its casters (a jungle's leaves, alpha-tested)
+	 * are most of what the shadows cost, and nothing in the map moves between two frames but the camera.
+	 */
+	private static boolean skipNear, nearDrawnLast, nearKept, farPostponed;
+	private static final Matrix4f nearClip = new Matrix4f();
+	private static double nearCamX, nearCamY, nearCamZ;
+	private static OwnTerrain nearOwn;
 	private static int frameParity;
 	private static long farDraws, farSkips, farLogNs;
 	private static long state, atlas;
@@ -179,6 +188,9 @@ public final class Shadows {
 		OwnTerrain own = OwnTerrain.get();
 		boolean usable = k != null && k.own == own && k.range == Settings.shadowRange
 			&& Math.abs(cam.x - k.camX) + Math.abs(cam.y - k.camY) + Math.abs(cam.z - k.camZ) < FAR_MOVE;
+		skipNear = Settings.shadowNearAlternate && nearKept && nearDrawnLast && nearOwn == own
+			&& Math.abs(cam.x - nearCamX) + Math.abs(cam.y - nearCamY) + Math.abs(cam.z - nearCamZ) < 2.0;
+		if (skipNear) new Matrix4f(nearClip).translate((float) (cam.x - nearCamX), (float) (cam.y - nearCamY), (float) (cam.z - nearCamZ)).get(MATRIX[0]);
 		boolean due;
 		if (!usable) {
 			due = true;
@@ -188,6 +200,13 @@ public final class Shadows {
 			due = k.run != farRun || (changed > k.ownFrame && ownFrame >= changed) || System.nanoTime() - k.drawnNs > FAR_MAX_AGE_NS;
 			// (never two frames running while the old map still serves: a stream of changes costs what every other frame did)
 			if (due && farDrawnLast && Settings.shadowFarAlternate) due = false;
+			// (and not in the frame the near map is drawn, once: the two take turns)
+			if (due && Settings.shadowNearAlternate && nearKept && !skipNear && !farPostponed) {
+				due = false;
+				farPostponed = true;
+			} else {
+				farPostponed = false;
+			}
 		} else {
 			// (the cache off: every frame, or every other one with shadowFarAlternate, as it was before the cache)
 			due = !(Settings.shadowFarAlternate && frameParity == 1 && k.run == farRun);
@@ -344,20 +363,35 @@ public final class Shadows {
 				boolean farDrawn = false;
 				for (int c = 0; c < 2; c++) {
 					if (c == 1 && skipFar) continue;
+					if (c == 0 && skipNear) {
+						nearDrawnLast = false;
+						continue;
+					}
 					if (!own.shadowCull(c, CULL[c], LIGHT[c][0], LIGHT[c][1], LIGHT[c][2])) {
 						if (c == 1) far = null;
+						else nearKept = false;
 						farDrawnLast = false;
 						return;
 					}
 					long[] b = own.shadowBuffers(c);
 					if (b[0] == 0 || b[4] == 0) {
 						if (c == 1) far = null;
+						else nearKept = false;
 						farDrawnLast = false;
 						return;
 					}
 					for (int i = 0; i < 16; i++) MemoryUtil.memPutFloat(f + i * 4L, MATRIX[c][i]);
 					ImNative.shadowRender(enc, state, f, FRAME_BYTES, b[0], b[1], b[2], b[3], b[4], (int) b[5], atlas, 2.0f, c);
 					drew = true;
+					if (c == 0) {
+						nearClip.set(CLIP[0]);
+						nearCamX = cam.x;
+						nearCamY = cam.y;
+						nearCamZ = cam.z;
+						nearOwn = own;
+						nearKept = true;
+						nearDrawnLast = true;
+					}
 					Far fn = farNext;
 					if (c == 1 && fn != null) {
 						fn.own = own;

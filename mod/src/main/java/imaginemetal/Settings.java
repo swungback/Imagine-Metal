@@ -65,10 +65,15 @@ public final class Settings {
 	public static volatile boolean bloomFog = Engine.flag("imaginemetal.bloomFog", true);
 	public static volatile boolean shadowFarAlternate = Engine.flag("imaginemetal.shadowFarAlternate", true);
 	/**
-	 * The far shadow cascade kept until something changes it (Shadows): not saved. OFF by default since 2026-11-11 (shadows
-	 * popped in with it on, cause not found; Settings > Advanced > Debug has a toggle). -Dimaginemetal.shadowFarCache=true.
+	 * The far shadow cascade kept until something changes it (Shadows): not saved. ON by default again since Build B1 (the pop-in
+	 * seen with it on was the foliage softening band, changed in Build A; Settings > Advanced > Debug has a toggle).
+	 * -Dimaginemetal.shadowFarCache=false.
 	 */
-	public static volatile boolean shadowFarCache = Engine.flag("imaginemetal.shadowFarCache", false);
+	public static volatile boolean shadowFarCache = Engine.flag("imaginemetal.shadowFarCache", true);
+	/** The haze and the border fade in one pass over the opaque world (Reflections.promiseAir): not saved. -Dimaginemetal.airPass=false. */
+	public static volatile boolean airPass = Engine.flag("imaginemetal.airPass", true);
+	/** The near shadow cascade drawn every other frame (Shadows.skipNear): not saved. -Dimaginemetal.shadowNearAlternate=false. */
+	public static volatile boolean shadowNearAlternate = Engine.flag("imaginemetal.shadowNearAlternate", true);
 	/**
 	 * The near shadow cascade's casters culled to what the view can see (Shadows.viewCull): not saved. OFF by default since
 	 * 2026-11-11: with it on, shadows went missing over part of the screen when looking down from the air (suspected, not proven,

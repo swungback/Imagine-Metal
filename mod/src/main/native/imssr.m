@@ -87,12 +87,49 @@ void mc_im_under_bind(id<MTLTexture> color, id<MTLTexture> depth);  // mcown.m
 
 // Before the translucent pass (no pass open on the encoder): the opaque picture and its depth, for water's refraction and its foam
 // along the shore. Returns 0 (copied or skipped), 1 with err.
-int im_under_capture(Enc *enc, ImSsr *s, id<MTLTexture> color, id<MTLTexture> depth, char *err, int errCap) {
+// The air pass (Build B1; air.metal im_air_fs in the terrain library): the haze and the fade into the sky at the edge of the render
+// distance laid over the opaque world once per pixel, from the depth copy just taken, instead of in every terrain fragment.
+// Its pipeline per target format, made on first use; nil (said once) if it can't be.
+static id<MTLRenderPipelineState> imAirPso;
+static MTLPixelFormat imAirFormat;
+static int imAirFailed;
+static id<MTLRenderPipelineState> imAirPipeline(ImSsr *s, id<MTLLibrary> lib, MTLPixelFormat format) {
+	if (imAirPso && imAirFormat == format) return imAirPso;
+	if (imAirFailed || !lib) return nil;
+	id<MTLFunction> vs = [[lib newFunctionWithName:@"im_air_vs"] autorelease], fs = [[lib newFunctionWithName:@"im_air_fs"] autorelease];
+	if (!vs || !fs) {
+		imAirFailed = 1;
+		fprintf(stderr, "[Imagine Metal] air pass off: im_air_vs / im_air_fs missing from the terrain library\n");
+		return nil;
+	}
+	MTLRenderPipelineDescriptor *pd = [[MTLRenderPipelineDescriptor new] autorelease];
+	pd.label = @"Imagine Metal air";
+	pd.vertexFunction = vs;
+	pd.fragmentFunction = fs;
+	pd.colorAttachments[0].pixelFormat = format;
+	NSError *e = nil;
+	id<MTLRenderPipelineState> pso = [s->device newRenderPipelineStateWithDescriptor:pd error:&e];
+	if (!pso) {
+		imAirFailed = 1;
+		fprintf(stderr, "[Imagine Metal] air pass off: %s\n", e ? e.description.UTF8String : "no pipeline");
+		return nil;
+	}
+	[imAirPso release];
+	imAirPso = pso;
+	imAirFormat = format;
+	return pso;
+}
+
+// air: this frame's inverse clip (16 floats, camera-relative world <- clip) when the air pass is wanted, else NULL; lib the terrain
+// library, frame the ImFrame bytes. Returns 0 (copied or skipped), 1 with err, 2 copied and the open pass reopened; + 4 when the air
+// pass was drawn.
+int im_under_capture(Enc *enc, ImSsr *s, id<MTLTexture> color, id<MTLTexture> depth, id<MTLTexture> airTarget, id<MTLLibrary> lib, const float *air,
+	const void *frame, int frameBytes, char *err, int errCap) {
 	// (a pass still open on the encoder is closed by mc_frame_cmd, as for the history: skipping here left the copy never taken,
 	// and the water read an empty texture, black, as what's under it)
 	// (color nil: the depth alone, for the mob shadows' trace)
 	if (!s || !depth) return 0;
-	int reopen = 0;
+	int reopen = 0, aired = 0;
 	@autoreleasepool {
 		if (color && (!s->under || s->under.width != color.width || s->under.height != color.height || s->under.pixelFormat != color.pixelFormat)) {
 			[s->under release];
@@ -128,19 +165,66 @@ int im_under_capture(Enc *enc, ImSsr *s, id<MTLTexture> color, id<MTLTexture> de
 		id<MTLBlitCommandEncoder> b = [imt_blit(cmd, IMT_CAPTURE) autorelease];
 		b.label = @"Imagine Metal under the water";
 		MTLOrigin o = {0, 0, 0};
+		[b copyFromTexture:depth sourceSlice:0 sourceLevel:0 sourceOrigin:o sourceSize:MTLSizeMake(depth.width, depth.height, 1)
+			toTexture:s->underDepth destinationSlice:0 destinationLevel:0 destinationOrigin:o];
+		id<MTLRenderPipelineState> airPso = air && airTarget && frame && frameBytes > 0 && airTarget.width == depth.width
+			&& airTarget.height == depth.height ? imAirPipeline(s, lib, airTarget.pixelFormat) : nil;
+		if (airPso) {
+			// (the air over the opaque world, before the colour copy below, so what's seen through water has it too)
+			[b endEncoding];
+			MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+			rp.colorAttachments[0].texture = airTarget;
+			rp.colorAttachments[0].loadAction = MTLLoadActionLoad;
+			rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+			imt_rp(rp, IMT_TERRAIN);
+			id<MTLRenderCommandEncoder> r = [cmd renderCommandEncoderWithDescriptor:rp];
+			r.label = @"Imagine Metal air";
+			float ap[20];
+			memcpy(ap, air, 64);
+			ap[16] = (float) airTarget.width;
+			ap[17] = (float) airTarget.height;
+			ap[18] = ap[19] = 0;
+			[r setRenderPipelineState:airPso];
+			[r setCullMode:MTLCullModeNone];
+			[r setFragmentTexture:s->underDepth atIndex:0];
+			[r setFragmentBytes:frame length:(NSUInteger) frameBytes atIndex:0];
+			[r setFragmentBytes:ap length:sizeof ap atIndex:1];
+			[r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+			[r endEncoding];
+			aired = 4;
+			b = color ? [imt_blit(cmd, IMT_CAPTURE) autorelease] : nil;
+			b.label = @"Imagine Metal under the water";
+		}
 		if (color)
 			[b copyFromTexture:color sourceSlice:0 sourceLevel:0 sourceOrigin:o sourceSize:MTLSizeMake(color.width, color.height, 1)
 				toTexture:s->under destinationSlice:0 destinationLevel:0 destinationOrigin:o];
-		[b copyFromTexture:depth sourceSlice:0 sourceLevel:0 sourceOrigin:o sourceSize:MTLSizeMake(depth.width, depth.height, 1)
-			toTexture:s->underDepth destinationSlice:0 destinationLevel:0 destinationOrigin:o];
 		[b endEncoding];
 		if (reopen) mc_render_reopen(enc);
 	}
 	mc_im_under_bind(s->under, s->underDepth);
-	return reopen ? 2 : 0;
+	return (reopen ? 2 : 0) + aired;
 }
 
 void mc_im_pbr_bind(id<MTLTexture> n, id<MTLTexture> s);  // mcown.m
+
+// (Build B1) The generated normals' bevels baked per atlas texel (PbrAtlas.bake; lighting.metal imGenNormal reads one texel of it
+// instead of the atlas's neighbours): RGBA8 the atlas's size, bound where a resource pack's normal map would be (texture 27; a
+// pack's maps replace it). Returns 1 made, 0 not.
+int im_bevel_upload(Ctx *ctx, int w, int h, const void *px) {
+	if (!ctx || w <= 0 || h <= 0 || !px) return 0;
+	@autoreleasepool {
+		MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm width:(NSUInteger) w
+			height:(NSUInteger) h mipmapped:NO];
+		td.storageMode = MTLStorageModeShared;
+		td.usage = MTLTextureUsageShaderRead;
+		id<MTLTexture> t = [ctx->device newTextureWithDescriptor:td];
+		if (!t) return 0;
+		[t replaceRegion:MTLRegionMake2D(0, 0, (NSUInteger) w, (NSUInteger) h) mipmapLevel:0 withBytes:px bytesPerRow:(NSUInteger) w * 4];
+		t.label = @"Imagine Metal baked bevels";
+		mc_im_pbr_bind(t, t);
+	}
+	return 1;
+}
 
 // A PBR resource pack's maps as the block atlas lays them out (PbrAtlas): RGBA8 each, uploaded once per resource reload.
 // Returns 1 made, 0 not.

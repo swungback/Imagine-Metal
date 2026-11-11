@@ -61,7 +61,9 @@ public final class Benchmark {
 		steps.add(new Step("leaf depth pre-pass off", () -> Settings.leafPrepass = false));
 		steps.add(new Step("shadows off", () -> Settings.shadows = false));
 		steps.add(new Step("shadow range 96", () -> Settings.shadowRange = Math.min(Settings.shadowRange, 96f)));
-		steps.add(new Step("far shadow map kept between frames (experimental, off)", () -> Settings.shadowFarCache = true));
+		steps.add(new Step("far shadow map drawn every other frame (not kept)", () -> Settings.shadowFarCache = false));
+		steps.add(new Step("near shadow map drawn every frame", () -> Settings.shadowNearAlternate = false));
+		steps.add(new Step("air pass off (the haze in every terrain fragment)", () -> Settings.airPass = false));
 		steps.add(new Step("near shadow casters culled to the view (experimental, off)", () -> Settings.shadowNearViewCull = true));
 		steps.add(new Step("ambient occlusion off", () -> Settings.ssao = false));
 		steps.add(new Step("light shafts off", () -> Settings.shafts = false));

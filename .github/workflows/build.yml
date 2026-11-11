@@ -35,10 +35,10 @@ jobs:
           mkdir -p build/msl
           # as the game builds it: the indie profile's defines, our lighting before mcopt's terrain, our shadow casters after it
           { echo '#define OWN_EXACT_POS 1'; echo '#define OWN_QREC 1'; echo '#define IM_SHADE 1'; cat $R/imaginemetal/shaders/lighting.metal; echo
-            cat $R/mcopt/own/terrain.metal; echo; cat $R/imaginemetal/shaders/shadow.metal; } > build/msl/terrain_im.metal
+            cat $R/mcopt/own/terrain.metal; echo; cat $R/imaginemetal/shaders/shadow.metal; echo; cat $R/imaginemetal/shaders/air.metal; } > build/msl/terrain_im.metal
           xcrun -sdk macosx metal -std=metal3.1 -c build/msl/terrain_im.metal -o build/msl/terrain_im.air
           { echo '#define IM_SHADE 1'; cat $R/imaginemetal/shaders/lighting.metal; echo
-            cat $R/mcopt/own/terrain.metal; echo; cat $R/imaginemetal/shaders/shadow.metal; } > build/msl/terrain_im_plain.metal
+            cat $R/mcopt/own/terrain.metal; echo; cat $R/imaginemetal/shaders/shadow.metal; echo; cat $R/imaginemetal/shaders/air.metal; } > build/msl/terrain_im_plain.metal
           xcrun -sdk macosx metal -std=metal3.1 -c build/msl/terrain_im_plain.metal -o build/msl/terrain_im_plain.air
           xcrun -sdk macosx metal -std=metal3.1 -c $R/mcopt/own/terrain.metal -o build/msl/terrain.air
           xcrun -sdk macosx metal -std=metal3.0 -c $R/imaginemetal/shaders/bloom.metal -o build/msl/bloom.air

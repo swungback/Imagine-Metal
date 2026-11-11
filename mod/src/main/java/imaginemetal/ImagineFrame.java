@@ -407,7 +407,8 @@ public final class ImagineFrame {
 		put(floor[0], floor[1], floor[2], 0.9f); // w: exposure
 		put(TM_A, TM_D, TM_B, TM_C);
 		// saturation, vibrance: gentle (measured against Reimagined's frames, more crushed the blue out of grass and leaves)
-		put(1.04f, 0.08f, 0f, 0f);
+		// (z: the generated normals' bevels are baked, bound at texture 27: PbrAtlas.bake)
+		put(1.04f, 0.08f, PbrAtlas.bevel && !PbrAtlas.on ? 1f : 0f, 0f);
 		BUF.putInt(dim).putInt(Settings.debug).putInt(Live.isOff() ? 0 : 1).putInt(frame++);  // (z 0: plain lighting, shaders off live)
 		// how far underground the player is (by the sky light at their eyes, eased so walking into a cave fades) and how much it's
 		// night: the picture's grade (Bloom's resolve) darkens the dark parts more in both
@@ -548,7 +549,8 @@ public final class ImagineFrame {
 			Settings.waterFx && Settings.waterStyle > 0 && Reflections.underReady ? 1f : 0f);
 		put(endFlashDir[0], endFlashDir[1], endFlashDir[2], dim == 2 ? endFlash : 0f);
 		// (z: the depth before the translucent pass, captured last frame, is bound at texture 26 for the mob shadows' trace)
-		put(PbrAtlas.on && Settings.pbrPack ? 1f : 0f, Settings.parallax ? 1f : 0f, Reflections.underDepthReady ? 1f : 0f, 0f);
+		// (w: the air pass draws the haze and the border fade this frame, the opaque terrain's fragments leave them out)
+		put(PbrAtlas.on && Settings.pbrPack ? 1f : 0f, Settings.parallax ? 1f : 0f, Reflections.underDepthReady ? 1f : 0f, Reflections.promiseAir(ourFog) ? 1f : 0f);
 		if (BUF.position() != SIZE) throw new IllegalStateException("ImFrame is " + BUF.position() + " bytes, not " + SIZE);
 	}
 

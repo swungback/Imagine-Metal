@@ -53,6 +53,16 @@ final class ImNative {
 
 	private static final MethodHandle PBR_UPLOAD = fn("im_pbr_upload", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_LONG, JAVA_LONG), false);
 
+	private static final MethodHandle BEVEL_UPLOAD = fn("im_bevel_upload", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_LONG), false);
+
+	static int bevelUpload(long ctx, int w, int h, long px) {
+		try {
+			return (int) BEVEL_UPLOAD.invokeExact(ctx, w, h, px);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
 	static int pbrUpload(long ctx, int w, int h, long n, long s) {
 		try {
 			return (int) PBR_UPLOAD.invokeExact(ctx, w, h, n, s);
@@ -62,11 +72,12 @@ final class ImNative {
 	}
 
 	private static final MethodHandle UNDER_CAPTURE = fn("im_under_capture", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG,
-		JAVA_LONG, JAVA_INT), false);
+		JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_INT), false);
 
-	static int underCapture(long enc, long state, long color, long depth, long err, int errCap) {
+	/** air: 16 floats (this frame's inverse clip) for the air pass over airTarget, or 0; lib the terrain library; frame the ImFrame. */
+	static int underCapture(long enc, long state, long color, long depth, long airTarget, long lib, long air, long frame, int frameBytes, long err, int errCap) {
 		try {
-			return (int) UNDER_CAPTURE.invokeExact(enc, state, color, depth, err, errCap);
+			return (int) UNDER_CAPTURE.invokeExact(enc, state, color, depth, airTarget, lib, air, frame, frameBytes, err, errCap);
 		} catch (Throwable t) {
 			throw new IllegalStateException(t);
 		}

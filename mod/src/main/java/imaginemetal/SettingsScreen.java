@@ -192,7 +192,7 @@ public final class SettingsScreen extends OptionsSubScreen {
 					.build());
 				this.list.addHeader(Component.literal("Debug"));
 				this.list.addSmall(toggle("Far shadow cache", Settings.shadowFarCache, v -> Settings.shadowFarCache = v,
-					"Experimental, not saved. The far shadow map is kept until the sun, the camera or the terrain changes, instead of drawn every other frame. Faster; suspected of shadows popping in."),
+					"Not saved. The far shadow map is kept until the sun, the camera or the terrain changes, instead of drawn every other frame. On by default."),
 					toggle("Near shadow view cull", Settings.shadowNearViewCull, v -> Settings.shadowNearViewCull = v,
 						"Experimental, not saved. The near shadow map leaves out what can't shadow anything on screen."));
 				this.list.addBig(toggle("TAA sub-pixel offset", Settings.taaJitter, v -> Settings.taaJitter = v,

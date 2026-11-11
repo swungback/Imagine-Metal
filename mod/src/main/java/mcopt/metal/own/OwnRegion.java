@@ -268,6 +268,7 @@ public final class OwnRegion implements BlockAndTintGetter {
 				int c = this.sky[i];
 				if (c >= 0) return c;
 				int v = this.light.getLayerListener(LightLayer.SKY).getLightValue(pos);
+				if (IM_WATER_SKY && v < 15) v = this.waterSky(pos, v);
 				this.sky[i] = (byte) v;
 				return v;
 			}
@@ -278,6 +279,41 @@ public final class OwnRegion implements BlockAndTintGetter {
 			return v;
 		}
 		return this.light.getLayerListener(layer).getLightValue(pos);
+	}
+
+	/** (Imagine Metal) -Dimaginemetal.waterSky=false: the sky light in water as Minecraft has it (one level lost per block of depth). */
+	private static final boolean IM_WATER_SKY = imaginemetal.Engine.TERRAIN && !"false".equalsIgnoreCase(System.getProperty("imaginemetal.waterSky", "true"));
+
+	/**
+	 * (Imagine Metal) The sky light of a block of water under open water: Minecraft takes a level off per block of depth, so a seabed
+	 * 15 blocks down has none at all and, seen from above the water, went flat dark along block edges. Here a quarter of a level
+	 * per block instead: the column is followed up to its surface (the light rising a level a block, or water with none), and three
+	 * quarters of the depth given back. Water under rock is left as it is (the light doesn't rise straight up there).
+	 */
+	private int waterSky(BlockPos pos, int v) {
+		if (!this.getBlockState(pos).getFluidState().is(net.minecraft.tags.FluidTags.WATER)) return v;
+		var sky = this.light.getLayerListener(LightLayer.SKY);
+		BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos(pos.getX(), pos.getY(), pos.getZ());
+		int cur = v, depth = 0;
+		// (the dark part: water with no sky light at all, followed up only inside this region's own cached blocks)
+		int topY = this.sy + S - 1;
+		while (cur == 0 && depth < 40) {
+			m.setY(m.getY() + 1);
+			if (m.getY() > topY) return v;
+			int up = sky.getLightValue(m);
+			if (up == 0 && !this.getBlockState(m).getFluidState().is(net.minecraft.tags.FluidTags.WATER)) return v;
+			depth++;
+			cur = up;
+		}
+		while (cur < 15 && depth < 64) {
+			m.setY(m.getY() + 1);
+			int up = sky.getLightValue(m);
+			if (up != cur + 1) break;
+			depth++;
+			cur = up;
+		}
+		if (depth == 0 || cur < 12) return v;  // (no open water above: an underwater cave, a pool under a roof)
+		return Math.max(v, Math.min(15, cur - depth / 4));
 	}
 
 	/**
