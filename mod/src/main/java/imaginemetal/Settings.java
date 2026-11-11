@@ -72,6 +72,16 @@ public final class Settings {
 	public static volatile boolean shadowFarCache = Engine.flag("imaginemetal.shadowFarCache", true);
 	/** The haze and the border fade in one pass over the opaque world (Reflections.promiseAir): not saved. -Dimaginemetal.airPass=false. */
 	public static volatile boolean airPass = Engine.flag("imaginemetal.airPass", true);
+	/**
+	 * The MetalFX build: Apple's temporal scaler does the anti-aliasing and brings the world up to the screen's size, in place of
+	 * our own TAA pass (Bloom, imbloom.m). Not saved. -Dimaginemetal.metalfx=false. The flips: the sign MetalFX is given the
+	 * jitter (J) and the motion (M) with on each axis, debug switches until the right ones are known from a test.
+	 */
+	public static volatile boolean metalfx = Engine.flag("imaginemetal.metalfx", true);
+	public static volatile boolean metalfxFlipJX = Engine.flag("imaginemetal.metalfxFlipJX", false);
+	public static volatile boolean metalfxFlipJY = Engine.flag("imaginemetal.metalfxFlipJY", false);
+	public static volatile boolean metalfxFlipMX = Engine.flag("imaginemetal.metalfxFlipMX", false);
+	public static volatile boolean metalfxFlipMY = Engine.flag("imaginemetal.metalfxFlipMY", false);
 	/** Build B2: the opaque terrain lit once per pixel in tile memory (Deferred): not saved. -Dimaginemetal.deferred=false. */
 	public static volatile boolean deferred = Engine.flag("imaginemetal.deferred", true);
 	/** The near shadow cascade drawn every other frame (Shadows.skipNear): not saved. -Dimaginemetal.shadowNearAlternate=false. */

@@ -199,6 +199,12 @@ public final class SettingsScreen extends OptionsSubScreen {
 					"Not saved. The opaque terrain lit once per screen pixel in the GPU's tile memory (Build B2) instead of every fragment lighting itself. Off to compare speed and picture: both should look the same."),
 					toggle("Air pass", Settings.airPass, v -> Settings.airPass = v,
 						"Not saved. The haze and the fade into the sky drawn once per pixel after the opaque world, instead of in every terrain fragment."));
+				this.list.addBig(toggle("MetalFX upscaler", Settings.metalfx, v -> Settings.metalfx = v,
+					"Not saved. Apple's temporal scaler in place of our own TAA. Off: our TAA, to compare."));
+				this.list.addSmall(toggle("MetalFX jitter flip X", Settings.metalfxFlipJX, v -> Settings.metalfxFlipJX = v, "Debug: the sign of the sub-pixel offset MetalFX is told, across."),
+					toggle("MetalFX jitter flip Y", Settings.metalfxFlipJY, v -> Settings.metalfxFlipJY = v, "Debug: the sign of the sub-pixel offset MetalFX is told, up and down."));
+				this.list.addSmall(toggle("MetalFX motion flip X", Settings.metalfxFlipMX, v -> Settings.metalfxFlipMX = v, "Debug: the sign of the motion MetalFX is told, across."),
+					toggle("MetalFX motion flip Y", Settings.metalfxFlipMY, v -> Settings.metalfxFlipMY = v, "Debug: the sign of the motion MetalFX is told, up and down."));
 				this.list.addBig(toggle("TAA sub-pixel offset", Settings.taaJitter, v -> Settings.taaJitter = v,
 					"Not saved. The terrain drawn a fraction of a pixel off in a new direction each frame, which the TAA averages into smooth edges and, with a render scale, into the full-size picture. Off to check whether a shimmer or wobble comes from it."));
 				String[] views = {"Off", "Light levels", "Normals", "Bloom glow only", "Coloured light grid", "Shadow maps"};
