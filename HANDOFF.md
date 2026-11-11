@@ -1,4 +1,4 @@
-# Imagine Metal: handoff (2026-11-11, ~17:30)
+# Imagine Metal: handoff (2026-11-11, ~23:45)
 
 Where things stand, for picking the work up in a new conversation.
 
@@ -11,7 +11,80 @@ Where things stand, for picking the work up in a new conversation.
   are chat lines in the log (`[CHAT] <herningstang> ...`) just before each screenshot.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
 
-## START HERE: 2026-11-11 17:30, Jack tested A2; next is Build B = PERFORMANCE (plan below). New chat starts here.
+## START HERE: 2026-11-11 23:45, Builds B1 + B2 built and B2 DEPLOYED, UNTESTED (Jack was away). MetalFX started on a branch.
+State: mods folder = B2 (main 76b21cf, sha256 f494b26f...). Fallback = `instances/Imagine metal/imagine-metal-b1.jar` (B1, 7bda686,
+sha256 9509c5a6...; OUTSIDE mods). Swap: quit the game, copy that file over `minecraft/mods/imagine-metal-0.1.0.jar`.
+Softer switch first (no jar swap): Settings > Advanced > Debug > "Deferred lighting" off (live) or `-Dimaginemetal.deferred=false`:
+B2 then shades exactly as B1 does.
+NOTHING below was seen running: CI compiles the Metal shaders and the jar, that is all. Expect bugs in B2.
+CI note: the main run for the B1 commit hung in GitHub's queue (never got a runner); B1's green build is the `b1` branch run
+(43102310354, same commit), its jar taken from that run's artifact. B2 green on main (43102612022) = the dev release.
+### What to check in the log first (latest.log)
+- `[Imagine Metal] generated normals baked: N textures (M worked out live), 4096x2048, T ms` (resource load).
+- `[Imagine Metal] air pass on (...)` once in a world (overworld, eyes in air).
+- `[Imagine Metal] deferred lighting on (...)` ~20 frames into a world. `deferred lighting off ...` (stderr) = it fell back to
+  forward by itself (pipeline could not be made): then B2 == B1 in speed, read the reason.
+- benchmark at the jungle spot (/tp 1099.5 107 -55.5, RD16): was 47 fps on Build A. Estimates told to Jack: B1 ~60, B2 ~75-90.
+  New benchmark steps: "far shadow map drawn every other frame (not kept)", "near shadow map drawn every frame", "air pass
+  off", "deferred lighting off (... as Build B1)": that last one's delta IS what B2 buys.
+### Build B1 (7bda686)
+1. Far shadow cache ON by default (Settings.shadowFarCache). NEW: the near cascade every other frame
+   (Settings.shadowNearAlternate, `imaginemetal.shadowNearAlternate`; Shadows.skipNear: the frame after it was drawn the same
+   map serves, MATRIX[0] = its clip moved by the camera's move; far waits a frame when both are due). If Jack sees uneven
+   frame pacing or shadows a frame late on fast flight: that switch. NOT done: "leaves solid in the far cascade" (it would
+   darken far canopies: full shadow instead of dappled, and the far map is drawn ~1/s now anyway). Told Jack.
+2. The air pass ("haze and sky colour once per pixel"): air.metal im_air_fs, drawn from imssr.m im_under_capture (the hook
+   before the translucent pass, Reflections.captureUnder) in its own render pass on the HDR image, reading the depth copy:
+   imAirFog + the border fade (imSkyColor) per screen pixel. The opaque terrain's fragments skip both when
+   ImFrame.pbrPack.w = 1 (Reflections.promiseAir: ourFog, state exists, classic transparency, no debug view); imShade knows
+   "opaque" by mat bit 16 (0x10000). Translucent keeps its own in-fragment air (drawn after). The picture is already through
+   the tone curve there, so the curve is inverted per channel (TM_D = 1: x^a = c y/(1 - b y)), air applied, curve again; the
+   grade re-applied only to the air's share; light past white (emission) just dimmed by T. Differences vs before, on purpose
+   or accepted: mobs now get haze and the border fade; saturation of hazy distance may differ slightly. WATCH: distant colours,
+   dawn mist, the edge of the render distance, lava/glow seen through haze. `imaginemetal.airPass=false` / Debug > "Air pass".
+3. Baked generated normals: PbrAtlas.bake at atlas build reads each sprite's own png (same size as the sprite, else left
+   unbaked = animated or resized), stores per texel the imGnDif to its 4 neighbours (RGBA8, 0 = unbaked), uploaded once
+   (im_bevel_upload) and bound at texture 27 (the pack normal map's slot; a pack's maps replace it); ImFrame.grade.z = 1.
+   imGenNormal reads that one texel; unbaked texels take the old path. 32 MB for his 4096x2048 atlas.
+   `imaginemetal.bakedNormals=false`. Material params were NOT baked (imSurface is arithmetic on the tinted colour, no reads).
+4. Seabed dark from above: looked at 17.05.57 / 17.06.04: hard block-edged dark area = sky light 0 (15+ blocks of water) where
+   `sun *= smoothstep(0, 0.07, sky)` and the ambient cut everything. Fix in the mesher's light: OwnRegion.waterSky: a water
+   block under open water (light rising 1 per block straight up to >= 12) gets surface - depth/4 instead of surface - depth.
+   Needs chunks re-meshed (a restart does). `imaginemetal.waterSky=false`. Also changes the view from under water (brighter
+   deep down): ask Jack if deep water is now too bright.
+### Build B2 (76b21cf): deferred lighting in tile memory
+- terrain.metal: own_fs_g (the G-buffer: c1 RGBA8 colour + flags(slanted, axis, fade), c2 RGBA8 texture + material byte,
+  c3 RGBA16Unorm light 12 bit + torch lean 4 bit x2 and the octahedral normal, c4 R32F depth, 0 = nothing), im_defer_vs/fs
+  (one triangle; discards where c4 = 0; place from depth x Deferred's inverse clip; imShade with ImPre; then imFogTail).
+- lighting.metal: imMaterial() = everything that needs derivatives (face normal, generated normal, torch direction Lt, atlas
+  texel); imShade(..., ImPre pre): pre.on false = computes it itself (forward: translucent, fallback), true = handed in.
+  In deferred the per-texel numbers (coated, sculk) come from the world position in sixteenths, not the atlas texel.
+- mcmetal.m: Enc.imG. mc_im_g_enter (end the pass, reopen with 4 memoryless attachments, cleared), endRender calls
+  mc_im_g_flush first (the lighting draw), the three reopen paths clear memoryless attachments (so the uocc splits keep the
+  G pass), mc_im_g_exit (flush, end, back to 1 attachment, reopen), mc_r_pipeline exits as a safety net.
+- mcown.m: mco_draw enters at the first opaque kind (0,1,4,5,6) when imDeferOn and colour 0 is RGBA16Float (the HDR image);
+  ownPipeline: G pipelines via ownStage with ownGStage (own_fs_g), write masks swapped; imDeferPipeline per feature set;
+  any failure -> imDeferFailed, forward for good. mco_im_defer (per frame, from Deferred.frame at OwnTerrain's noteClip),
+  mco_im_defer_end (OwnTerrain.drawOpaque's end, then restorePass).
+- Off automatically: debug view, shaders off live, PBR pack in use, no HDR. PassTimes' terrain cuts don't happen in the G pass
+  (mc_render_split refuses memoryless), so the benchmark's "terrain" split is one number with deferred on.
+- KNOWN differences from forward: 8-bit colour into the lighting (banding possible in dark AO gradients); torch lean in 15 steps;
+  cutout texels' alpha no longer reaches the TAA (only the waving 0.98 mark); coated/sculk patterns differ per texel.
+- IF THE WORLD IS BLACK / GARBLED / UNLIT with B2: first Debug > "Deferred lighting" off. Likely suspects: the place from depth
+  (sign of the jitter or y in im_defer_fs: shadows/reflections offset or swimming), a pass that draws between the terrain's
+  opaque draws and Deferred.end (pixels left unlit: marker c4 lost), the flags/material bytes (wrong materials).
+### MetalFX (branch `metalfx`, NOT merged, NOT deployed; Jack must test B2 first)
+imbloom.m: Settings.metalfx (default on in that branch): motion pass (bloom.metal im_bloom_motion, camera motion only, from
+depth + clipInv + prevClip, jitter removed) -> MTLFXTemporalScaler (taaCur + depth + motion -> fxOut RGBA16F screen size,
+depthReversed, jitterOffset = sign x jitter uv x input size, motionVectorScale = sign) -> im_bloom_fxcopy onto the screen.
+Falls back to our TAA if the scaler can't be made. OPEN: the jitter and motion sign conventions are NOT verified (4 debug
+toggles in Advanced > Debug to find them in game); the input is display-encoded LDR, not linear HDR; mobs have no motion
+vectors; jitter is still terrain-only (mobs unjittered). build.gradle links MetalFX. To deploy later: merge into main.
+### Jack's A2 feedback this answers / still open
+- performance ("think bro think"): B1 + B2 above. - "still blurry", "mobs pixelated and blurry": NOT touched (B3 / MetalFX).
+- seabed from above: B1 item 4.
+
+## Build B plan and A2 test (2026-11-11 17:30; superseded above where they differ)
 A2 (606707a + CI fix) ran 16:54-17:07. Jack: "perfomance still ass, think bro think. how do we optimize??? what are we doing
 wrong?? ... its for apple silicon only so we can use that to advantage". He is frustrated: wants a real plan, then results.
 ### His A2 feedback (screenshots 16.58.46 .. 17.06.45)
