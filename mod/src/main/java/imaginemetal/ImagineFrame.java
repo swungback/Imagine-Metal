@@ -417,6 +417,12 @@ public final class ImagineFrame {
 		float eyeNow = 1f;
 		if (level != null) {
 			var eye = net.minecraft.core.BlockPos.containing(mc.gameRenderer.mainCamera().position());
+			// (eyes in water: the sky light falls a level with every block of water, so nine blocks down in the open sea counted
+			// as going underground and the whole picture switched to the cave's dark look within a few blocks, "goes very dark at
+			// a specific point". The sky light over the water above the eyes instead: the open sea is daylight at any depth, a
+			// flooded cave under rock still a cave)
+			if (camera.fogType == net.minecraft.world.level.material.FogType.WATER)
+				for (int i = 0; i < 64 && !level.getFluidState(eye).isEmpty(); i++) eye = eye.above();
 			eyeNow = level.getBrightness(net.minecraft.world.level.LightLayer.SKY, eye) / 15f;
 		}
 		eyeSky += (eyeNow - eyeSky) * (1f - (float) Math.exp(-dt / 1.2f));

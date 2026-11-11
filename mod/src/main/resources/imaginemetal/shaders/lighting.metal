@@ -185,6 +185,28 @@ static inline float3 imPresent(float3 c, constant ImFrame &f) {
 	return max(imGrade(imTonemap(c * f.minLight.w, f.tonemap), f), 0.0);
 }
 
+// Minecraft's linear fog (fog.glsl linear_fog_value)
+static inline float imLinFog(float d, float s, float e) {
+	return d <= s ? 0.0 : d >= e ? 1.0 : (d - s) / (e - s);
+}
+
+// The fog with the eyes under water (Reimagined's): the colour (display-encoded) and, in w, how much of it at this distance.
+// mcFog: Minecraft's own water fog colour, only its brightness used. For the terrain and for mobs alike, so a mob fades into
+// the water exactly as the sea floor beside it does.
+static inline float4 imWaterFog(float3 mcFog, float dist, constant ImFrame &f) {
+	// (thicker the deeper the eyes are under the sea's level: "a little more foggy further down")
+	float deep = saturate((60.0 - f.fogParams.y) / 40.0);
+	float d = dist / (46.0 - 16.0 * deep);
+	// (bluer and a little brighter than the plain colour: Reimagined's water reads blue, ours came out teal-grey)
+	float3 wfc = pow(max(mcFog, 1e-3), float3(0.33, 0.21, 0.26)) * 0.24 * float3(0.8, 1.0, 1.3);
+	// (the hue held at Reimagined's blue-green, only its brightness from Minecraft's colour: at dusk Minecraft mixes the sky's
+	// purple into it and under the sea turned a dull grey-violet)
+	float wl = dot(wfc, float3(0.2126, 0.7152, 0.0722));
+	// (a vibrant tropical turquoise, brighter, not a cold deep blue: "not like a cold ocean"; a little darker the deeper)
+	wfc = mix(wfc, float3(0.12, 0.75, 0.7) * (wl / 0.5348) * 1.3 * (1.0 - 0.45 * deep), 0.8);
+	return float4(pow(imPresent(wfc, f), 1.0 / 2.2), 1.0 - exp(-d * d));
+}
+
 // The face normal from the position's screen derivatives (a 2x2 quad always shades one triangle), turned toward the camera and
 // snapped to its axis on the axis-aligned faces that make up nearly all of Minecraft.
 static inline float3 imFaceNormal(float3 p, thread bool &slanted) {
@@ -1401,11 +1423,17 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 // sky) 0..1. Sun with the shadow maps, the sky's light from above, block light in the grid's colour, the floor, the held light,
 // combined as the terrain combines them, through the same tone curve. Returns display-encoded.
 static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, constant ImFrame &f, depth2d_array<float> smap, sampler cmp,
-	texture3d<float> lvol, sampler lsamp, float kind) {
+	texture3d<float> lvol, sampler lsamp, float kind, float4 vfog) {
 	// (kind: 0 a mob, 1 an item, 2 armour, 3 the first-person hand and what it holds)
+	// (vfog: Minecraft's own fog as it was mixed into col: its colour, and in w how much)
 	bool hand = kind > 2.5;
 	bool item = (kind > 0.5 && kind < 1.5) || hand;
 	if (f.flags.z == 0 || f.flags.y != 0) return col;
+	// (eyes under water: Minecraft's water fog is a dark navy that starts 8 blocks behind the eye and, for the first seconds
+	// under, ends 24 blocks out, so a turtle three blocks away was already a third navy before any light fell on it: "it
+	// becomes blue". Taken back out; ours, the terrain's, goes over it at the end)
+	bool uw = f.water.z > 0.5 && f.flags.x == 0 && !hand;
+	if (uw && vfog.w > 0.0) col = saturate((col - vfog.rgb * min(vfog.w, 0.96)) / (1.0 - min(vfog.w, 0.96)));
 	if (f.flags.x == 2) light.y = 1.0;
 	float3 base = pow(max(col, 0.0), 2.2);
 	float nlen = length(nrm);
@@ -1520,14 +1548,6 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 		float tsp = pow(saturate(dot(n, V)), 3.0) * 0.5;
 		radiance += tintM * (f.lightColor.rgb * sp + env * (0.15 + 0.7 * fres) + torch * tsp) * (shine * f.minLight.w);
 	}
-	if (f.water.z > 0.5 && f.flags.x == 0 && !hand) {
-		// (eyes under water: the terrain fades into our blue-green water fog, mobs only into Minecraft's dark navy one, so they
-		// stood out as dark blue cut-outs; ours laid over them as over the terrain)
-		float wd = length(p) / 48.0;
-		float wf = 1.0 - exp(-wd * wd);
-		float3 wfc = float3(0.1, 0.72, 0.68) * (0.06 + 0.16 * f.nightMiddle.w);
-		radiance = mix(radiance, wfc, wf * 0.8);
-	}
 	// (the hand: no vibrance, its light's colour half kept: a netherite sword's warm grey went maroon by a torch and purple by the sky)
 	float3 c = hand ? imTonemap(radiance, f.tonemap) : imGrade(imTonemap(radiance, f.tonemap), f);
 	// items in the world that give off light (a lava bucket's lava, a torch's flame, glowstone dust, blaze rods): their hot,
@@ -1541,7 +1561,13 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 		float e = max(warm, soul) * smoothstep(0.75, 0.92, hi) * smoothstep(0.45, 0.75, (hi - lo) / max(hi, 1e-3));
 		c += base * (1.6 * e);
 	}
-	return pow(max(c, 0.0), 1.0 / 2.2);
+	c = pow(max(c, 0.0), 1.0 / 2.2);
+	if (uw) {
+		// (the water's fog as the terrain has it; and where Minecraft's own had left nothing of the mob to take back, wholly)
+		float4 wf = imWaterFog(vfog.rgb, length(p), f);
+		c = mix(c, wf.rgb, max(wf.w, smoothstep(0.85, 1.0, vfog.w)));
+	}
+	return c;
 }
 
 // The nether portal as Reimagined's special portal: only its bright swirls glow (crisp, past white so they bloom), the rest a deep

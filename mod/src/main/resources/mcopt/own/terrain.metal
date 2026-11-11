@@ -2518,20 +2518,10 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 		}
 	} else if (imf.water.z > 0.5 && imf.flags.x == 0 && imf.water.x > 0.5) {
 		// under water (Reimagined's): the biome's water fog colour, pushed toward its blue-green, thickening with the square of
-		// the distance (clear close by, a deep blue wall at about 60 blocks)
-		// (thicker the deeper the eyes are under the sea's level: "a little more foggy further down")
-		float deep = saturate((60.0 - imf.fogParams.y) / 40.0);
-		float dist = length(in.imPos) / (46.0 - 16.0 * deep);
-		imFog = 1.0 - exp(-dist * dist);
-		// (bluer and a little brighter than the plain colour: Reimagined's water reads blue, ours came out teal-grey)
-		float3 wfc = pow(max(fog.FogColor.rgb, 1e-3), float3(0.33, 0.21, 0.26)) * 0.24 * float3(0.8, 1.0, 1.3);
-		// (the hue held at Reimagined's blue-green, only its brightness from Minecraft's colour: at dusk Minecraft mixes the sky's
-		// purple into it and under the sea turned a dull grey-violet)
-		float wl = dot(wfc, float3(0.2126, 0.7152, 0.0722));
-		// (a vibrant tropical turquoise, brighter, not a cold deep blue: "not like a cold ocean")
-		// (the turquoise the water has from above, a little darker the deeper)
-		wfc = mix(wfc, float3(0.12, 0.75, 0.7) * (wl / 0.5348) * 1.3 * (1.0 - 0.45 * deep), 0.8);
-		imFogColor = pow(imPresent(wfc, imf), 1.0 / 2.2);
+		// the distance (clear close by, a deep blue wall at about 60 blocks): lighting.metal imWaterFog, the mobs' too
+		float4 wf = imWaterFog(fog.FogColor.rgb, length(in.imPos), imf);
+		imFog = wf.w;
+		imFogColor = wf.rgb;
 	}
 	imFog = 1.0 - (1.0 - imFog) * (1.0 - imFade);
 	// (waving plants marked for the TAA (alpha 0.98, invisible): it can't follow their sway, and its history left ghost copies

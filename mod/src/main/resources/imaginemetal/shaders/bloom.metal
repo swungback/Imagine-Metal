@@ -830,13 +830,9 @@ fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur 
 		}
 	c /= max(wsum, 1e-4);
 	float3 loC = mn, hiC = mx;  // (the plain box: the sharpen's limits)
-	// (variance clipping, tighter than the min/max box: less ghosting)
 	m1 /= 9.0;
 	m2 /= 9.0;
 	float3 sd = sqrt(max(m2 - m1 * m1, 0.0));
-	// (1.0: a mob walking over grass a little way off left a trail at 1.25)
-	mn = max(mn, m1 - 1.0 * sd);
-	mx = min(mx, m1 + 1.0 * sd);
 	// (how near this frame's nearest sample is to this screen pixel: 1 on it, about 0.3 half a pixel off diagonally)
 	float nearW = wx[1] * wy[1];
 	float4 w = p.clipInv * float4(in.uv * 2.0 - 1.0, dmin <= 0.00001 ? 0.0001 : dmin, 1.0);
@@ -848,29 +844,44 @@ fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur 
 		if (all(puv > 0.0) && all(puv < 1.0)) {
 			// (the history holds the picture without the jitter, at the screen's size)
 			float3 hc = imbCatmull(hist, s, puv);
-			float3 h = clamp(hc, mn, mx);
-			// (less history where the picture moved a lot on screen: sharper in motion)
 			float moved = length((puv - in.uv) * osz);
-			float k = mix(0.86, 0.6, saturate(moved / 8.0));
+			float still = 1.0 - saturate(moved / 1.5);
+			float scaled = saturate((1.0 - p.taa.w) * 3.0);
+			// the history kept within this frame's neighbourhood: its mean give or take its spread (variance clipping), inside the
+			// plain min/max box. Wider while the picture holds still, and wider yet with a render scale: there the history is the
+			// only place the detail between this frame's pixels lives, and a box of one spread (as it was) cut that detail back
+			// out every frame, to a different place each time as the sub-pixel offset moved: blurry and shimmering at once
+			// (the method is GaelQuinta's TAAU's: 1.25 spreads, more while still; here up to 2 at 67 %)
+			float gam = 1.25 + still * (0.25 + 0.5 * scaled);
+			float3 lo3 = max(mn, m1 - gam * sd), hi3 = min(mx, m1 + gam * sd);
+			float3 ctr = 0.5 * (lo3 + hi3), ext = 0.5 * (hi3 - lo3) + 1.0 / 400.0;
+			// (pulled toward the box's middle along its own line, not channel by channel: the hue kept)
+			float3 dv = hc - ctr;
+			float3 au = abs(dv) / ext;
+			float outside = max(au.x, max(au.y, au.z));  // (how far out, in box sizes: 1 = on its edge)
+			float3 h = outside > 1.0 ? ctr + dv / outside : hc;
+			// (less history where the picture moved a lot on screen: sharper in motion)
+			float k = mix(0.88, 0.6, saturate(moved / 8.0));
 			// (with a render scale a still picture keeps more of it: each screen pixel only gets a near sample every few frames)
-			k = mix(k, max(k, 0.93), saturate((1.0 - p.taa.w) * 3.0) * (1.0 - saturate(moved / 2.0)));
-			// (and less where the history had to be pulled in a lot: something moved there that the camera's motion doesn't explain)
-			float off = saturate(length(hc - h) / max(imbLuma(m1) * 0.5, 0.02));
-			k *= 1.0 - 0.6 * off;
-			// (beside a waving plant much less history: the sway left ghost copies of grass on the sand)
-			if (wav < 0.99) k *= 0.35;
+			k = mix(k, max(k, 0.94), scaled * (1.0 - saturate(moved / 2.0)));
+			// (beside a waving plant less history, near the camera, where its sway is many pixels: the sway left ghost copies of
+			// grass on the sand. Not far off, and less so with a render scale: with little history the picture there is this
+			// frame's alone, shifted by a new sub-pixel offset every frame: "leaves look jittery all around")
+			if (wav < 0.99) k *= mix(mix(0.35, 0.7, scaled), 1.0, smoothstep(10.0, 32.0, length(P)));
 			// (this frame counts by how near its sample fell: far from it, it's a guess between samples and the history knows
-			// better; where the history was rejected it has to do either way)
+			// better)
 			// (at full size less so: every pixel has a sample within its own area each frame)
 			float lo = mix(0.3, 0.6, saturate((p.taa.w - 0.67) * 3.0));
-			float a = (1.0 - k) * mix(mix(lo, 1.0, nearW), 1.0, off);
+			float a = (1.0 - k) * mix(lo, 1.0, nearW);
+			// (and where the history lay well outside the box, something changed there that the camera's motion doesn't explain:
+			// this frame takes over, from one box size out. Before, any pull at all cut the history's share)
+			a = max(a, 0.5 * saturate((outside - 1.0) / 2.5));
 			res = mix(h, c, a);
 			// (a light sharpen against what's left of the softness, on the screen only: fed back into the history it sharpened
 			// the already sharpened picture every frame, the finest grain growing until the colour box stopped it, a crawling
 			// static over walls and floors)
-			// (0.3: the softness TAA leaves read as a blurry picture at 0.15; kept inside the neighbourhood's own colours, so with
-			// a render scale, where the neighbourhood is wider on screen, edges get no halos)
-			shown = clamp(res + (res - m1) * 0.3, min(loC, res), max(hiC, res));
+			// (0.3 at full size, 0.5 at 67 %; kept inside the neighbourhood's own colours, so edges get no halos)
+			shown = clamp(res + (res - m1) * mix(0.3, 0.5, scaled), min(loC, res), max(hiC, res));
 		}
 	}
 	o.screen = float4(shown + imbDither8(in.pos.xy), 1.0);

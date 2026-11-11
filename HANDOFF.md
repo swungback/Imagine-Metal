@@ -1,4 +1,4 @@
-# Imagine Metal: handoff (2026-11-11, ~16:30)
+# Imagine Metal: handoff (2026-11-11, ~17:10)
 
 Where things stand, for picking the work up in a new conversation.
 
@@ -11,10 +11,36 @@ Where things stand, for picking the work up in a new conversation.
   are chat lines in the log (`[CHAT] <herningstang> ...`) just before each screenshot.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
 
-## START HERE: 2026-11-11 16:30, Build A written (render scale + pop-in), NOT yet tested in game
-New chat today (started from the project doc). Build A = 7ce03ed, CI green, jar deployed to the instance 15:55 (game was
-closed). Nothing below has been seen running yet: Jack's eyes test it.
-### What Build A changed
+## START HERE: 2026-11-11 17:10, Build A2 (fixes after Jack's first test of Build A), NOT yet tested in game
+Jack tested Build A (7ce03ed) 16:02-16:30. It ran (HDR 1158x724 at 67 % of 1728x1080). His notes and what A2 does about them:
+- "shit looks blurry", "blurry without taa [sub-pixel offset off] and shimmering with it", "leaves look jittery all around",
+  "look how pixelated", "blur fest here fr". Measured on his 16.13.53 / 16.14.05 pair: offset ON was SOFTER than off (mean
+  gradient 5.8 vs 6.6), so the TAAU wasn't adding detail. Signs re-checked by reading (own_vs flips y before the offset; uv runs
+  with the unflipped clip): they are right. Cause, as I read it: the history was clamped to mean +- 1.0 sd of the frame's 3x3
+  every frame (cuts the between-pixel detail back out, at a different place each frame as the offset moves), any clamping cut
+  the history's share by up to 60 %, and waving plants (all leaves) kept only 35 % history: mostly this frame's jittered
+  picture. A2 (bloom.metal im_bloom_taa): clip toward the box's middle along the line (hue kept), box = min/max AND mean +-
+  gam sd with gam 1.25 moving, up to 1.5 still at 100 % and 2.0 still at 67 %; history share only cut from one box size
+  outside (a >= 0.5 sat((outside-1)/2.5)); waving plants x0.35 (x0.7 scaled) only within ~10 blocks, none past 32; sharpen
+  0.3 -> 0.5 at 67 %. WATCH: trails behind moving mobs (a note from before: "trail at 1.25"). If still blurry/shimmery: next is
+  the jitter in the projection for everything (Gael's ShadeTaaCameraMixin way) and age-based accumulation + a depth test
+  (GaelQuinta docs/dev/TAAU.md, on Jack's Mac in ~/minecraft-metal-shaders), or MetalFX temporal.
+- "underwater coloring is still off": turtle olive from above the water (16.17.17), deep navy from under it 3 blocks away
+  (16.17.22); fish navy silhouettes (16.20.59). Cause: Minecraft's own water fog is baked into the mob's colour before our
+  light (entity.fsh apply_fog; water fog starts at -8 and ends at 96 x waterVision, 24 right after going under; navy). A2:
+  EntityShade passes Minecraft's fog colour and amount (regex on main0's "constant Fog& x", in.sphericalVertexDistance /
+  in.cylindricalVertexDistance; "float4(0)" if the shader isn't that shape), imShadeEntity takes it back out under water and
+  lays the terrain's water fog over the mob (new lighting.metal imWaterFog, used by terrain.metal too: one formula).
+- "underwter still goes very dark at a specific point not smooth at all": ImagineFrame.cave came from the sky light AT THE
+  EYES, which falls 1 per block of water: 9-14 blocks down in open sea = "cave" = the cave grade. A2: with the eyes in water
+  the sky light is read above the water column over the eyes (up to 64 blocks). Flooded caves under rock still count as caves.
+- "water refleciton" (16.22.13, river): no words on what is wrong. Pale blocky patches in the reflection. ASK him.
+- Pop-in: no comment from him yet on the 30..96 band.
+### Benchmark, Build A, jungle spot (RD16, world 1158x724 -> 1728x1080): 47 fps / 21.3 ms (was 38 fps / 26 ms at 1440x900 100 %)
+shaders off 129 fps (+13.6 ms); render distance 8: +4.5 ms (60 fps) (I had estimated 2-3: Jack was right to doubt, it's more);
+shadows off +4.5; generated normals +3.9; sky and air +3.0; PBR +2.7; far shadow cache ON +1.6; coloured light +1.3; shadow
+range 96 +1.1; TAA off +1.0; render scale 100 % -8.5 (33 fps at 1728x1080); leaf pre-pass off -4.2. Estimate had been ~50.
+### Build A as written (for reference)
 1. Pop-in: imShade's foliage softening band 26..40 -> 30..96 blocks (same 0.45 strength, still IM_MAT_FOLIAGE incl. grass
    blocks and dirt). If far canopy blotches come back or shadows still pop: next is leaves only / lower strength.
 2. World-only render scale, live (Settings > Advanced > Speed > "Render scale", imaginemetal.renderScale, default 0.67; Jack's

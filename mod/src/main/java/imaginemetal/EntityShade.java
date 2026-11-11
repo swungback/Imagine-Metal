@@ -124,6 +124,7 @@ public final class EntityShade {
 	private static final String[] SKIP = {"oit_", "terrain", "text", "wireframe", "weather", "leash", "beam", "breeze", "lines", "gui", "eyes"};
 
 	private static final Pattern PROJ = Pattern.compile("constant\\s+Projection&\\s+(\\w+)");
+	private static final Pattern FOG = Pattern.compile("constant\\s+Fog&\\s+(\\w+)");
 	private static final Pattern VS_MAIN = Pattern.compile("vertex\\s+main0_out\\s+main0\\s*\\(\\s*main0_in\\s+in\\s*\\[\\[stage_in\\]\\]");
 	private static final Pattern FS_MAIN = Pattern.compile("fragment\\s+main0_out\\s+main0\\s*\\(\\s*main0_in\\s+in\\s*\\[\\[stage_in\\]\\]");
 
@@ -174,11 +175,22 @@ public final class EntityShade {
 			+ ", texture3d<float> imLightVol [[texture(21)]], sampler imLightSampler [[sampler(12)]]" + fs.substring(m.end());
 		f = addMembers(f, "main0_in", "    float3 imPos [[user(locn20)]];\n    float3 imNrm [[user(locn21)]];\n    float2 imLm [[user(locn22)]];\n    float imHand [[user(locn23)]];");
 		if (f == null) return null;
+		// (Minecraft's own fog on it, to take back out under water: its colour and how much of it this pixel got, as fog.glsl's
+		// apply_fog mixes it. Only where the shader is the shape expected; otherwise none is reported and nothing is taken out)
+		String vfog = "float4(0.0)";
+		Matcher m2 = FS_MAIN.matcher(f);  // (main0's own parameters, where it is now)
+		int sigEnd = m2.find() ? f.indexOf('{', m2.end()) : -1;
+		Matcher fm = sigEnd < 0 ? null : FOG.matcher(f.substring(m2.end(), sigEnd));
+		if (fm != null && fm.find() && f.contains("in.sphericalVertexDistance") && f.contains("in.cylindricalVertexDistance")) {
+			String fg = fm.group(1);
+			vfog = "float4(" + fg + ".FogColor.xyz, " + fg + ".FogColor.w * max(imLinFog(in.sphericalVertexDistance, " + fg + ".FogEnvironmentalStart, "
+				+ fg + ".FogEnvironmentalEnd), imLinFog(in.cylindricalVertexDistance, " + fg + ".FogRenderDistanceStart, " + fg + ".FogRenderDistanceEnd)))";
+		}
 		// (the hand: lit at the eye, as a thing held there; its torch's flame glowing as a dropped one's does)
 		f = beforeLastReturn(f, "    if (imOn.x > 0.5 && imOn.x < 1.5) out.fragColor.xyz = imShadeEntity(out.fragColor.xyz, in.imPos, in.imNrm, in.imLm, imf,"
-			+ " imShadowMap, imShadowCmp, imLightVol, imLightSampler, " + kind + ");\n"
+			+ " imShadowMap, imShadowCmp, imLightVol, imLightSampler, " + kind + ", " + vfog + ");\n"
 			+ "    else if (imOn.x > 1.5 && in.imHand > 0.5) out.fragColor.xyz = imShadeEntity(out.fragColor.xyz, float3(0.0, -0.4, 0.001),"
-			+ " float3(0.0), in.imLm, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, 3.0);");
+			+ " float3(0.0), in.imLm, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, 3.0, float4(0.0));");
 		if (f == null) return null;
 		if (lighting == null) lighting = Engine.resource("/imaginemetal/shaders/lighting.metal");
 		return lighting + "\n// ---- Minecraft's shader (SPIRV-Cross), patched ----\n" + f;
