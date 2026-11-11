@@ -53,6 +53,35 @@ final class ImNative {
 
 	private static final MethodHandle PBR_UPLOAD = fn("im_pbr_upload", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_LONG, JAVA_LONG), false);
 
+	// (Build B2) deferred lighting in tile memory (mcown.m)
+	private static final MethodHandle DEFER = fn("mco_im_defer", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_INT, JAVA_LONG), false);
+	private static final MethodHandle DEFER_END = fn("mco_im_defer_end", FunctionDescriptor.of(JAVA_INT, JAVA_LONG), false);
+	private static final MethodHandle DEFER_STATS = fn("mco_im_defer_stats", FunctionDescriptor.ofVoid(JAVA_LONG), false);
+
+	static int defer(long own, int on, long clipInv) {
+		try {
+			return (int) DEFER.invokeExact(own, on, clipInv);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
+	static int deferEnd(long enc) {
+		try {
+			return (int) DEFER_END.invokeExact(enc);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
+	static void deferStats(long out) {
+		try {
+			DEFER_STATS.invokeExact(out);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
 	private static final MethodHandle BEVEL_UPLOAD = fn("im_bevel_upload", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_LONG), false);
 
 	static int bevelUpload(long ctx, int w, int h, long px) {

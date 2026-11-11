@@ -195,6 +195,10 @@ public final class SettingsScreen extends OptionsSubScreen {
 					"Not saved. The far shadow map is kept until the sun, the camera or the terrain changes, instead of drawn every other frame. On by default."),
 					toggle("Near shadow view cull", Settings.shadowNearViewCull, v -> Settings.shadowNearViewCull = v,
 						"Experimental, not saved. The near shadow map leaves out what can't shadow anything on screen."));
+				this.list.addSmall(toggle("Deferred lighting", Settings.deferred, v -> Settings.deferred = v,
+					"Not saved. The opaque terrain lit once per screen pixel in the GPU's tile memory (Build B2) instead of every fragment lighting itself. Off to compare speed and picture: both should look the same."),
+					toggle("Air pass", Settings.airPass, v -> Settings.airPass = v,
+						"Not saved. The haze and the fade into the sky drawn once per pixel after the opaque world, instead of in every terrain fragment."));
 				this.list.addBig(toggle("TAA sub-pixel offset", Settings.taaJitter, v -> Settings.taaJitter = v,
 					"Not saved. The terrain drawn a fraction of a pixel off in a new direction each frame, which the TAA averages into smooth edges and, with a render scale, into the full-size picture. Off to check whether a shimmer or wobble comes from it."));
 				String[] views = {"Off", "Light levels", "Normals", "Bloom glow only", "Coloured light grid", "Shadow maps"};

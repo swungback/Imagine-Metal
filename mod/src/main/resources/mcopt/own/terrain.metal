@@ -2322,6 +2322,72 @@ static float linear_fog_value(float vertexDistance, float fogStart, float fogEnd
 constant bool CUTOUT [[function_constant(0)]];
 constant float CUTOUT_LIMIT [[function_constant(5)]];  // vanilla's ALPHA_CUTOUT: 0.5 cutout, 0.1 translucent
 
+#ifdef IM_SHADE
+// (Imagine Metal) The fog over a lit fragment and the fade-in of new chunks: ownFsBody's last step, and the deferred lighting's
+// (im_defer_fs). color display-encoded; fogValue Minecraft's own fog amount; translucentPass: the translucent layer's fragments.
+static float4 imFogTail(float4 color, float3 imPos, uint imMat, float fogValue, float4 fogColor, float imFade, bool translucentPass, constant ImFrame &imf) {
+	float3 imFogColor = fogColor.rgb;
+	float imFog = fogValue * fogColor.a;
+	if (imf.sunDir.w > 0.5) {
+		// our sky's: the air itself (Photon's air fog) is in the lighting (imShade); here only Reimagined's border fog, a fade at the
+		// edge of the render distance into the sky exactly as it is behind
+		float dist = length(imPos);
+		float3 dir = imPos / max(dist, 1e-3);
+		float bf = dist / max(imf.fogParams.x, 16.0);
+		bf *= bf;
+		bf *= bf;
+		bf *= bf;
+		bf *= bf;
+		imFog = 1.0 - exp(-3.0 * bf);
+		// (with the air pass on, the opaque world's border fade is laid on there, once per pixel: air.metal)
+		if (imf.pbrPack.w > 0.5 && !translucentPass) imFog = 0.0;
+		if (max(imFog, imFade) > 0.001) imFogColor = pow(imPresent(imSkyColor(dir, imf, false), imf), 1.0 / 2.2);
+	} else if (imf.flags.x == 1 && imf.nether.w > 0.0) {
+		// the Nether (Reimagined's border fog there, mainFog.glsl): the biome's glowing haze, thickening evenly out to 256 blocks
+		// or the render distance (Minecraft's own dark red wall of fog close by is replaced)
+		float dist = length(imPos);
+		imFog = saturate(dist / imf.nether.w);
+		imFogColor = pow(imf.nether.rgb, 1.0 / 2.2);
+		// (lava glows through the haze: a lava sea far off keeps its orange and its currents instead of fading into a flat sheet
+		// of the haze's colour (pink in the crimson forest); the haze over it only half as thick, and lit by it)
+		if (!translucentPass && (imMat & 15u) == 2u) {
+			imFog *= 0.5;
+			imFogColor = mix(imFogColor, color.rgb, 0.35);
+		}
+	} else if (imf.flags.x == 2 && imf.nether.w < 0.0) {
+		// the End (Reimagined's border fog there): the far islands fade into its violet sky toward the edge of the render
+		// distance (in place of Minecraft's black)
+		float dist = length(imPos);
+		float bf = dist / -imf.nether.w;
+		bf *= bf;
+		bf *= bf;
+		imFog = 1.0 - exp(-3.0 * bf);
+		imFogColor = pow(imPresent(float3(0.095, 0.07, 0.15) * 1.65, imf), 1.0 / 2.2);
+		if (imf.nether.x > 0.5) {
+			// (the black hole's End, after IterationT's: a thin warm haze lit by the black hole, glowing toward it, so the far
+			// islands fade into a bright mist on its side and into the dark on the other)
+			float nu = dot(imPos / max(dist, 1e-3), normalize(imf.lightDir.xyz));
+			float hg = 0.0795775 * (1.0 - 0.49) / pow(1.0 + 0.49 - 1.4 * nu, 1.5);
+			imFog = max(1.0 - exp(-min(dist, 512.0) * 0.0028), imFog);
+			imFogColor = pow(imPresent(float3(0.54, 0.49, 0.48) * (0.01 + 0.9 * hg), imf), 1.0 / 2.2);  // (IterationT's EndFog: the 6000 K light's white)
+		}
+	} else if (imf.water.z > 0.5 && imf.flags.x == 0 && imf.water.x > 0.5) {
+		// under water (Reimagined's): the biome's water fog colour, pushed toward its blue-green, thickening with the square of
+		// the distance (clear close by, a deep blue wall at about 60 blocks): lighting.metal imWaterFog, the mobs' too
+		float4 wf = imWaterFog(fogColor.rgb, length(imPos), imf);
+		imFog = wf.w;
+		imFogColor = wf.rgb;
+	}
+	imFog = 1.0 - (1.0 - imFog) * (1.0 - imFade);
+	// (waving plants marked for the TAA (alpha 0.98, invisible): it can't follow their sway, and its history left ghost copies
+	// of grass and dead bushes on the sand; there it keeps less of it)
+	float outA = color.a;
+	uint wcF = (imMat >> 4) & 15u, clsF = imMat & 15u;
+	if (!translucentPass && wcF != 0u && clsF != 4u && clsF != 6u) outA = min(outA, 0.98);
+	return float4(mix(color.rgb, imFogColor, imFog), outA);
+}
+#endif
+
 // own_fs's work (own_fs and, with Imagine Metal, own_fs_tr call it). imTint (Imagine Metal): how the translucent pass tints what's
 // behind this fragment (water blue, stained glass its colour; 1: not at all).
 static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, constant Fog &fog, texture2d<float> atlas, sampler atlasSampler
@@ -2464,7 +2530,7 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 		imLightQ = saturate(float2(mix(mix(qb.x, qb.y, st.y), mix(qb.w, qb.z, st.y), st.x), mix(mix(qs.x, qs.y, st.y), mix(qs.w, qs.z, st.y), st.x)) / 240.0);
 	}
 	color.rgb = imShade(color.rgb, texel.rgb, in.imPos, imLightQ, in.imMat | (imKind << 8) | (CUTOUT && CUTOUT_LIMIT < 0.2 ? 0u : 0x10000u), in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imLightFilt, imLightOpen, imSeeds, imPbrN, imPbrS,
-		in.texCoord0, in.imRect, atlas, imHistColor, imHistDepth, imHistSampler, imUnderDepth); // (Imagine Metal)
+		in.texCoord0, in.imRect, atlas, imHistColor, imHistDepth, imHistSampler, imUnderDepth, imNoPre()); // (Imagine Metal)
 	if (IM_FC_PORTALS && imPortal && imf.extra.x > 0.5 && imf.portalRect.z > imf.portalRect.x) color = imPortalLook(in.texCoord0, in.imPos, texel, atlas, imf);
 	// (the translucent pass has no material bytes, so a flame drawn in it (a resource pack's 3D torch, the copper torch: sprites with
 	// soft edges land in that layer) didn't glow: its opaque, hot, saturated texels glow as a flame's do; glass is see-through)
@@ -2473,65 +2539,7 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 		float fe = 4.0 * smoothstep(0.62, 0.92, fhi) * smoothstep(0.15, 0.4, fhi - flo);
 		if (fe > 0.0) color.rgb = pow(pow(max(color.rgb, 0.0), 2.2) + pow(texel.rgb, 2.2) * fe, 1.0 / 2.2);
 	}
-	float3 imFogColor = fog.FogColor.rgb;
-	float imFog = fogValue * fog.FogColor.a;
-	if (imf.sunDir.w > 0.5) {
-		// our sky's: the air itself (Photon's air fog) is in the lighting (imShade); here only Reimagined's border fog, a fade at the
-		// edge of the render distance into the sky exactly as it is behind
-		float dist = length(in.imPos);
-		float3 dir = in.imPos / max(dist, 1e-3);
-		float bf = dist / max(imf.fogParams.x, 16.0);
-		bf *= bf;
-		bf *= bf;
-		bf *= bf;
-		bf *= bf;
-		imFog = 1.0 - exp(-3.0 * bf);
-		// (with the air pass on, the opaque world's border fade is laid on there, once per pixel: air.metal)
-		if (imf.pbrPack.w > 0.5 && !(CUTOUT && CUTOUT_LIMIT < 0.2)) imFog = 0.0;
-		if (max(imFog, imFade) > 0.001) imFogColor = pow(imPresent(imSkyColor(dir, imf, false), imf), 1.0 / 2.2);
-	} else if (imf.flags.x == 1 && imf.nether.w > 0.0) {
-		// the Nether (Reimagined's border fog there, mainFog.glsl): the biome's glowing haze, thickening evenly out to 256 blocks
-		// or the render distance (Minecraft's own dark red wall of fog close by is replaced)
-		float dist = length(in.imPos);
-		imFog = saturate(dist / imf.nether.w);
-		imFogColor = pow(imf.nether.rgb, 1.0 / 2.2);
-		// (lava glows through the haze: a lava sea far off keeps its orange and its currents instead of fading into a flat sheet
-		// of the haze's colour (pink in the crimson forest); the haze over it only half as thick, and lit by it)
-		if (!(CUTOUT && CUTOUT_LIMIT < 0.2) && (in.imMat & 15u) == 2u) {
-			imFog *= 0.5;
-			imFogColor = mix(imFogColor, color.rgb, 0.35);
-		}
-	} else if (imf.flags.x == 2 && imf.nether.w < 0.0) {
-		// the End (Reimagined's border fog there): the far islands fade into its violet sky toward the edge of the render
-		// distance (in place of Minecraft's black)
-		float dist = length(in.imPos);
-		float bf = dist / -imf.nether.w;
-		bf *= bf;
-		bf *= bf;
-		imFog = 1.0 - exp(-3.0 * bf);
-		imFogColor = pow(imPresent(float3(0.095, 0.07, 0.15) * 1.65, imf), 1.0 / 2.2);
-		if (imf.nether.x > 0.5) {
-			// (the black hole's End, after IterationT's: a thin warm haze lit by the black hole, glowing toward it, so the far
-			// islands fade into a bright mist on its side and into the dark on the other)
-			float nu = dot(in.imPos / max(dist, 1e-3), normalize(imf.lightDir.xyz));
-			float hg = 0.0795775 * (1.0 - 0.49) / pow(1.0 + 0.49 - 1.4 * nu, 1.5);
-			imFog = max(1.0 - exp(-min(dist, 512.0) * 0.0028), imFog);
-			imFogColor = pow(imPresent(float3(0.54, 0.49, 0.48) * (0.01 + 0.9 * hg), imf), 1.0 / 2.2);  // (IterationT's EndFog: the 6000 K light's white)
-		}
-	} else if (imf.water.z > 0.5 && imf.flags.x == 0 && imf.water.x > 0.5) {
-		// under water (Reimagined's): the biome's water fog colour, pushed toward its blue-green, thickening with the square of
-		// the distance (clear close by, a deep blue wall at about 60 blocks): lighting.metal imWaterFog, the mobs' too
-		float4 wf = imWaterFog(fog.FogColor.rgb, length(in.imPos), imf);
-		imFog = wf.w;
-		imFogColor = wf.rgb;
-	}
-	imFog = 1.0 - (1.0 - imFog) * (1.0 - imFade);
-	// (waving plants marked for the TAA (alpha 0.98, invisible): it can't follow their sway, and its history left ghost copies
-	// of grass and dead bushes on the sand; there it keeps less of it)
-	float outA = color.a;
-	uint wcF = (in.imMat >> 4) & 15u, clsF = in.imMat & 15u;
-	if (!(CUTOUT && CUTOUT_LIMIT < 0.2) && wcF != 0u && clsF != 4u && clsF != 6u) outA = min(outA, 0.98);
-	return float4(mix(color.rgb, imFogColor, imFog), outA);
+	return imFogTail(color, in.imPos, in.imMat, fogValue, float4(fog.FogColor), imFade, CUTOUT && CUTOUT_LIMIT < 0.2, imf);
 #else
 	return float4(mix(color.rgb, fog.FogColor.rgb, fogValue * fog.FogColor.a), color.a);
 #endif
@@ -2554,6 +2562,135 @@ fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]],
 	return ownFsBody(in, g, t, fog, atlas, atlasSampler);
 #endif
 }
+#ifdef IM_SHADE
+// ---- (Imagine Metal, Build B2) deferred lighting in tile memory ----
+// The opaque terrain (solid and cutout) doesn't light itself fragment by fragment any more. own_fs_g writes what the lighting
+// needs into four extra attachments that exist only in the GPU's tile memory (memoryless: never stored, never loaded), and one
+// full-screen draw in the same pass (im_defer_fs) reads them back per pixel ([[color(n)]], Apple GPUs' programmable blending) and
+// runs imShade once for each pixel that ended up visible, however many small triangles were drawn over it. Water, glass and the
+// rest of the translucent layer are lit in their own fragments after it, as before; so is everything when this is off
+// (imaginemetal.deferred=false, a PBR resource pack, a debug view).
+//   1 RGBA8   the surface's colour (texture x tint, display-encoded); a: bit 0 slanted, bits 1-3 the face's axis, bits 4-7 the
+//             new chunk's fade
+//   2 RGBA8   the texture alone; a: the material byte
+//   3 RGBA16  r: block light (12 bits) and the torch lean along the face's first axis (4); g: sky light and the lean along its
+//             second; ba: the normal with the generated bevels (octahedral)
+//   4 R32F    the depth (0: nothing of ours drawn at this pixel, the clear value)
+struct ImGOut {
+	float4 g1 [[color(1)]];
+	float4 g2 [[color(2)]];
+	float4 g3 [[color(3)]];
+	float g4 [[color(4)]];
+};
+
+static inline float2 imOctEnc(float3 n) {
+	n /= (abs(n.x) + abs(n.y) + abs(n.z));
+	float2 o = n.z >= 0.0 ? n.xy : (1.0 - abs(n.yx)) * float2(n.x >= 0.0 ? 1.0 : -1.0, n.y >= 0.0 ? 1.0 : -1.0);
+	return o * 0.5 + 0.5;
+}
+
+static inline float3 imOctDec(float2 e) {
+	float2 o = e * 2.0 - 1.0;
+	float3 n = float3(o, 1.0 - abs(o.x) - abs(o.y));
+	float t = saturate(-n.z);
+	n.x += n.x >= 0.0 ? -t : t;
+	n.y += n.y >= 0.0 ? -t : t;
+	return normalize(n);
+}
+
+fragment ImGOut own_fs_g(VOut in [[stage_in]], constant Globals &g [[buffer(22)]], constant Terrain &t [[buffer(23)]],
+	texture2d<float> atlas [[texture(16)]], sampler atlasSampler [[sampler(14)]], constant ImFrame &imf [[buffer(30)]],
+	texture2d<float> imPbrN [[texture(27)]]) {
+	float2 pixelSize = 1.0f / float2(t.TextureSize);
+	float imLod = imf.taa.w > 0.01 ? imf.taa.w : 1.0;
+	float4 texel = g.UseRgss == 1 ? sampleRGSS(atlas, atlasSampler, in.texCoord0, pixelSize, imLod) : sampleNearest(atlas, atlasSampler, in.texCoord0, pixelSize, imLod);
+	float4 color = texel * getColor(in);
+	float imFade = 0.0;
+	if (F_RICH) imFade = 1.0 - in.chunkVisibility;
+	if (CUTOUT && texel.a < CUTOUT_LIMIT) discard_fragment();
+	float2 imLightQ = in.imLight;
+	if (in.imQuv.x > -0.5) {
+		float2 st = saturate(in.imQuv);
+		float4 qb = float4(in.imQL.x & 255u, (in.imQL.x >> 8) & 255u, (in.imQL.x >> 16) & 255u, in.imQL.x >> 24);
+		float4 qs = float4(in.imQL.y & 255u, (in.imQL.y >> 8) & 255u, (in.imQL.y >> 16) & 255u, in.imQL.y >> 24);
+		imLightQ = saturate(float2(mix(mix(qb.x, qb.y, st.y), mix(qb.w, qb.z, st.y), st.x), mix(mix(qs.x, qs.y, st.y), mix(qs.w, qs.z, st.y), st.x)) / 240.0);
+	}
+	ImPre m = imMaterial(in.imPos, imLightQ, in.imMat & 255u, texel.rgb, in.texCoord0, in.imRect, atlas, imPbrN, imf);
+	float3 n = m.n;
+	uint axis = n.x > 0.5 ? 0u : n.x < -0.5 ? 1u : n.y > 0.5 ? 2u : n.y < -0.5 ? 3u : n.z > 0.5 ? 4u : 5u;
+	// (the torch lean: Lt's part along the face, as imMaterial put it together: up to 0.7 beside the normal's 0.75)
+	float2 lean = float2(0.0);
+	if (!m.slanted) {
+		float3 tv = (m.Lt - n * dot(m.Lt, n)) * (0.75 / max(dot(m.Lt, n), 1e-3));
+		lean = axis < 2u ? tv.yz : axis < 4u ? tv.xz : tv.xy;
+	}
+	float2 code = clamp(floor(lean / 0.7 * 7.0 + 0.5) + 8.0, 1.0, 15.0);
+	uint flags = (m.slanted ? 1u : 0u) | (axis << 1) | (uint(saturate(imFade) * 15.0 + 0.5) << 4);
+	ImGOut o;
+	o.g1 = float4(saturate(color.rgb), float(flags) / 255.0);
+	o.g2 = float4(texel.rgb, float(in.imMat & 255u) / 255.0);
+	o.g3 = float4((floor(saturate(imLightQ) * 4095.0 + 0.5) * 16.0 + code) / 65535.0, imOctEnc(m.slanted ? n : m.N));
+	o.g4 = in.pos.z;
+	return o;
+}
+
+struct ImDeferParams {
+	float4x4 clipInv;  // clip (Minecraft's, y up; depth 0..1 reversed) -> camera-relative world: this frame's terrain transform
+	float4 size;       // xy the target's size in pixels
+};
+
+struct ImDeferOut {
+	float4 pos [[position]];
+};
+
+vertex ImDeferOut im_defer_vs(uint vid [[vertex_id]]) {
+	ImDeferOut o;
+	float2 q = float2((vid << 1) & 2, vid & 2);
+	o.pos = float4(q * 2.0 - 1.0, 0.0, 1.0);
+	return o;
+}
+
+fragment float4 im_defer_fs(ImDeferOut in [[stage_in]], float4 g1 [[color(1)]], float4 g2 [[color(2)]], float4 g3 [[color(3)]], float4 g4 [[color(4)]],
+	constant Fog &fog [[buffer(24)]], constant ImDeferParams &dp [[buffer(29)]], constant ImFrame &imf [[buffer(30)]],
+	depth2d_array<float> imShadowMap [[texture(20)]], sampler imShadowCmp [[sampler(13)]],
+	texture3d<float> imLightVol [[texture(21)]], sampler imLightSampler [[sampler(12)]], texture3d<float> imSeeds [[texture(24)]],
+	texture2d<float> imHistColor [[texture(22)]], depth2d<float> imHistDepth [[texture(23)]], sampler imHistSampler [[sampler(11)]],
+	depth2d<float> imUnderDepth [[texture(26)]], texture3d<float> imLightFilt [[texture(29)]], texture3d<float> imLightOpen [[texture(30)]]) {
+	float d = g4.r;
+	if (d <= 0.0) discard_fragment();
+	// the fragment's place from its depth (the terrain's sub-pixel offset taken back out; rows as Minecraft's clip space, y up)
+	float2 ndc = in.pos.xy / dp.size.xy * 2.0 - 1.0;
+	if (imf.taa.z > 0.5) ndc -= imf.taa.xy;
+	float4 w = dp.clipInv * float4(ndc, d, 1.0);
+	float3 p = w.xyz / w.w;
+	uint flags = uint(g1.a * 255.0 + 0.5);
+	uint mat = uint(g2.a * 255.0 + 0.5);
+	uint axis = (flags >> 1) & 7u;
+	float2 lq = floor(g3.rg * 65535.0 + 0.5);
+	float2 lhi = floor(lq / 16.0);
+	float2 light = lhi / 4095.0;
+	float2 lean = (lq - lhi * 16.0 - 8.0) * (0.7 / 7.0);
+	ImPre m;
+	m.on = true;
+	m.slanted = (flags & 1u) != 0u;
+	m.N = imOctDec(g3.ba);
+	float3 an = float3(axis < 2u ? 1.0 : 0.0, axis == 2u || axis == 3u ? 1.0 : 0.0, axis >= 4u ? 1.0 : 0.0) * ((axis & 1u) != 0u ? -1.0 : 1.0);
+	m.n = m.slanted ? m.N : an;
+	float3 tv = axis < 2u ? float3(0.0, lean.x, lean.y) : axis < 4u ? float3(lean.x, 0.0, lean.y) : float3(lean.x, lean.y, 0.0);
+	m.Lt = m.slanted ? m.n : normalize(m.n * 0.75 + tv);
+	// (the texel's number for the coated textures and the sculk's flicker: its place on the face in sixteenths of a block, which is
+	// the texture's own texel on a full block's face; the material mixed in so two materials' patterns differ)
+	float3 wq = fract(p + imf.world.xyz - m.n * 0.01) * 16.0;
+	m.texel = floor(axis < 2u ? wq.yz : axis < 4u ? wq.xz : wq.xy) + float2(mat * 16u, mat * 48u);
+	float3 lit = imShade(g1.rgb, g2.rgb, p, light, mat | 0x10000u, in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imLightFilt, imLightOpen,
+		imSeeds, imHistColor, imHistColor, float2(0.0), float4(0.0), imHistColor, imHistColor, imHistDepth, imHistSampler, imUnderDepth, m);
+	// Minecraft's own fog amount (terrain.fsh), from the place instead of the vertex distances
+	float fogValue = max(linear_fog_value(length(p), fog.FogEnvironmentalStart, fog.FogEnvironmentalEnd),
+		linear_fog_value(max(length(p.xz), abs(p.y)), fog.FogRenderDistanceStart, fog.FogRenderDistanceEnd));
+	return imFogTail(float4(lit, 1.0), p, mat, fogValue, float4(fog.FogColor), float(flags >> 4) / 15.0, false, imf);
+}
+#endif
+
 
 #ifdef IM_SHADE
 // (Imagine Metal) the translucent pass with its own blending (Apple GPUs read the pixel underneath straight from tile memory;

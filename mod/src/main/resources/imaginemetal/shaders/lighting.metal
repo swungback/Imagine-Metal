@@ -923,19 +923,33 @@ static inline float imDither(float2 pixel, constant ImFrame &f) {
 	return f.taa.z > 0.5 ? fract(d + 0.61803399 * float(f.flags.w & 63)) : d;
 }
 
-static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint mat, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp,
-	texture3d<float> lvol, sampler lsamp, texture3d<float> lfilt, texture3d<float> lopen, texture3d<float> seeds, texture2d<float> pbrN, texture2d<float> pbrS, float2 uv, float4 rect, texture2d<float> atlas, texture2d<float> hc, depth2d<float> hd, sampler hs,
-	depth2d<float> ud) {
-	// (the engine hasn't filled a frame yet, or the shaders are switched off live: lit plainly, close to vanilla's lightmap)
-	if (f.flags.z == 0) {
-		float lb = light.x, ls = light.y * mix(0.2, 1.0, f.blockColor.w);
-		float3 lm = max(float3(lb) * float3(1.0, 0.9, 0.75), float3(ls));
-		if (f.flags.x != 0) lm = max(lm, float3(0.3));  // (the Nether and the End: no sky light, vanilla's ambient)
-		return albedo * max(lm * lm * (3.0 - 2.0 * lm), float3(0.04));
-	}
-	// (the End has no sky light in Minecraft: everything there counts as open to its sky, so its light (Reimagined's lavender,
-	// or the black hole's) reaches the islands, the shadow maps deciding where)
-	if (f.flags.x == 2) light.y = 1.0;
+// (Build B2) What a fragment can only know where its triangle is drawn, from its own screen derivatives: the face normal, the
+// normal with the generated bevels, where the torch light comes from, its atlas texel. imShade works them out itself (pre.on
+// false: forward shading, as always) or is handed them (deferred lighting: own_fs_g stores them, im_defer_fs lights from them).
+struct ImPre {
+	bool on;
+	bool slanted;
+	float3 n;      // the face's normal
+	float3 N;      // with the generated normal
+	float3 Lt;     // toward the torch light (the face's normal leaned up the block light's slope)
+	float2 texel;  // the atlas texel (the coated textures' and the sculk's per-texel numbers)
+};
+
+static inline ImPre imNoPre() {
+	ImPre m;
+	m.on = false;
+	m.slanted = false;
+	m.n = float3(0.0, 1.0, 0.0);
+	m.N = float3(0.0, 1.0, 0.0);
+	m.Lt = float3(0.0, 1.0, 0.0);
+	m.texel = float2(0.0);
+	return m;
+}
+
+static ImPre imMaterial(float3 p, float2 light, uint mat, float3 tex, float2 uv, float4 rect, texture2d<float> atlas, texture2d<float> pbrN,
+	constant ImFrame &f) {
+	ImPre m;
+	m.on = true;
 	bool slanted;
 	float3 n = imFaceNormal(p, slanted);
 	// the texture's tangent frame from the screen derivatives (Schüler 2013), taken before any branch
@@ -946,11 +960,9 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	float2 asz = float2(atlas.get_width(), atlas.get_height());
 	float2 tpp = (abs(duv1) + abs(duv2)) * asz;  // texels a pixel covers
 	uint cls = mat & 15u;
-	uint kind = (mat >> 8) & 255u;  // (the translucent pass: 1 water, 2 glass and other see-through blocks)
-	// (mat bit 16: an opaque fragment. With the air pass on (f.pbrPack.w) its haze is laid on later, once per pixel: air.metal)
-	bool airLater = (mat & 0x10000u) != 0u && f.pbrPack.w > 0.5;
+	uint kind = (mat >> 8) & 255u;
 	float3 N = n;
-	if (IM_FC_NORMALS && f.lightSize.w > 0.0 && cls != IM_MAT_LAVA && !slanted && kind == 0u) {
+	if (IM_FC_NORMALS && f.lightSize.w > 0.0 && f.flags.z != 0 && cls != IM_MAT_LAVA && !slanted && kind == 0u) {
 		float3 tn = imGenNormal(atlas, uv, rect, f.lightSize.w, tpp, tex, pbrN, f.grade.z > 0.5);
 		if (tn.z < 0.9999) {
 			float3 dp2perp = cross(dp2, n), dp1perp = cross(n, dp1);
@@ -960,12 +972,58 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			N = normalize(T * (tn.x * im) + B * (tn.y * im) + n * tn.z);
 		}
 	}
+	// torch light with a direction: the block light level's slope across the face points toward the light (it rises toward it),
+	// so the light comes from the face's front, leaning that way
+	float3 Lt = n;
+	{
+		float3 dq2 = cross(dp2, n), dq1 = cross(n, dp1);
+		float det = dot(dp1, dq2);
+		float3 G = (dq2 * dl1 + dq1 * dl2) / (abs(det) > 1e-10 ? det : 1e-10);
+		G -= n * dot(G, n);
+		float gl = length(G);
+		float tconf = smoothstep(0.012, 0.05, gl);
+		if (gl > 1e-5) Lt = normalize(n * 0.75 + (G / gl) * (0.7 * tconf));
+	}
+	m.slanted = slanted;
+	m.n = n;
+	m.N = N;
+	m.Lt = Lt;
+	m.texel = floor(uv * asz);
+	return m;
+}
+
+static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint mat, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp,
+	texture3d<float> lvol, sampler lsamp, texture3d<float> lfilt, texture3d<float> lopen, texture3d<float> seeds, texture2d<float> pbrN, texture2d<float> pbrS, float2 uv, float4 rect, texture2d<float> atlas, texture2d<float> hc, depth2d<float> hd, sampler hs,
+	depth2d<float> ud, ImPre pre) {
+	// (the engine hasn't filled a frame yet, or the shaders are switched off live: lit plainly, close to vanilla's lightmap)
+	if (f.flags.z == 0) {
+		float lb = light.x, ls = light.y * mix(0.2, 1.0, f.blockColor.w);
+		float3 lm = max(float3(lb) * float3(1.0, 0.9, 0.75), float3(ls));
+		if (f.flags.x != 0) lm = max(lm, float3(0.3));  // (the Nether and the End: no sky light, vanilla's ambient)
+		return albedo * max(lm * lm * (3.0 - 2.0 * lm), float3(0.04));
+	}
+	// (the End has no sky light in Minecraft: everything there counts as open to its sky, so its light (Reimagined's lavender,
+	// or the black hole's) reaches the islands, the shadow maps deciding where)
+	if (f.flags.x == 2) light.y = 1.0;
+	// (Build B2: what needs the fragment's own derivatives comes from imMaterial, here or, with deferred lighting, where the
+	// triangle was drawn: pre)
+	ImPre m = pre;
+	if (!pre.on) m = imMaterial(p, light, mat, tex, uv, rect, atlas, pbrN, f);
+	bool slanted = m.slanted;
+	float3 n = m.n;
+	uint cls = mat & 15u;
+	uint kind = (mat >> 8) & 255u;  // (the translucent pass: 1 water, 2 glass and other see-through blocks)
+	// (mat bit 16: an opaque fragment. With the air pass on (f.pbrPack.w) its haze is laid on later, once per pixel: air.metal)
+	bool airLater = (mat & 0x10000u) != 0u && f.pbrPack.w > 0.5;
+	float3 N = m.N;
 	// a PBR resource pack (LabPBR): its normal map, ambient occlusion and height (parallax), and below its smoothness, metalness and
 	// glow; in place of ours where the pack has a map
 	float4 pS = float4(0.0);
 	bool packed = false;
-	if (IM_FC_PBRPACK && f.pbrPack.x > 0.5 && kind == 0u && !slanted) {
+	if (IM_FC_PBRPACK && f.pbrPack.x > 0.5 && kind == 0u && !slanted && !pre.on) {
 		constexpr sampler ps(filter::nearest, address::clamp_to_edge);
+		float3 dp1 = dfdx(p), dp2 = dfdy(p);
+		float2 duv1 = dfdx(uv), duv2 = dfdy(uv);
 		float3 dp2perp = cross(dp2, n), dp1perp = cross(n, dp1);
 		float3 T = dp2perp * duv1.x + dp1perp * duv2.x;
 		float3 B = dp2perp * duv1.y + dp1perp * duv2.y;
@@ -1045,7 +1103,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	bool pbr = IM_FC_PBR && f.shadow.w > 0.5 && f.flags.y == 0;
 	// Reimagined's coated textures: each texel a touch lighter or darker than its neighbours, so flat colours read as a material
 	if (IM_FC_COATED && f.toggles.x > 0.5 && kind == 0u && cls != IM_MAT_EMITTER && cls != IM_MAT_LAVA && cls != IM_MAT_FLAME) {
-		float2 tx = floor(uv * float2(atlas.get_width(), atlas.get_height()));
+		float2 tx = m.texel;
 		float hn = fract(sin(dot(tx, float2(12.9898, 78.233))) * 43758.5453);
 		albedo *= 1.0 + (hn - 0.5) * 0.32;
 	}
@@ -1184,19 +1242,8 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// so the light comes from the face's front, leaning that way. Bumps (the generated normals) take it by how they face it, and
 	// glossy surfaces catch its highlight (below): stone's specks, sand's grains, a polished floor glint near a lantern. Flat faces
 	// keep exactly their light.
-	float3 Lt = n;
-	float tconf = 0.0;
-	{
-		float3 dq2 = cross(dp2, n), dq1 = cross(n, dp1);
-		float det = dot(dp1, dq2);
-		float3 G = (dq2 * dl1 + dq1 * dl2) / (abs(det) > 1e-10 ? det : 1e-10);
-		G -= n * dot(G, n);
-		float gl = length(G);
-		tconf = smoothstep(0.012, 0.05, gl);
-		if (gl > 1e-5) Lt = normalize(n * 0.75 + (G / gl) * (0.7 * tconf));
-		float nt = dot(n, Lt);
-		torch *= clamp(saturate(dot(N, Lt)) / max(nt, 0.3), 0.55, 1.35);
-	}
+	float3 Lt = m.Lt;
+	torch *= clamp(saturate(dot(N, Lt)) / max(dot(n, Lt), 0.3), 0.55, 1.35);
 	float3 day = direct + ambient;
 	float3 lit = sqrt(day * day + torch * torch + f.minLight.rgb * f.minLight.rgb);
 	// Complementary Reimagined adds its lights up in gamma space (on the texture as it is, linearized only afterwards,
@@ -1310,7 +1357,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		// spreading through it; on top each speck flickers on its own
 		float3 wp3 = p + f.world.xyz - n * 0.01;
 		float3 bp = floor(wp3);
-		float2 tx = floor(uv * asz);
+		float2 tx = m.texel;
 		float h = imHash2(int2(bp.xz) * 31 + int2(bp.y) * 17 + int2(tx) * int2(7, 13));
 		float h2 = fract(h * 7.31 + 0.17);
 		float2 cell = floor(wp3.xz / 11.0);

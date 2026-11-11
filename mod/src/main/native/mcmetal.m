@@ -783,8 +783,12 @@ void mc_gpucount_enable(const char *path, int every, int groups) {
 }
 // ---- end of GPU counting ---------------------------------------------------------------------------------------------------
 
+void (*mc_im_g_flush)(Enc *enc);
+
 static void endRender(Enc *enc) {
 	if (!enc->render) return;
+	// (Imagine Metal, Build B2: the G-buffer lives only while this encoder does; its lighting is drawn now)
+	if (enc->imG && mc_im_g_flush) mc_im_g_flush(enc);
 	if (rpLog) {
 		printf("mcopt-metal rp end #%d\n", enc->renderSerial);
 		for (int i = 0; i < enc->colorCount; i++)
@@ -1304,7 +1308,8 @@ int mc_tl_restart(Enc *enc, int mode) {
 		for (int i = 0; i < enc->colorCount; i++) {
 			if (!enc->colors[i]) continue;
 			rp.colorAttachments[i].texture = enc->colors[i];
-			rp.colorAttachments[i].loadAction = enc->colors[i].storageMode == MTLStorageModeMemoryless ? MTLLoadActionDontCare : MTLLoadActionLoad;
+			rp.colorAttachments[i].loadAction = enc->colors[i].storageMode == MTLStorageModeMemoryless ? MTLLoadActionClear : MTLLoadActionLoad;
+			rp.colorAttachments[i].clearColor = MTLClearColorMake(0, 0, 0, 0);
 			rp.colorAttachments[i].storeAction = MTLStoreActionUnknown;
 		}
 		if (enc->depth) {
@@ -1368,6 +1373,10 @@ int mc_render_begin(Enc *enc, int count, id<MTLTexture> const *colors, const flo
 		return 2;
 	}
 	endRender(enc);
+	if (enc->imG) {
+		for (int i = count; i < MAX_COLORS; i++) enc->colors[i] = nil;
+		enc->imG = 0;
+	}
 	enc->colorCount = count;
 	memcpy(enc->colors, colors, sizeof(id) * count);
 	enc->depth = depth;
@@ -1492,7 +1501,8 @@ void mc_render_resume(Enc *enc, id<MTLComputeCommandEncoder> compute) {
 		for (int i = 0; i < enc->colorCount; i++) {
 			if (!enc->colors[i]) continue;
 			rp.colorAttachments[i].texture = enc->colors[i];
-			rp.colorAttachments[i].loadAction = enc->colors[i].storageMode == MTLStorageModeMemoryless ? MTLLoadActionDontCare : MTLLoadActionLoad;
+			rp.colorAttachments[i].loadAction = enc->colors[i].storageMode == MTLStorageModeMemoryless ? MTLLoadActionClear : MTLLoadActionLoad;
+			rp.colorAttachments[i].clearColor = MTLClearColorMake(0, 0, 0, 0);
 			rp.colorAttachments[i].storeAction = MTLStoreActionUnknown;
 		}
 		if (enc->depth) {
@@ -1531,7 +1541,8 @@ void mc_render_reopen(Enc *enc) {
 		for (int i = 0; i < enc->colorCount; i++) {
 			if (!enc->colors[i]) continue;
 			rp.colorAttachments[i].texture = enc->colors[i];
-			rp.colorAttachments[i].loadAction = enc->colors[i].storageMode == MTLStorageModeMemoryless ? MTLLoadActionDontCare : MTLLoadActionLoad;
+			rp.colorAttachments[i].loadAction = enc->colors[i].storageMode == MTLStorageModeMemoryless ? MTLLoadActionClear : MTLLoadActionLoad;
+			rp.colorAttachments[i].clearColor = MTLClearColorMake(0, 0, 0, 0);
 			rp.colorAttachments[i].storeAction = MTLStoreActionUnknown;
 			any = 1;
 		}
@@ -1552,6 +1563,9 @@ void mc_render_reopen(Enc *enc) {
 
 void mc_r_pipeline(Enc *enc, id<MTLRenderPipelineState> pso, id<MTLDepthStencilState> depth, int cull, int wireframe,
 	float biasConstant, float biasSlope, int primitive) {
+	// (Imagine Metal, Build B2: one of the game's own pipelines can't draw into the G-buffer's pass; normally the terrain has
+	// left it by now, OwnTerrain.drawOpaque's end)
+	if (enc->imG) mc_im_g_exit(enc);
 	id<MTLRenderCommandEncoder> r = enc->render;
 	[r setRenderPipelineState:pso];
 	if (depth) [r setDepthStencilState:depth];
@@ -2033,3 +2047,32 @@ static void pqSubmit(void) {
 }
 
 long mc_present_skipped(void) { return atomic_load(&pqSkipped); }
+
+
+// (Imagine Metal, Build B2) see mcmetal.h
+int mc_im_g_enter(Enc *enc, id<MTLTexture> const *g) {
+	if (enc->imG) return 1;
+	if (!enc->render || enc->colorCount != 1 || !enc->colors[0] || !enc->depth || enc->dead) return 0;
+	if (enc->colors[0].storageMode == MTLStorageModeMemoryless || enc->colors[0].sampleCount != 1) return 0;
+	if (enc->depth.storageMode == MTLStorageModeMemoryless || enc->depth.sampleCount != 1) return 0;
+	if (MAX_COLORS < 5) return 0;
+	for (int i = 0; i < 4; i++)
+		if (!g[i] || g[i].width != enc->colors[0].width || g[i].height != enc->colors[0].height) return 0;
+	endRender(enc);
+	for (int i = 0; i < 4; i++) enc->colors[1 + i] = g[i];
+	enc->colorCount = 5;
+	enc->imG = 1;
+	mc_render_reopen(enc);
+	return 1;
+}
+
+int mc_im_g_exit(Enc *enc) {
+	if (!enc->imG) return 0;
+	int open = enc->render != nil;
+	endRender(enc);
+	for (int i = 1; i < MAX_COLORS; i++) enc->colors[i] = nil;
+	enc->colorCount = 1;
+	enc->imG = 0;
+	if (open) mc_render_reopen(enc);
+	return 1;
+}

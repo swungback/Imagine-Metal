@@ -2097,6 +2097,7 @@ public final class OwnTerrain {
 		Matrix4fc view = camera.viewRotationMatrix;
 		Matrix4f clip = new Matrix4f(proj).mul(view);
 		imaginemetal.Reflections.noteClip(clip, camera.pos.x, camera.pos.y, camera.pos.z);
+		imaginemetal.Deferred.frame(this.own, clip);  // (Imagine Metal, Build B2: deferred lighting for this frame's opaque draws)
 		GpuBufferSlice terrain = RenderSystem.getDynamicUniforms().writeTerrainTransform(new Matrix4f(view), atlas.getWidth(0), atlas.getHeight(0));
 		try (MemoryStack stack = MemoryStack.stackPush()) {
 			long f = stack.ncalloc(16, 1, CULL_FRAME_BYTES);
@@ -2211,6 +2212,7 @@ public final class OwnTerrain {
 			boolean draw = !mode.equals("skip") && !mode.equals("skipall"), fragSplit = false;
 			if (prefilter) {
 				this.drawPrefiltered(f, clip, d, arena, k, u, atlas, sampler, light, lightSampler, draw);
+				if (imaginemetal.Deferred.end(this.enc)) MetalBridge.restorePass(this.encoder);
 				if (STATS) this.stats();
 				return true;
 			}
@@ -2219,6 +2221,7 @@ public final class OwnTerrain {
 				this.quadsMesh = OwnFrag.QMESH && !mode.equals("quads") || mode.equals("qmesh");
 				this.quadsKind = OwnFrag.quadsKind(mode);
 				this.drawQuads(f, clip, camera, d, arena, k, u, atlas, sampler, light, lightSampler, draw);
+				if (imaginemetal.Deferred.end(this.enc)) MetalBridge.restorePass(this.encoder);
 				if (STATS) this.stats();
 				return true;
 			}
@@ -2270,6 +2273,8 @@ public final class OwnTerrain {
 					this.curVis = t;
 				}
 			}
+			// (Imagine Metal, Build B2: the G-buffer's pass lit and left: a new encoder, a split like the others)
+			if (imaginemetal.Deferred.end(this.enc)) split = true;
 			if (split) MetalBridge.restorePass(this.encoder);
 			else MetalBridge.reapplyPipeline(this.encoder);
 		}

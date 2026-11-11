@@ -64,6 +64,7 @@ public final class Benchmark {
 		steps.add(new Step("far shadow map drawn every other frame (not kept)", () -> Settings.shadowFarCache = false));
 		steps.add(new Step("near shadow map drawn every frame", () -> Settings.shadowNearAlternate = false));
 		steps.add(new Step("air pass off (the haze in every terrain fragment)", () -> Settings.airPass = false));
+		steps.add(new Step("deferred lighting off (every terrain fragment lit, as Build B1)", () -> Settings.deferred = false));
 		steps.add(new Step("near shadow casters culled to the view (experimental, off)", () -> Settings.shadowNearViewCull = true));
 		steps.add(new Step("ambient occlusion off", () -> Settings.ssao = false));
 		steps.add(new Step("light shafts off", () -> Settings.shafts = false));

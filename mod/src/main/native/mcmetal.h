@@ -28,6 +28,9 @@ typedef struct {
 	// Attachments whose contents died while `render` was open (the game cleared them): bit i = color i, bit 8 = depth.
 	// Their store actions are decided at endEncoding, so dead ones are never written back to memory.
 	unsigned dead;
+	// (Imagine Metal, Build B2) the open pass carries the deferred lighting's G-buffer: colors[1..4] memoryless, colorCount 5
+	// (mcown.m); its lighting is drawn before the encoder ends (mc_im_g_flush)
+	int imG;
 	id<MTLBuffer> indexBuffer;
 	MTLIndexType indexType;
 	int indexSize;
@@ -80,6 +83,12 @@ id<MTLCommandBuffer> mc_frame_cmd(Enc *enc);  // the frame's command buffer with
 void mc_render_resume(Enc *enc, id<MTLComputeCommandEncoder> compute);
 int mc_render_is_open(Enc *enc);
 void mc_render_reopen(Enc *enc);  // (Imagine Metal) after a blit ended the open pass
+// (Imagine Metal, Build B2: deferred lighting in tile memory, mcown.m) the pass on colour 0 and the depth reopened with g[0..3]
+// as memoryless attachments 1..4 (1 done, 0 not possible: nothing changed); the G-buffer lit, dropped and the plain pass
+// reopened (1 done, 0 wasn't in it); the lighting draw, called before an encoder with the G-buffer ends.
+int mc_im_g_enter(Enc *enc, id<MTLTexture> const *g);
+int mc_im_g_exit(Enc *enc);
+extern void (*mc_im_g_flush)(Enc *enc);
 
 // (Imagine Metal) the per-pass GPU timing (imtime.m). Tags, as imaginemetal.Perf names them.
 enum { IMT_MISC, IMT_SHADOW, IMT_LIGHT, IMT_SKY, IMT_TERRAIN, IMT_ENTITIES, IMT_TRANSLUCENT, IMT_OVERLAY, IMT_WEATHER, IMT_CAPTURE, IMT_SHAFTS,

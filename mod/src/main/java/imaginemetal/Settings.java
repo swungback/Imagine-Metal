@@ -72,6 +72,8 @@ public final class Settings {
 	public static volatile boolean shadowFarCache = Engine.flag("imaginemetal.shadowFarCache", true);
 	/** The haze and the border fade in one pass over the opaque world (Reflections.promiseAir): not saved. -Dimaginemetal.airPass=false. */
 	public static volatile boolean airPass = Engine.flag("imaginemetal.airPass", true);
+	/** Build B2: the opaque terrain lit once per pixel in tile memory (Deferred): not saved. -Dimaginemetal.deferred=false. */
+	public static volatile boolean deferred = Engine.flag("imaginemetal.deferred", true);
 	/** The near shadow cascade drawn every other frame (Shadows.skipNear): not saved. -Dimaginemetal.shadowNearAlternate=false. */
 	public static volatile boolean shadowNearAlternate = Engine.flag("imaginemetal.shadowNearAlternate", true);
 	/**

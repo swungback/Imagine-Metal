@@ -73,6 +73,16 @@ void mc_im_frame(const void *bytes, int length) {
 	if (length > 0) memcpy(imFrame, bytes, (size_t) length);
 }
 
+// ---- (Imagine Metal, Build B2) deferred lighting in tile memory (terrain.metal own_fs_g / im_defer_fs) ----
+// imDeferOn: this frame's opaque terrain goes through the G-buffer (set by Java each frame, mco_im_defer); imDeferParams: the
+// lighting draw's ImDeferParams (the inverse clip; the size is filled in at the draw). imGTex: the four memoryless attachments,
+// the size of the pass they were last used with. imGDrawn: the open encoder has G-buffer draws to light. imDeferFailed: the
+// lighting pipeline couldn't be made (said once): forward shading from then on.
+static int imDeferOn, imDeferFailed, imGDrawn;
+static float imDeferParams[20];
+static id<MTLTexture> imGTex[4];
+static uint64_t imDeferEnters, imDeferFlushes;
+
 #define OWN_MAX_LAYOUTS 160  // (Imagine Metal: kept per shading feature set too)
 
 typedef struct {
@@ -623,6 +633,10 @@ void mco_cull(Own *w, Enc *enc, const void *frame, int frameLength, id<MTLBuffer
 	}
 }
 
+// (Imagine Metal, Build B2) set around ownStage by ownPipeline for a pass with the G-buffer: the colour kinds' fragment stage is
+// own_fs_g (the same constants); the key carries the name, so both are kept.
+static int ownGStage;
+
 // frag variants: a stage specialized for kind (bits 0-3 fragment kind, 4-5 vertex probe mode, 18 F_HALF, 19 F_LEAN, 20 F_NONIDX, 21 mesh,
 // 22 F_REVERSE, 23 mesh with a thread per vertex, 25 F_TIGHT, 26 F_POSONLY (fragment kind 7 = own_fs_pos), 27 F_OCCA, 28 F_OCCB),
 // made on first use and kept. vertex: 0 the fragment stage, 1 the vertex stage, 2 the mesh stage. nil (err set) if it can't be made.
@@ -639,6 +653,7 @@ static id<MTLFunction> ownStage(Own *w, int kind, int vertex, char *err, int err
 		: frag == 8 ? @"own_fs_tex"
 		: frag == 7 ? @"own_fs_pos"
 		: frag == 6 ? @"own_fs_alpha"
+		: ownGStage && (frag == 0 || frag == 1 || frag == 4 || frag == 5) ? @"own_fs_g"
 		: frag == 2 ? @"own_fs_flat" : frag == 3 && w->fsTranslucent && [w->fsTranslucent.name isEqualToString:@"own_fs_tr"] ? @"own_fs_tr" : @"own_fs";
 	NSString *key = [NSString stringWithFormat:@"%@ %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d%@ f%x", name, vertex ? vsMode | translucent << 2 | quads << 3 : frag, half, lean, nonidx,
 		rev, tight, posonly, occA, occB, (kind >> 29) & 1, oracle, fogvert, fogvertAll, fogvertT, qflat, group ? @" g" : @"", vertex ? 0u : ownFeat];
@@ -716,11 +731,17 @@ static id<MTLRenderPipelineState> ownPipeline(Own *w, Enc *enc, int cutout, char
 		pd.fragmentFunction = frag == 6 ? w->fsAlpha : frag == 5 ? w->fsCutoutLevel : frag == 4 ? w->fsSolidLevel : frag == 3 ? w->fsTranslucent : frag == 2 ? w->fsFlat
 			: frag ? w->fsCutout : w->fsSolid;
 		// (bit 12, a1Exact / a2Exact's table draw: its vertex stage must be the F_QFLAT variant; a plain one would read the table as a list)
-		if ((cutout & ((0x1f << 18) | (0x3f << 25) | (7 << 13) | (1 << 12) | (1 << 11))) || frag >= 8) {  // (kinds 8-10: own_fs_tex / _nofade / _nofog, made only as variants)
+		// (Build B2: a pass with the G-buffer: the colour kinds through ownStage as own_fs_g; the pre-pass, kind 6, as it is)
+		int gbuf = enc->imG && enc->colorCount == 5;
+		ownGStage = gbuf;
+		if ((cutout & ((0x1f << 18) | (0x3f << 25) | (7 << 13) | (1 << 12) | (1 << 11))) || frag >= 8 || (gbuf && frag != 6)) {  // (kinds 8-10: own_fs_tex / _nofade / _nofog, made only as variants)
 			// frag variants: both stages specialized alike (the vertex outputs and fragment inputs must match)
 			pd.vertexFunction = ownStage(w, cutout, 1, err, errCap);
 			pd.fragmentFunction = ownStage(w, cutout, 0, err, errCap);
-			if (!pd.vertexFunction || !pd.fragmentFunction) return nil;
+			if (!pd.vertexFunction || !pd.fragmentFunction) {
+				ownGStage = 0;
+				return nil;
+			}
 		}
 		MTLMeshRenderPipelineDescriptor *md = nil;
 		if (cutout & (1 << 21)) {
@@ -729,13 +750,18 @@ static id<MTLRenderPipelineState> ownPipeline(Own *w, Enc *enc, int cutout, char
 			md.label = pd.label;
 			md.meshFunction = ownStage(w, cutout, 2, err, errCap);
 			md.fragmentFunction = ownStage(w, cutout, 0, err, errCap);
-			if (!md.meshFunction || !md.fragmentFunction) return nil;
+			if (!md.meshFunction || !md.fragmentFunction) {
+				ownGStage = 0;
+				return nil;
+			}
 			md.maxTotalThreadsPerMeshThreadgroup = (cutout & (1 << 23)) ? 128 : 32;
 		}
 		for (int c = 0; c < enc->colorCount; c++) {
 			if (!enc->colors[c]) continue;
 			pd.colorAttachments[c].pixelFormat = enc->colors[c].pixelFormat;
 			pd.colorAttachments[c].writeMask = c == 0 && (cutout & 15) != 6 && !(cutout & (1 << 30)) ? MTLColorWriteMaskAll : MTLColorWriteMaskNone;
+			// (Build B2: with the G-buffer the colour kinds write attachments 1..4 and leave the picture to the lighting draw)
+			if (gbuf) pd.colorAttachments[c].writeMask = c >= 1 && (cutout & 15) != 6 ? MTLColorWriteMaskAll : MTLColorWriteMaskNone;
 			if (c == 0 && (cutout & 15) == 3 && ![pd.fragmentFunction.name isEqualToString:@"own_fs_tr"]) {
 				// vanilla's BlendFunction.TRANSLUCENT
 				pd.colorAttachments[c].blendingEnabled = YES;
@@ -749,6 +775,7 @@ static id<MTLRenderPipelineState> ownPipeline(Own *w, Enc *enc, int cutout, char
 		}
 		pd.depthAttachmentPixelFormat = enc->depth ? enc->depth.pixelFormat : MTLPixelFormatInvalid;
 		pd.inputPrimitiveTopology = MTLPrimitiveTopologyClassTriangle;
+		ownGStage = 0;
 		NSError *e = nil;
 		id<MTLRenderPipelineState> pso;
 		if (md) {
@@ -810,6 +837,137 @@ static uint32_t ownVgClass(Own *w, int v, int id) {
 	return (uint32_t) ((MIN(cls, w->vg[v].sizes - 1) + 1) * w->vg[v].sizeQuads);
 }
 
+// (Build B2) The lighting draw's pipeline for a pass with the G-buffer (formats as the encoder's), specialized with the shading
+// features on now; kept until they or the formats change. nil (said once, imDeferFailed) if it can't be made.
+static id<MTLRenderPipelineState> imDeferPso;
+static uint32_t imDeferFeat;
+static MTLPixelFormat imDeferColor, imDeferDepth;
+static id<MTLDepthStencilState> imDeferDepthState;
+static const MTLPixelFormat imGFormats[4] = {MTLPixelFormatRGBA8Unorm, MTLPixelFormatRGBA8Unorm, MTLPixelFormatRGBA16Unorm, MTLPixelFormatR32Float};
+
+static id<MTLRenderPipelineState> imDeferPipeline(Own *w, MTLPixelFormat color, MTLPixelFormat depth) {
+	if (imDeferPso && imDeferFeat == ownFeat && imDeferColor == color && imDeferDepth == depth) return imDeferPso;
+	if (imDeferFailed) return nil;
+	@autoreleasepool {
+		MTLFunctionConstantValues *cv = [[MTLFunctionConstantValues new] autorelease];
+		ownFeatConstants(cv, ownFeat);
+		NSError *e = nil;
+		id<MTLFunction> vs = [[w->library newFunctionWithName:@"im_defer_vs"] autorelease];
+		id<MTLFunction> fs = [[w->library newFunctionWithName:@"im_defer_fs" constantValues:cv error:&e] autorelease];
+		id<MTLRenderPipelineState> pso = nil;
+		if (vs && fs) {
+			MTLRenderPipelineDescriptor *pd = [[MTLRenderPipelineDescriptor new] autorelease];
+			pd.label = @"Imagine Metal deferred lighting";
+			pd.vertexFunction = vs;
+			pd.fragmentFunction = fs;
+			pd.colorAttachments[0].pixelFormat = color;
+			for (int i = 0; i < 4; i++) {
+				pd.colorAttachments[1 + i].pixelFormat = imGFormats[i];
+				pd.colorAttachments[1 + i].writeMask = MTLColorWriteMaskNone;
+			}
+			pd.depthAttachmentPixelFormat = depth;
+			pso = [w->ctx->device newRenderPipelineStateWithDescriptor:pd error:&e];
+		}
+		if (!pso) {
+			imDeferFailed = 1;
+			fprintf(stderr, "[Imagine Metal] deferred lighting off (forward shading as before): %s\n", e ? e.description.UTF8String : "im_defer_vs / im_defer_fs missing");
+			return nil;
+		}
+		if (!imDeferDepthState) {
+			MTLDepthStencilDescriptor *dd = [[MTLDepthStencilDescriptor new] autorelease];
+			dd.depthCompareFunction = MTLCompareFunctionAlways;
+			dd.depthWriteEnabled = NO;
+			imDeferDepthState = [w->ctx->device newDepthStencilStateWithDescriptor:dd];
+		}
+		[imDeferPso release];
+		imDeferPso = pso;
+		imDeferFeat = ownFeat;
+		imDeferColor = color;
+		imDeferDepth = depth;
+		return pso;
+	}
+}
+
+// (Build B2) The open pass switched to one with the G-buffer, if this frame wants it and it can be done: 1 the encoder is a new
+// one (nothing bound), 0 unchanged.
+static int imGEnter(Own *w, Enc *enc) {
+	if (!imDeferOn || imDeferFailed || enc->imG || !enc->render || enc->colorCount != 1 || !enc->colors[0] || !enc->depth) return 0;
+	id<MTLTexture> c0 = enc->colors[0];
+	// (only the level's HDR image: the lighting writes light past white)
+	if (c0.pixelFormat != MTLPixelFormatRGBA16Float) return 0;
+	if (!imDeferPipeline(w, c0.pixelFormat, enc->depth.pixelFormat)) return 0;
+	if (!imGTex[0] || imGTex[0].width != c0.width || imGTex[0].height != c0.height) {
+		@autoreleasepool {
+			for (int i = 0; i < 4; i++) {
+				[imGTex[i] release];
+				MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:imGFormats[i] width:c0.width height:c0.height mipmapped:NO];
+				td.storageMode = MTLStorageModeMemoryless;
+				td.usage = MTLTextureUsageRenderTarget;
+				imGTex[i] = [w->ctx->device newTextureWithDescriptor:td];
+				imGTex[i].label = [NSString stringWithFormat:@"Imagine Metal G-buffer %d", i + 1];
+			}
+		}
+		if (!imGTex[0] || !imGTex[1] || !imGTex[2] || !imGTex[3]) {
+			imDeferFailed = 1;
+			fprintf(stderr, "[Imagine Metal] deferred lighting off (forward shading as before): no memoryless attachments\n");
+			return 0;
+		}
+	}
+	if (!mc_im_g_enter(enc, imGTex)) return 0;
+	imGDrawn = 0;
+	imDeferEnters++;
+	w->lastPso = nil;
+	return 1;
+}
+
+// (Build B2) The lighting draw, before an encoder with the G-buffer ends (mcmetal.m endRender): one triangle over the screen,
+// im_defer_fs lighting every pixel the G-buffer's draws left visible. Everything it reads was bound by those draws (the shading's
+// textures, ImFrame at 30, the fog block at 24); only its own parameters are added. Nothing to do when none drew.
+static Own *imGOwn;
+static void imGFlush(Enc *enc) {
+	id<MTLRenderCommandEncoder> r = enc->render;
+	if (!r || !imGDrawn || !imGOwn || enc->colorCount != 5 || !enc->colors[0]) return;
+	imGDrawn = 0;
+	id<MTLRenderPipelineState> pso = imDeferPipeline(imGOwn, enc->colors[0].pixelFormat, enc->depth ? enc->depth.pixelFormat : MTLPixelFormatInvalid);
+	if (!pso) return;
+	imDeferParams[16] = (float) enc->colors[0].width;
+	imDeferParams[17] = (float) enc->colors[0].height;
+	[r pushDebugGroup:@"Imagine Metal deferred lighting"];
+	[r setRenderPipelineState:pso];
+	[r setDepthStencilState:imDeferDepthState];
+	[r setCullMode:MTLCullModeNone];
+	[r setTriangleFillMode:MTLTriangleFillModeFill];
+	[r setDepthBias:0 slopeScale:0 clamp:0];
+	[r setFragmentBytes:imFrame length:sizeof imFrame atIndex:30];
+	[r setFragmentBytes:imDeferParams length:sizeof imDeferParams atIndex:29];
+	[r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+	[r popDebugGroup];
+	imGOwn->lastPso = nil;
+	imDeferFlushes++;
+}
+
+// (Build B2, from Java each frame the opaque terrain is drawn: imaginemetal.Deferred) on: this frame's opaque terrain through the
+// G-buffer; clipInv: 16 floats, the terrain's clip inverted. Returns 1 if the lighting can't be made (forward from now on).
+int mco_im_defer(Own *w, int on, const float *clipInv) {
+	imGOwn = w;
+	mc_im_g_flush = imGFlush;
+	imDeferOn = on && clipInv && w;
+	if (clipInv) memcpy(imDeferParams, clipInv, 64);
+	return imDeferFailed;
+}
+
+// (Build B2, the end of the opaque terrain's draws) the G-buffer lit and left, the plain pass reopened: 1 the encoder is a new
+// one (the caller binds the game's pass state again), 0 it wasn't in one.
+int mco_im_defer_end(Enc *enc) {
+	return mc_im_g_exit(enc);
+}
+
+void mco_im_defer_stats(uint64_t *out) {
+	out[0] = imDeferEnters;
+	out[1] = imDeferFlushes;
+	out[2] = (uint64_t) imDeferFailed;
+}
+
 // The layer's draw into the open render encoder: one instanced indexed draw of 64-quad instances, its instance count from
 // the cull. u: projection, projOff, globals, globalsOff, terrain, terrainOff, fog, fogOff (the game's uniform buffers).
 // Leaves pipeline, depth and cull state changed: the caller puts the game's back. 1 drawn, 0 no encoder open, -1 err set.
@@ -825,6 +983,17 @@ int mco_draw(Own *w, Enc *enc, int cutout, const void *frame, int frameLength, i
 	// bit 24: a follow-up draw of the same sequence: everything but the pipeline, depth state, bias and frame is still bound
 	int bound = (cutout & (1 << 24)) != 0;
 	cutout &= ~(64 | (1 << 16) | (1 << 17) | (1 << 24));
+	{
+		// (Build B2) the opaque layers' colour and depth kinds go through the G-buffer; anything else (the translucent layer, the
+		// probes' stages, the oracle) leaves it first. Either way the encoder is then a new one: everything is bound again.
+		int fk = cutout & 15, gk = (fk == 0 || fk == 1 || fk == 4 || fk == 5 || fk == 6) && !(cutout & (1 << 30));
+		if (gk ? imGEnter(w, enc) : mc_im_g_exit(enc)) {
+			bound = 0;
+			r = enc->render;
+			if (!r) return 0;
+		}
+		if (enc->imG && fk != 6) imGDrawn = 1;
+	}
 	// -Dmcopt.own.frag.vGroup: a phase A class draw (args of a frag cull that grouped this frame, a list's draw, the plain instanced path:
 	// not the table, mesh, non-indexed, per-quad, reversed, tight, position-only or oracle variants, not translucent, not FAT lists)
 	// becomes instances of 2^sh units: kind bit 11 (F_GROUP), frag_finish's arguments, the larger index buffer, the class size at 29
@@ -881,6 +1050,17 @@ int mco_draw(Own *w, Enc *enc, int cutout, const void *frame, int frameLength, i
 			frame = fbuf;
 			w->exactPipeFallbacks++;
 		}
+	}
+	if (!pso && enc->imG) {
+		// (Build B2: no G-buffer pipeline for this kind: deferred lighting is given up for good, this draw and the rest forward.
+		// What the G-buffer holds so far is lit first.)
+		imDeferFailed = 1;
+		fprintf(stderr, "[Imagine Metal] deferred lighting off (forward shading as before): %s\n", err && errCap > 0 ? err : "a G-buffer pipeline failed");
+		mc_im_g_exit(enc);
+		r = enc->render;
+		bound = 0;
+		if (!r) return 0;
+		pso = ownPipeline(w, enc, cutout, err, errCap);
 	}
 	if (!pso) return -1;
 	int mesh = (cutout & (1 << 21)) != 0;
