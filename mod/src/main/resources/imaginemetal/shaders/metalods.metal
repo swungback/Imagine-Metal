@@ -14,7 +14,7 @@ struct MLFrame {
 	float4 camFrac;    // the camera's position minus camBlock; w unused
 	float4 jitter;     // ImFrame.taa: xy the TAA's sub-pixel offset (clip units), z 1 = on, w the render scale
 	int4 mask;         // where the real terrain is drawn: x, z the first chunk, size (chunks per side), words per row
-	float4 params;     // x 1 = hide the LODs under the real terrain, y the reach (blocks), zw unused
+	float4 params;     // x 1 = hide the LODs under the real terrain, y the reach (blocks), z 1 = debug: tint by level, w unused
 };
 
 struct PageInfo {
@@ -39,6 +39,7 @@ struct MLOut {
 	uint face [[flat]];
 	uint light [[flat]];       // sky | block << 4
 	uint biome [[flat]];
+	uint level [[flat]];
 };
 
 vertex MLOut ml_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant MLFrame &f [[buffer(0)]],
@@ -52,6 +53,7 @@ vertex MLOut ml_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant ML
 	o.face = 0u;
 	o.light = 0u;
 	o.biome = 0u;
+	o.level = 0u;
 	o.uv = float2(0.0);
 	o.rel = float3(0.0);
 	if (q >= count) {
@@ -85,6 +87,7 @@ vertex MLOut ml_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant ML
 	o.biome = (qd.y >> 16) & 255u;
 	o.light = qd.y >> 24;
 	o.face = face;
+	o.level = level;
 	return o;
 }
 
@@ -142,6 +145,11 @@ fragment MLGOut ml_fs(MLOut in [[stage_in]], constant MLFrame &f [[buffer(0)]], 
 	uint tc = kind == 1u ? bt.x : kind == 2u ? bt.y : kind == 3u ? bt.z : kind == 4u ? bt.w : kind == 5u ? m.fixedTint : 0xFFFFFFu;
 	float3 color = tex.rgb * mlRgb(tc);
 	if (water) color *= 0.85;
+	if (f.params.z > 0.5) {
+		// (debug: each level its own colour: 0 red, 1 orange, 2 yellow, 3 green, 4 cyan, 5 blue)
+		const float3 lc[6] = {float3(1.0, 0.3, 0.3), float3(1.0, 0.6, 0.2), float3(1.0, 1.0, 0.3), float3(0.3, 1.0, 0.3), float3(0.3, 1.0, 1.0), float3(0.4, 0.4, 1.0)};
+		color = mix(color, lc[min(in.level, 5u)], 0.6);
+	}
 	uint mat = (m.flags >> 8) & 255u;
 	uint axis = in.face;  // (the G-buffer's axis numbering is ours: +x -x +y -y +z -z)
 	float3 n = float3(axis == 0u ? 1.0 : axis == 1u ? -1.0 : 0.0, axis == 2u ? 1.0 : axis == 3u ? -1.0 : 0.0, axis == 4u ? 1.0 : axis == 5u ? -1.0 : 0.0);

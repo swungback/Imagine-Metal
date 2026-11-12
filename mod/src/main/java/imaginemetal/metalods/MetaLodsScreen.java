@@ -41,6 +41,10 @@ public final class MetaLodsScreen extends OptionsSubScreen {
 				MetaLods.clearWorld();
 				b.setMessage(Component.literal("Cleared"));
 			}).tooltip(Tooltip.create(Component.literal("Deletes MetaLODS' files for this world and dimension and makes them again."))).bounds(0, 0, 150, 20).build());
+		this.list.addSmall(toggle("Show levels", MetaSettings.showLevels, v -> MetaSettings.showLevels = v,
+			"Debug, not saved. Each LOD level in its own colour: 0 red, 1 orange, 2 yellow, 3 green, 4 cyan, 5 blue."),
+			Button.builder(Component.literal("Remake all LODs"), b -> MetaLods.settingsChanged(true)).tooltip(Tooltip.create(Component.literal(
+				"Meshes every LOD again from what's stored (nothing is deleted)."))).bounds(0, 0, 150, 20).build());
 		this.list.addBig(Button.builder(Component.literal("Status: " + MetaLods.status()), b -> b.setMessage(Component.literal("Status: " + MetaLods.status())))
 			.bounds(0, 0, 310, 20).build());
 	}

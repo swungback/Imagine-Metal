@@ -591,7 +591,7 @@ final class MetaWorld {
 		MemoryUtil.memPutInt(fr + 124, this.maskWords);
 		MemoryUtil.memPutFloat(fr + 128, MetaSettings.hideUnderReal ? 1f : 0f);
 		MemoryUtil.memPutFloat(fr + 132, this.reach);
-		MemoryUtil.memPutFloat(fr + 136, 0f);
+		MemoryUtil.memPutFloat(fr + 136, MetaSettings.showLevels ? 1f : 0f);
 		MemoryUtil.memPutFloat(fr + 140, 0f);
 		for (int i = 0; i < this.maskSize * this.maskWords; i++) MemoryUtil.memPutInt(this.arena.mask + 4L * i, this.maskBits[i]);
 		this.housekeeping();

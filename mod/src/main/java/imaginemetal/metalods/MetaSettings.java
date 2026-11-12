@@ -31,6 +31,8 @@ public final class MetaSettings {
 	public static volatile int threads = 0;
 	/** Hide the LODs inside the real terrain (where real chunks are drawn). Debug: off shows both. */
 	public static volatile boolean hideUnderReal = true;
+	/** Debug, not saved: each level drawn in its own colour. */
+	public static volatile boolean showLevels = false;
 	/** Log a stats line every 10 seconds. */
 	public static volatile boolean stats = true;
 
