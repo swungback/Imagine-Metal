@@ -26,13 +26,13 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * MetaLODS on disk, per world and dimension (saves/WORLD/metalods/DIMENSION, or metalods/SERVER/DIMENSION for a server):
- * - gen5/L{level}/{cx}.{cz}.bin: a column generated from the seed (regenerated if the generator's version changes);
+ * - gen6/L{level}/{cx}.{cz}.bin (gen6h: without overhangs): a column generated from the seed (regenerated if the generator's version changes);
  * - real/r.{rx}.{rz}.bin: the real chunks seen there (a region of 32 x 32 chunks), each with its LODs at levels 0 to 4.
  * Files name their blocks and biomes (a palette per file), so numbers never need to match between sessions.
  * Everything compressed (deflate). Writes go to one background thread.
  */
 final class MetaStore {
-	static final int GEN_VERSION = 5;
+	static final int GEN_VERSION = 6;
 	private static final int MAGIC = 0x4D4C4F44;  // "MLOD"
 	final Path dir;
 	private final RegistryAccess access;
@@ -56,7 +56,11 @@ final class MetaStore {
 		volatile boolean dirty;
 	}
 
-	MetaStore(Path dir, RegistryAccess access) {
+	/** The generated columns' folder: the generator's version, and h for heightfield ones (3D off). */
+	private final String genDir;
+
+	MetaStore(Path dir, RegistryAccess access, boolean overhangs) {
+		this.genDir = "gen" + GEN_VERSION + (overhangs ? "" : "h");
 		this.dir = dir;
 		this.access = access;
 		try {
@@ -85,7 +89,7 @@ final class MetaStore {
 	// ---- generated columns ----
 
 	private Path genPath(int level, int cx, int cz) {
-		return this.dir.resolve("gen" + GEN_VERSION).resolve("L" + level).resolve(cx + "." + cz + ".bin");
+		return this.dir.resolve(this.genDir).resolve("L" + level).resolve(cx + "." + cz + ".bin");
 	}
 
 	@Nullable Rle loadGen(int level, int cx, int cz) {

@@ -316,6 +316,35 @@ final class LodNoise {
 		this.finish(t, w, t0);
 	}
 
+	/**
+	 * (MetaLODS) The terrain's density (the function the surface is found in, with the final density's top slide) over a volume
+	 * for 3D far terrain: g x ny x g samples from (x0, y0, z0), every s blocks across and STEP_Y up, index k + ny (x + g z).
+	 * y0 / ny as generate0 lays them out (from the dimension's lowest y down to a multiple of 8, to its top). Worker thread.
+	 */
+	float[] terrainVolume(int x0, int z0, int g, int s) {
+		Worker w = this.workers.get();
+		int ny = (this.maxY - this.minY) / STEP_Y + 1, y0 = Math.floorDiv(this.minY, STEP_Y) * STEP_Y;
+		DensityVolume volume = new DensityVolume(g, ny, g, x0, y0, z0, s, STEP_Y, s);
+		int size = volume.size();
+		DensityBuffer buffer = DensityBuffer.createUnpooled(size);
+		w.terrain.sampleVolume(buffer, volume);
+		float[] d = new float[size];
+		for (int i = 0; i < size; i++) d[i] = buffer.get(i);
+		if (this.slideTop) {
+			for (int col = 0; col < g * g; col++) for (int k = 0; k < ny; k++) d[k + col * ny] = this.slide(y0 + k * STEP_Y, d[k + col * ny]);
+		}
+		return d;
+	}
+
+	/** (MetaLODS) terrainVolume's vertical layout: the lowest sample's y and the sample count. */
+	int volumeY0() {
+		return Math.floorDiv(this.minY, STEP_Y) * STEP_Y;
+	}
+
+	int volumeNy() {
+		return (this.maxY - this.minY) / STEP_Y + 1;
+	}
+
 	/** The top face of the water the game's aquifer puts over a column's ground (DRY: none; under sea level only). */
 	private short waterOver(Aquifer aquifer, float[] col, int x, int top, int z, int y0) {
 		if (top >= this.seaLevel) return LodTile.DRY;

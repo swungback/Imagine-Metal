@@ -63,6 +63,15 @@ public final class MetaGen {
 	 * 32). exactTrees: the game's own trees where they can be (level 0 only), else the biome's estimate.
 	 */
 	public Rle[] generate(int level, int tx, int tz, int minY, int height, boolean exactTrees, int airSky, Ids ids) {
+		return this.generate(level, tx, tz, minY, height, exactTrees, airSky, false, ids);
+	}
+
+	/**
+	 * As above; with overhangs, the terrain's density is also sampled in 3D at the tile's resolution and carves what lies under
+	 * the surface (overhangs, arches, cliffs' hollows) and adds what floats above it (islands, lips LodNoise's heightfield left
+	 * out). The surface block LodNoise found stays where it is, with a voxel of skin under it.
+	 */
+	public Rle[] generate(int level, int tx, int tz, int minY, int height, boolean exactTrees, int airSky, boolean overhangs, Ids ids) {
 		LodTile t = new LodTile(level, tx, tz);
 		LodForest forest = exactTrees && level == 0 ? this.forest : null;
 		t.impostorTrees = forest == null;
@@ -79,20 +88,88 @@ public final class MetaGen {
 		Rle[] out = new Rle[4];
 		Rle.Builder b = new Rle.Builder(32, h, (airSky & 15) << 24);
 		int[] seg = new int[24];
+		int[] info = new int[4];
 		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+		// (3D: the density at the sample grid LodNoise uses, every max(c, 4) blocks across, 8 up)
+		float[] dv = null;
+		int s = Math.max(c, 4), g = LodTile.SIZE * c / s + 1, ny = 0, y0 = 0;
+		if (overhangs) {
+			try {
+				dv = this.noise.terrainVolume(t.x0, t.z0, g, s);
+				ny = this.noise.volumeNy();
+				y0 = this.noise.volumeY0();
+			} catch (RuntimeException e) {
+				dv = null;
+			}
+		}
+		int[] col = new int[h];
+		float[] dens = new float[h];
 		for (int q = 0; q < 4; q++) {
 			int ox = (q & 1) * 32, oz = (q >> 1) * 32;
 			b.reset();
 			for (int z = 0; z < 32; z++) {
 				for (int x = 0; x < 32; x++) {
 					int i = (oz + z) * LodTile.SIZE + ox + x;
-					int n = this.cell(t, i, level, c, minY, h, ids, seg, pos, airSky);
-					b.cell(x, z, seg, n);
+					int n = this.cell(t, i, level, c, minY, h, ids, seg, pos, airSky, info);
+					if (dv == null || info[0] < 0) {
+						b.cell(x, z, seg, n);
+						continue;
+					}
+					// the column as voxels, then the density's say
+					java.util.Arrays.fill(col, (airSky & 15) << 24);
+					for (int k = 0; k + 2 < n; k += 3) java.util.Arrays.fill(col, Math.max(0, seg[k]), Math.min(h, seg[k + 1]), seg[k + 2]);
+					float bx = ((ox + x) * c + c * 0.5F) / s, bz = ((oz + z) * c + c * 0.5F) / s;
+					int ix = Math.min(g - 2, (int) bx), iz = Math.min(g - 2, (int) bz);
+					float fx = bx - ix, fz = bz - iz;
+					int a00 = (ix + iz * g) * ny, a10 = (ix + 1 + iz * g) * ny, a01 = (ix + (iz + 1) * g) * ny, a11 = (ix + 1 + (iz + 1) * g) * ny;
+					for (int v = 0; v < h; v++) {
+						float wy = minY + (v + 0.5F) * c;
+						float kf = (wy - y0) / 8.0F;
+						int k0 = Math.clamp((int) Math.floor(kf), 0, ny - 2);
+						float fk = Math.clamp(kf - k0, 0.0F, 1.0F);
+						float d0 = lerp2(dv[a00 + k0], dv[a10 + k0], dv[a01 + k0], dv[a11 + k0], fx, fz);
+						float d1 = lerp2(dv[a00 + k0 + 1], dv[a10 + k0 + 1], dv[a01 + k0 + 1], dv[a11 + k0 + 1], fx, fz);
+						dens[v] = d0 + (d1 - d0) * fk;
+					}
+					this.carve(col, dens, h, info, (airSky & 15) << 24);
+					b.column(x, z, col);
 				}
 			}
 			out[q] = b.build();
 		}
 		return out;
+	}
+
+	private static float lerp2(float a, float b, float c, float d, float fx, float fz) {
+		float ab = a + (b - a) * fx, cd = c + (d - c) * fx;
+		return ab + (cd - ab) * fz;
+	}
+
+	/**
+	 * 3D on a heightfield column: under the surface (keeping it and a voxel under it), voxels the density calls air are hollowed
+	 * out, and the solid ground left with a hollow over it gets the surface block (a ledge under an overhang grows grass);
+	 * over everything the column holds (water, trees), voxels the density calls solid are added (floating ground), with the
+	 * surface block on top, the block under it below, stone inside. info: top voxel, surface id, under id, first voxel over the
+	 * column's contents.
+	 */
+	private void carve(int[] col, float[] dens, int h, int[] info, int air) {
+		int top = info[0], surface = info[1], under = info[2], at = info[3];
+		int stone = col[0];
+		for (int v = 0; v < top - 1 && v < h; v++) if (dens[v] <= 0.0F && v > 0) col[v] = air;
+		for (int v = 1; v < top - 1 && v < h; v++) {
+			if (!imaginemetal.metalods.Voxel.isAir(col[v]) && imaginemetal.metalods.Voxel.isAir(col[v + 1])) col[v] = (col[v] & 0xFF0000) | (surface & 0xFFFF);
+		}
+		for (int v = Math.max(at, top + 1); v < h; v++) {
+			if (dens[v] > 0.0F && imaginemetal.metalods.Voxel.isAir(col[v])) col[v] = (stone & 0xFF0000) | (stone & 0xFFFF);
+		}
+		for (int v = h - 1; v > Math.max(at, top + 1) - 1 && v >= 0; v--) {
+			if (v <= top || !(dens[v] > 0.0F)) continue;
+			boolean airAbove = v + 1 >= h || imaginemetal.metalods.Voxel.isAir(col[v + 1]);
+			if (airAbove) {
+				col[v] = (stone & 0xFF0000) | (surface & 0xFFFF);
+				if (v - 1 > top && dens[v - 1] > 0.0F) col[v - 1] = (stone & 0xFF0000) | (under & 0xFFFF);
+			}
+		}
 	}
 
 	/** Voxel y of block y at this level (clamped into the column, -1: below it). */
@@ -105,12 +182,13 @@ public final class MetaGen {
 	 * Cell i's segments as (from, to exclusive, value) triples into seg, ascending, from voxel 0; returns how many ints were
 	 * written. What's not covered is air (with the sky's full light).
 	 */
-	private int cell(LodTile t, int i, int level, int c, int minY, int h, Ids ids, int[] seg, BlockPos.MutableBlockPos pos, int airSky) {
+	private int cell(LodTile t, int i, int level, int c, int minY, int h, Ids ids, int[] seg, BlockPos.MutableBlockPos pos, int airSky, int[] info) {
 		int n = 0;
 		Holder<Biome> bh = t.biome[i];
 		int biome = bh != null ? ids.biome(bh) : 0;
 		int ground = t.ground[i];
 		int top = vy(ground - 1, minY, level, h);
+		info[0] = top;
 		if (top < 0) return 0;
 		BlockState surface = t.state[i] != null ? t.state[i] : this.stone;
 		BlockState under = t.under[i] != null ? t.under[i] : this.stone;
@@ -135,6 +213,8 @@ public final class MetaGen {
 		if (stoneTop > 0) n = put(seg, n, 0, stoneTop, ids.block(this.stone) | biome << 16);
 		if (top > stoneTop) n = put(seg, n, stoneTop, top, ids.block(under) | biome << 16);
 		n = put(seg, n, top, top + 1, ids.block(surface) | biome << 16);
+		info[1] = ids.block(surface);
+		info[2] = ids.block(under);
 		int at = top + 1;
 		if (wet) {
 			int wTop = vy(t.water[i] - 1, minY, level, h);
@@ -172,6 +252,7 @@ public final class MetaGen {
 				}
 			}
 		}
+		info[3] = at;
 		if (at < h) n = put(seg, n, at, h, sky);
 		return n;
 	}

@@ -27,6 +27,8 @@ public final class MetaSettings {
 	public static volatile boolean generate = true;
 	/** The game's own trees on the nearest generated LODs (slower to generate than the biome's estimate). */
 	public static volatile boolean exactTrees = true;
+	/** Generated LODs in 3D: overhangs, arches and floating ground from the terrain's density (off: a heightfield, faster). */
+	public static volatile boolean overhangs = true;
 	/** Worker threads for generating and meshing (0: automatic). */
 	public static volatile int threads = 0;
 	/** Hide the LODs inside the real terrain (where real chunks are drawn). Debug: off shows both. */
@@ -65,6 +67,7 @@ public final class MetaSettings {
 		detail = Math.clamp(integer(p, "detail", detail), 4, 16);
 		generate = bool(p, "generate", generate);
 		exactTrees = bool(p, "exactTrees", exactTrees);
+		overhangs = bool(p, "overhangs", overhangs);
 		threads = Math.clamp(integer(p, "threads", threads), 0, 16);
 		stats = bool(p, "stats", stats);
 	}
@@ -82,6 +85,8 @@ public final class MetaSettings {
 			+ "generate=" + generate + "\n"
 			+ "# The game's own trees on the nearest generated LODs.\n"
 			+ "exactTrees=" + exactTrees + "\n"
+			+ "# Generated LODs in 3D (overhangs, arches, floating ground). Applies when a world is next loaded.\n"
+			+ "overhangs=" + overhangs + "\n"
 			+ "# Worker threads (0: automatic).\n"
 			+ "threads=" + threads + "\n"
 			+ "# A stats line in the log every 10 seconds.\n"

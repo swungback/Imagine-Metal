@@ -15,7 +15,8 @@ supplies the seed generator (mcopt.metal.lod.LodNoise / LodForest / LodTrees / L
   splits into its 4 children once all 4 are meshed, otherwise it stays drawn. Columns fully inside the real terrain's chunks
   are skipped. Default detail 6: level 0 to ~384 blocks, 1 to ~768, 2 to ~1536, 3 beyond.
 - **Data**: generated column (`MetaGen`: mcopt's LodNoise tile of 64 x 64 cells -> 4 columns; exact trees from LodForest on
-  level 0, the biome's impostor canopy above) + every real chunk seen there laid over it (`MetaStore.RealChunk`: levels 0-4,
+  level 0, the biome's impostor canopy above; with "Overhangs" (default on) the terrain density is also sampled in 3D on
+  LodNoise's grid and carves overhangs/arches under the surface and adds floating ground above it) + every real chunk seen there laid over it (`MetaStore.RealChunk`: levels 0-4,
   mipped Voxy's way: the most solid of 8 children wins, upper first; all-air keeps the brightest light).
 - **Real chunks** (`MetaChunks`): captured 2 s after the client loads them (light in) and again at unload (player edits).
   Air with sky light 0 under a column's top block is filled (caves, house insides: invisible from afar, else thousands of
@@ -39,7 +40,8 @@ supplies the seed generator (mcopt.metal.lod.LodNoise / LodForest / LodTrees / L
 ## Limits of this first build (known)
 - Needs Imagine Metal's deferred lighting (off with a PBR pack, a debug view, F8): then nothing is drawn (logged once).
 - No LODs in dimensions with a ceiling (the Nether). Generation only in singleplayer (a server's seed isn't known).
-- Generated terrain is mcopt's heightfield turned into voxels: no overhangs or floating islands until a real chunk was seen.
+- Generated 3D is from the terrain shape before caves (sloped_cheese): no caves, and islands get stone inside, the surface
+  block on top. Whether Terralith's skylands are in that density is unverified.
 - LODs cast no shadows. Small cracks can show where two levels meet. Grass, flowers, torches are left out (no collision).
 - Water is an opaque surface with a sheen (material POLISHED), not see-through.
 - Nothing was run: CI compiles the shader, the native code and the jar; the data path (runs, mips, meshing, file round trip)
@@ -53,6 +55,11 @@ supplies the seed generator (mcopt.metal.lod.LodNoise / LodForest / LodTrees / L
 4. Distance 64 / 128 / 256 and Detail 4 / 6 / 10: fps and look.
 5. Anything wrong: F2 + a chat note as usual.
 
+## Also on this branch
+- C3 (merged from branch `underwater-window`): under water the window up through the surface is wide (Debug toggle "Wide
+  window up from under water", env.w bit 32), for Jack's "can only see out through a circle above me".
+- Debug: "Show levels" tints each level (0 red ... 5 blue), "Remake all LODs".
+
 ## Next steps (not done)
-- 3D density for generated columns (overhangs, Terralith's skylands), LOD shadows, LODs in the forward path (deferred off),
+- LOD shadows, LODs in the forward path (deferred off),
   translucent far water, import of existing saves (Voxy's world import), GPU-side culling (HiZ) if the draw costs too much.

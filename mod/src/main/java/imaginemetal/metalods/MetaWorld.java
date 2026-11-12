@@ -43,6 +43,8 @@ final class MetaWorld {
 	final ClientLevel level;
 	final int minY, height;
 	final boolean skyLight;
+	/** Generated LODs in 3D (MetaSettings.overhangs as the world was loaded). */
+	private final boolean overhangs;
 	final MetaStore store;
 	private final MetaArena arena;
 	private final @Nullable ServerLevel server;
@@ -120,7 +122,8 @@ final class MetaWorld {
 		this.skyLight = level.dimensionType().hasSkyLight();
 		this.arena = arena;
 		this.server = server;
-		this.store = new MetaStore(dir, level.registryAccess());
+		this.overhangs = MetaSettings.overhangs;
+		this.store = new MetaStore(dir, level.registryAccess(), this.overhangs);
 		int n = MetaSettings.workerThreads();
 		for (int i = 0; i < n; i++) {
 			Thread t = new Thread(this::work, "MetaLODS worker " + i);
@@ -251,7 +254,7 @@ final class MetaWorld {
 			long t0 = System.nanoTime();
 			Rle[] four;
 			try {
-				four = g.generate(level, tx, tz, this.minY, this.height, MetaSettings.exactTrees, this.airSky(), new MetaGen.Ids() {
+				four = g.generate(level, tx, tz, this.minY, this.height, MetaSettings.exactTrees, this.airSky(), this.overhangs, new MetaGen.Ids() {
 					@Override
 					public int block(BlockState state) {
 						return MetaPalette.id(state);

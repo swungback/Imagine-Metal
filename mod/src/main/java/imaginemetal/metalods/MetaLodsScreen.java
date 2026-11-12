@@ -34,19 +34,22 @@ public final class MetaLodsScreen extends OptionsSubScreen {
 			}, "Terrain you never visited, filled in from the world seed (singleplayer: a server's seed isn't known). Off: only chunks you have seen."));
 		this.list.addSmall(toggle("Exact trees", MetaSettings.exactTrees, v -> MetaSettings.exactTrees = v,
 			"The game's own trees on the nearest generated LODs, where they will really grow (slower to make). Off: the biome's estimate. Applies to new LODs."),
-			toggle("Stats in the log", MetaSettings.stats, v -> MetaSettings.stats = v, "A MetaLODS line in latest.log every 10 seconds."));
-		this.list.addSmall(toggle("Hide under real terrain", MetaSettings.hideUnderReal, v -> MetaSettings.hideUnderReal = v,
-			"Debug, not saved. Off: the LODs are drawn inside the render distance too (overlapping the real terrain)."),
-			Button.builder(Component.literal("Clear this world's LODs"), b -> {
-				MetaLods.clearWorld();
-				b.setMessage(Component.literal("Cleared"));
-			}).tooltip(Tooltip.create(Component.literal("Deletes MetaLODS' files for this world and dimension and makes them again."))).bounds(0, 0, 150, 20).build());
+			toggle("Overhangs", MetaSettings.overhangs, v -> MetaSettings.overhangs = v,
+				"Generated LODs in 3D: overhangs, arches and floating ground from the terrain's shape. Off: a heightfield (a little faster). Applies when the world is next loaded."));
+		this.list.addHeader(Component.literal("Debug"));
 		this.list.addSmall(toggle("Show levels", MetaSettings.showLevels, v -> MetaSettings.showLevels = v,
-			"Debug, not saved. Each LOD level in its own colour: 0 red, 1 orange, 2 yellow, 3 green, 4 cyan, 5 blue."),
+			"Not saved. Each LOD level in its own colour: 0 red, 1 orange, 2 yellow, 3 green, 4 cyan, 5 blue."),
+			toggle("Hide under real terrain", MetaSettings.hideUnderReal, v -> MetaSettings.hideUnderReal = v,
+				"Not saved. Off: the LODs are drawn inside the render distance too (overlapping the real terrain)."));
+		this.list.addSmall(toggle("Stats in the log", MetaSettings.stats, v -> MetaSettings.stats = v, "A MetaLODS line in latest.log every 10 seconds."),
 			Button.builder(Component.literal("Remake all LODs"), b -> MetaLods.settingsChanged(true)).tooltip(Tooltip.create(Component.literal(
 				"Meshes every LOD again from what's stored (nothing is deleted)."))).bounds(0, 0, 150, 20).build());
-		this.list.addBig(Button.builder(Component.literal("Status: " + MetaLods.status()), b -> b.setMessage(Component.literal("Status: " + MetaLods.status())))
-			.bounds(0, 0, 310, 20).build());
+		this.list.addSmall(Button.builder(Component.literal("Clear this world's LODs"), b -> {
+			MetaLods.clearWorld();
+			b.setMessage(Component.literal("Cleared"));
+		}).tooltip(Tooltip.create(Component.literal("Deletes MetaLODS' files for this world and dimension and makes them again."))).bounds(0, 0, 150, 20).build(),
+			Button.builder(Component.literal("Status: " + MetaLods.status()), b -> b.setMessage(Component.literal("Status: " + MetaLods.status())))
+				.bounds(0, 0, 150, 20).build());
 	}
 
 	@Override
