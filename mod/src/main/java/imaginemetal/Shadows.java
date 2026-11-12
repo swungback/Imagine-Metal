@@ -149,6 +149,22 @@ public final class Shadows {
 		double farStep = cache ? RUN_STEP * Math.max(1, Math.floor(Settings.shadowRange / NEAR_RANGE)) : RUN_STEP;
 		double farRun = 0;
 		Far next = new Far();
+		// (Build C2b, Settings.shadowNearGround) The near cascade's centre: the ground under the camera, not the camera. The cascade
+		// is a box around its centre measured ACROSS the light, so on the ground it covers a band around the point where the light
+		// ray through its centre lands: with the camera 20 blocks up and a low sun, that point lies 40 blocks away from the sun,
+		// and the ground toward the sun (where you look to see shadows coming at you) left the near map ~17 blocks ahead. Past
+		// that only the far map's quarter-block texels: small shadows ended at a line and popped in as you came down or closer.
+		// Centred on the ground, the near map covers the ground around you whatever your height. Never above the camera (under a
+		// sky island or in a cave the heightmap is above you: the camera, as before), at most 48 blocks below it.
+		double nearY = cam.y;
+		if (Settings.shadowNearGround) {
+			var lvl = Minecraft.getInstance().level;
+			int gx = (int) Math.floor(cam.x), gz = (int) Math.floor(cam.z);
+			if (lvl != null && lvl.hasChunk(gx >> 4, gz >> 4)) {
+				int top = lvl.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING, gx, gz);
+				if (top > lvl.getMinY()) nearY = Math.min(cam.y, Math.max(top + 1.0, cam.y - 48.0));
+			}
+		}
 		for (int c = 0; c < 2; c++) {
 			double st = c == 0 ? RUN_STEP : farStep;
 			double run = Math.round(lightDir[0] / ly0 / st) * st;
@@ -171,10 +187,11 @@ public final class Shadows {
 			float range = c == 0 ? NEAR_RANGE : Settings.shadowRange;
 			double step = 2.0 * range / RES;
 			double[] a = ANCHOR[c];
+			double oy = c == 0 ? nearY : cam.y;  // (the point the cascade follows: the near one the ground under the camera)
 			if (a == null) {
-				a = ANCHOR[c] = new double[] {cam.x, cam.y, cam.z};
+				a = ANCHOR[c] = new double[] {cam.x, oy, cam.z};
 			} else {
-				double ax = cam.x - a[0], ay = cam.y - a[1], az = cam.z - a[2];
+				double ax = cam.x - a[0], ay = oy - a[1], az = cam.z - a[2];
 				double kx = Math.round(dot(ax, ay, az, x) / step) * step, ky = Math.round(dot(ax, ay, az, y) / step) * step;
 				double kz = dot(ax, ay, az, z);
 				for (int i = 0; i < 3; i++) a[i] += kx * x[i] + ky * y[i] + kz * z[i];

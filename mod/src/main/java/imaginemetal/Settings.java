@@ -146,6 +146,12 @@ public final class Settings {
 	 * -Dimaginemetal.entityJitter=false.
 	 */
 	public static volatile boolean entityJitter = Engine.flag("imaginemetal.entityJitter", true);
+	/**
+	 * (Build C2b) The near shadow map centred on the ground under the camera instead of the camera: flying or standing high and
+	 * looking toward a low sun, the ground ahead left the near map ~17 blocks out and its shadows ended there (the pop-in).
+	 * -Dimaginemetal.shadowNearGround=false.
+	 */
+	public static volatile boolean shadowNearGround = Engine.flag("imaginemetal.shadowNearGround", true);
 	/** (benchmark only) Water and glass reflections traced through the screen; false: the sky alone. */
 	public static volatile boolean waterTrace = true;
 	public static volatile boolean ssao = Engine.flag("imaginemetal.ssao", true);
