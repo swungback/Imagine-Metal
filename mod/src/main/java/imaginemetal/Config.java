@@ -14,6 +14,8 @@ import net.fabricmc.loader.api.FabricLoader;
  */
 public final class Config {
 	private static boolean loaded;
+	/** The settings file's version (imaginemetal.configVersion; none: 0). 1 = Build C1: the shadow distance's default went from 160 to 256. */
+	static final int VERSION = 1;
 
 	private static final String DEFAULTS = """
 		# Imagine Metal settings. Edit, then restart the game.
@@ -34,7 +36,7 @@ public final class Config {
 		# the map, not its size, so 1024 saves little and blurs the leaves.
 		imaginemetal.shadowRes=2048
 		# How far around you shadows reach, in blocks (64 to 256). Less is faster: fewer blocks to draw into the map.
-		imaginemetal.shadowRange=160
+		imaginemetal.shadowRange=256
 		#
 		# Our sky and distance haze (false: Minecraft's sky and fog).
 		imaginemetal.sky=true
@@ -138,8 +140,25 @@ public final class Config {
 			for (String k : p.stringPropertyNames()) {
 				if (k.startsWith("imaginemetal.") && System.getProperty(k) == null) System.setProperty(k, p.getProperty(k).trim());
 			}
+			migrate(p);
 		} catch (IOException | RuntimeException e) {
 			System.out.println("[Imagine Metal] config: " + e + " (using the defaults)");
+		}
+	}
+
+	/**
+	 * A file from before a default changed still holds the old default as if it had been chosen: moved to the new one, once (the
+	 * file's version is written with the next save, after which whatever it holds is the user's choice).
+	 */
+	private static void migrate(Properties file) {
+		int v = 0;
+		try {
+			v = Integer.parseInt(file.getProperty("imaginemetal.configVersion", "0").trim());
+		} catch (NumberFormatException ignored) {
+		}
+		if (v < 1 && "160".equals(file.getProperty("imaginemetal.shadowRange", "").trim()) && "160".equals(System.getProperty("imaginemetal.shadowRange"))) {
+			System.setProperty("imaginemetal.shadowRange", "256");
+			System.out.println("[Imagine Metal] settings: shadow distance 160 (the old default) -> 256 (Build C1)");
 		}
 	}
 

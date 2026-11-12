@@ -88,6 +88,7 @@ abstract class LevelRendererMixin {
 	/** Bloom and the HDR resolve, once the level's passes have drawn the world (the hand and the HUD come after, so they don't glow). */
 	@Inject(method = "render", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/framegraph/FrameGraphBuilder;execute(Lcom/mojang/blaze3d/resource/GraphicsResourceAllocator;Lcom/mojang/blaze3d/framegraph/FrameGraphBuilder$Inspector;)V", shift = At.Shift.AFTER))
 	private void imaginemetal$bloom(CallbackInfo ci) {
+		imaginemetal.Sky.lateEnd();  // (Build C1: the clouds drawn after the opaque world: did that happen this frame?)
 		Reflections.capture();
 		imaginemetal.Sky.drawEndLate();
 		Bloom.render();

@@ -554,7 +554,8 @@ static inline float imCloudMap(texture2d<float> ct, sampler s, float2 texel) {
 	return ct.sample(s, c / sz).r;
 }
 
-static float4 imClouds(float3 d, constant ImFrame &f, texture2d<float> ct, sampler s, float dither) {
+// hitT: how far along d the cloud was met (blocks; left as it is where there's none).
+static float4 imClouds(float3 d, constant ImFrame &f, texture2d<float> ct, sampler s, float dither, thread float &hitT) {
 	float camY = f.fogParams.y, alt = f.cloudPos.z;
 	float hi = alt + IM_CLOUD_STRETCH, lo = alt - IM_CLOUD_STRETCH;
 	if (abs(d.y) < 1e-4) return float4(0.0);
@@ -596,6 +597,7 @@ static float4 imClouds(float3 d, constant ImFrame &f, texture2d<float> ct, sampl
 		float fogF = ratio * ratio * 0.707;
 		col = mix(imSkyColor(d, f, false), col, fogF * 0.707);
 		float a = sqrt(min(ratio, 0.75) * 1.33333);
+		hitT = t;
 		return float4(col, a);
 	}
 	return float4(0.0);
@@ -637,9 +639,45 @@ fragment float4 im_clouds_fs(ImSkyOut in [[stage_in]], constant ImFrame &f [[buf
 	float3 d = normalize(q.xyz / q.w);
 	float dither = fract(52.9829189 * fract(dot(in.pos.xy, float2(0.06711056, 0.00583715))));
 	float3 aurora = f.aurora.x > 0.0 ? imAurora(d, f, noise, rs, dither) : float3(0.0);
-	float4 c = f.cloudPos.w > 0.5 ? imClouds(d, f, clouds, rs, dither) : float4(0.0);
+	float hitT = 0.0;
+	float4 c = f.cloudPos.w > 0.5 ? imClouds(d, f, clouds, rs, dither, hitT) : float4(0.0);
 	c.rgb += aurora * 0.1;
 	// premultiplied: the clouds over what's there, the aurora added behind them
+	float3 col = pow(imPresent(c.rgb, f), 1.0 / 2.2) * c.a + pow(imPresent(aurora, f), 1.0 / 2.2) * (1.0 - c.a);
+	if (c.a <= 0.0 && max(max(aurora.r, aurora.g), aurora.b) <= 0.0) discard_fragment();
+	return float4(col, c.a);
+}
+
+// (Build C1) The clouds and the aurora drawn after the opaque world instead (imssr.m im_under_capture, right before the
+// translucent pass; imaginemetal.Sky.drawAfter decides), reading the depth copy taken there. Drawn in the sky pass, before the
+// land and with no depth, the land was always in front of them: a mountain or a sky island standing beyond or above the clouds
+// showed through them. Here a cloud is drawn where it is nearer than what the picture holds at that pixel (fading out over the
+// last blocks before it, so it doesn't end in a hard line on a mountainside), the aurora only on the sky.
+struct ImCloudLate {
+	float4x4 clipInv;  // clip (Minecraft's, y up; depth 0..1 reversed) -> camera-relative world, this frame's terrain transform
+	float4 size;       // xy the target's size in pixels
+};
+
+fragment float4 im_clouds_late_fs(ImSkyOut in [[stage_in]], constant ImFrame &f [[buffer(0)]], constant float4x4 &rot [[buffer(1)]],
+	constant ImCloudLate &a [[buffer(2)]], texture2d<float> clouds [[texture(0)]], texture2d<float> noise [[texture(1)]],
+	depth2d<float> depth [[texture(2)]], sampler rs [[sampler(0)]]) {
+	float4 q = rot * float4(in.ndc.x, -in.ndc.y, 0.5, 1.0);
+	float3 d = normalize(q.xyz / q.w);
+	uint2 px = min(uint2(in.pos.xy), uint2(depth.get_width() - 1, depth.get_height() - 1));
+	float z = depth.read(px);
+	bool land = z > 0.00001;  // (the game's depth is reversed: 0 is the far plane, the sky)
+	float dither = fract(52.9829189 * fract(dot(in.pos.xy, float2(0.06711056, 0.00583715))));
+	float3 aurora = !land && f.aurora.x > 0.0 ? imAurora(d, f, noise, rs, dither) : float3(0.0);
+	float hitT = 0.0;
+	float4 c = f.cloudPos.w > 0.5 ? imClouds(d, f, clouds, rs, dither, hitT) : float4(0.0);
+	if (land && c.a > 0.0) {
+		// (the pixel's place from its depth, as the air pass finds it: the terrain's sub-pixel offset taken back out)
+		float2 ndc = in.pos.xy / a.size.xy * 2.0 - 1.0;
+		if (f.taa.z > 0.5) ndc -= f.taa.xy;
+		float4 w = a.clipInv * float4(ndc, z, 1.0);
+		c.a *= saturate((length(w.xyz / w.w) - hitT) / 4.0);
+	}
+	c.rgb += aurora * 0.1;
 	float3 col = pow(imPresent(c.rgb, f), 1.0 / 2.2) * c.a + pow(imPresent(aurora, f), 1.0 / 2.2) * (1.0 - c.a);
 	if (c.a <= 0.0 && max(max(aurora.r, aurora.g), aurora.b) <= 0.0) discard_fragment();
 	return float4(col, c.a);

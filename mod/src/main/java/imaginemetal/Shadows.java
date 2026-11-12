@@ -34,6 +34,15 @@ public final class Shadows {
 	static final float NEAR_RANGE = 32f;
 	/** Depth range along the light (blocks before and behind the camera). */
 	private static final float DEPTH = 256f;
+
+	/**
+	 * (Build C1) The far cascade's depth range: with a reach past ~180 blocks its square's corners (reach x 1.41 from the camera)
+	 * lie farther along a low sun's light than 256, and what's out there fell out of the map: lit, no shadow. One and a half
+	 * times the reach from 171 blocks up; the near cascade keeps 256 (its depth bias is tuned to it).
+	 */
+	private static float depth(int c) {
+		return c == 0 ? DEPTH : Math.max(DEPTH, 1.5f * Settings.shadowRange);
+	}
 	/** The light is kept at least this high for the projection (shadows of a grazing sun would stretch to infinity). */
 	private static final float MIN_ELEVATION = 0.08f;
 	private static final int FRAME_BYTES = 128;
@@ -159,8 +168,9 @@ public final class Shadows {
 				for (int i = 0; i < 3; i++) a[i] += kx * x[i] + ky * y[i] + kz * z[i];
 			}
 			float cx = (float) (a[0] - cam.x), cy = (float) (a[1] - cam.y), cz = (float) (a[2] - cam.z);
-			CLIP[c].setOrtho(-range, range, -range, range, 0f, 2f * DEPTH, true)
-				.lookAt(cx + (float) z[0] * DEPTH, cy + (float) z[1] * DEPTH, cz + (float) z[2] * DEPTH, cx, cy, cz, (float) y[0], (float) y[1], (float) y[2]);
+			float dep = depth(c);
+			CLIP[c].setOrtho(-range, range, -range, range, 0f, 2f * dep, true)
+				.lookAt(cx + (float) z[0] * dep, cy + (float) z[1] * dep, cz + (float) z[2] * dep, cx, cy, cz, (float) y[0], (float) y[1], (float) y[2]);
 			CLIP[c].get(MATRIX[c]);
 			CULL[c].set(CLIP[c]);
 			LIGHT[c][0] = (float) lx;
@@ -187,7 +197,8 @@ public final class Shadows {
 		Far k = far;
 		OwnTerrain own = OwnTerrain.get();
 		boolean usable = k != null && k.own == own && k.range == Settings.shadowRange
-			&& Math.abs(cam.x - k.camX) + Math.abs(cam.y - k.camY) + Math.abs(cam.z - k.camZ) < FAR_MOVE;
+			// (Build C1: a sixteenth of the reach where that is more, 16 blocks at 256: the map covers far more than the camera moves)
+			&& Math.abs(cam.x - k.camX) + Math.abs(cam.y - k.camY) + Math.abs(cam.z - k.camZ) < Math.max(FAR_MOVE, Settings.shadowRange / 16.0);
 		skipNear = Settings.shadowNearAlternate && nearKept && nearDrawnLast && nearOwn == own
 			&& Math.abs(cam.x - nearCamX) + Math.abs(cam.y - nearCamY) + Math.abs(cam.z - nearCamZ) < 2.0;
 		if (skipNear) new Matrix4f(nearClip).translate((float) (cam.x - nearCamX), (float) (cam.y - nearCamY), (float) (cam.z - nearCamZ)).get(MATRIX[0]);

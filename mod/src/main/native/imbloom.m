@@ -20,7 +20,7 @@ typedef struct {
 	float clipInv[16];
 	float prevClip[16];   // the last frame's transform, from this frame's camera-relative world (the shafts' history)
 	float taa[4];         // TAA: xy the jitter in uv, z 1 = the history is usable
-	float taaPrev[4];     // TAA: xy the last frame's jitter in uv
+	float taaPrev[4];     // TAA: xy the last frame's jitter in uv, z 1 = steadier far away
 } ImBloomParams;
 
 id<MTLTexture> mc_im_ssr_depth(void);
@@ -512,6 +512,7 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 				p.taa[3] = (float) src.width / (float) dst.width;
 				p.taaPrev[0] = b->taaPrevJ[0];
 				p.taaPrev[1] = b->taaPrevJ[1];
+				p.taaPrev[2] = b->taaJitter[2] > 1.5f ? 1.0f : 0.0f;  // (Build C1: on = 2: steadier far away, imaginemetal.Bloom)
 				b->taaPrevJ[0] = b->taaJitter[0];
 				b->taaPrevJ[1] = b->taaJitter[1];
 				MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];

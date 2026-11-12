@@ -70,6 +70,47 @@ public final class Sky {
 	}
 
 	private static boolean cloudsFailed, texturesSet;
+	/**
+	 * (Build C1, Settings.cloudsLate) This frame's clouds and aurora wait for the opaque world: Reflections.captureUnder draws
+	 * them right before the translucent pass, behind what's nearer than they are (sky.metal im_clouds_late_fs). Whether that
+	 * happened is checked once the level has drawn ({@link #lateEnd}); if it doesn't for 20 frames running, they are drawn in
+	 * the sky pass again, as before, for the rest of the session.
+	 */
+	private static boolean latePending, lateOff, lateLogged;
+	private static int lateMisses;
+
+	static boolean latePending() {
+		return latePending;
+	}
+
+	static long nativeState() {
+		return state;
+	}
+
+	/** Clip -> view direction for this frame (the late clouds' rays, the same as the sky pass's). */
+	static Matrix4f rotNow() {
+		return skyRot();
+	}
+
+	/** (Reflections.captureUnder) the late clouds were drawn this frame. */
+	static void lateDrawn() {
+		latePending = false;
+		lateMisses = 0;
+		if (!lateLogged) {
+			lateLogged = true;
+			System.out.println("[Imagine Metal] clouds on (after the opaque world, behind what's in front of them)");
+		}
+	}
+
+	/** After the level's passes (LevelRendererMixin): were this frame's late clouds drawn? */
+	public static void lateEnd() {
+		if (!latePending) return;
+		latePending = false;
+		if (++lateMisses >= 20 && !lateOff) {
+			lateOff = true;
+			System.out.println("[Imagine Metal] clouds: the pass after the opaque world didn't run for 20 frames, drawn in the sky pass again (as before)");
+		}
+	}
 
 	/** this frame's bob and hurt tilt (GameRendererBobMixin), multiplied into the projection as Minecraft does; identity if none */
 	private static final Matrix4f BOB = new Matrix4f();
@@ -189,6 +230,13 @@ public final class Sky {
 					Clouds.NOISE, Clouds.NOISE) != 0) throw new IllegalStateException("cloud textures");
 				texturesSet = true;
 				System.out.println("[Imagine Metal] clouds on (" + Clouds.mapW + "x" + Clouds.mapH + " map)");
+			}
+			// (Build C1: after the opaque world instead, when that pass will run this frame; Minecraft's own clouds are skipped
+			// either way)
+			if (Settings.cloudsLate && !lateOff && Reflections.underWillRun()) {
+				latePending = true;
+				if (clouds) Clouds.markDrawn();
+				return;
 			}
 			MetalBridge.flushClear(encoder, target);
 			try (MemoryStack stack = MemoryStack.stackPush()) {

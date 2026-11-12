@@ -35,6 +35,48 @@ public final class ImagineFrame {
 	}
 	private static long lastNs;
 	static float cave, night;
+	/**
+	 * (Build C1) How much the player stands in the open air under something high, 0..1: the first block straight above the eyes
+	 * is far up (none at 16 blocks, all at 40 or more: a sky island, a high arch) AND the open sky comes down to the eyes'
+	 * height somewhere within 128 blocks around (full sky light there). Minecraft's sky light is 0 under a sky island's middle
+	 * just as in a cave, so by the sky light at the eyes alone that counted as underground: the cave's dark grade, and the light
+	 * shafts' "something overhead" mode over open sea. A cavern with a high roof has no open sky beside it and stays a cave.
+	 * Looked up every eighth frame (one column of 64 blocks, up to 64 light levels).
+	 */
+	private static float highCover;
+	private static int highCoverTick;
+
+	private static float highCover(ClientLevel level, net.minecraft.core.BlockPos eye) {
+		if ((highCoverTick++ & 7) != 0) return highCover;
+		try {
+			int top = level.getMinY() + level.getHeight();
+			var q = new net.minecraft.core.BlockPos.MutableBlockPos(eye.getX(), eye.getY(), eye.getZ());
+			int gap = 64;
+			for (int i = 1; i <= 64; i++) {
+				q.setY(eye.getY() + i);
+				if (q.getY() > top) break;
+				if (!level.getBlockState(q).isAir()) {
+					gap = i;
+					break;
+				}
+			}
+			float high = smoothstep(16f, 40f, gap);
+			int best = 0;
+			if (high > 0f) {
+				final int[] dx = {1, 1, 0, -1, -1, -1, 0, 1}, dz = {0, 1, 1, 1, 0, -1, -1, -1};
+				for (int r = 16; r <= 128 && best < 15; r += 16) {
+					for (int k = 0; k < 8 && best < 15; k++) {
+						q.set(eye.getX() + dx[k] * r, eye.getY(), eye.getZ() + dz[k] * r);
+						best = Math.max(best, level.getBrightness(net.minecraft.world.level.LightLayer.SKY, q));
+					}
+				}
+			}
+			highCover = high * smoothstep(9f, 14f, best);
+		} catch (Throwable t) {
+			highCover = 0f;
+		}
+		return highCover;
+	}
 	/** the light shafts (Bloom): the light's direction and colour, this frame's sky ours (overworld, eyes in air), rain */
 	static final float[] shaftDir = new float[3], shaftColor = new float[3];
 	static boolean shaftOn, underwater;
@@ -228,6 +270,9 @@ public final class ImagineFrame {
 					up[i] = mix(up[i], lum * Haze.look[3 + i], Haze.look[6] * bw);
 					light[i] *= mix(1f, Haze.look[i], bw);
 				}
+				// (Build C1, the desert look: the shade there a fifth darker again, so lit and shaded sand read clearly apart, as
+				// in Reimagined's desert, where the shade is under half the lit sand's brightness; ours was four fifths of it)
+				if (Settings.desertLook) for (int i = 0; i < 3; i++) up[i] *= 1f - 0.22f * Haze.dry * bw;
 			}
 
 			// the sky itself: Complementary Reimagined's sky colours (lib/colors/skyColors.glsl), from Minecraft's sky colour for this
@@ -401,14 +446,18 @@ public final class ImagineFrame {
 		BUF.clear();
 		put(lightDir[0], lightDir[1], lightDir[2], sunFlag);
 		put(light[0], light[1], light[2], rain);
-		put(up[0], up[1], up[2], 0f);
-		put(down[0], down[1], down[2], 0f);
+		// (Build C1, the free w's: ambientUp.w 1 = daylight under something high overhead decided by the shadow maps (imShade);
+		// ambientDown.w the far cascade's softness, a shadow's blur in blocks per block between caster and receiver (0: off))
+		put(up[0], up[1], up[2], Settings.shadowOpenAir && dim == 0 ? 1f : 0f);
+		put(down[0], down[1], down[2], Settings.shadowSoftFar && dim != 1 ? 0.03f : 0f);
 		put(TORCH[0], TORCH[1], TORCH[2], dim == 0 ? day * (1f - 0.5f * rain) : 0f);
 		put(floor[0], floor[1], floor[2], 0.9f); // w: exposure
 		put(TM_A, TM_D, TM_B, TM_C);
 		// saturation, vibrance: gentle (measured against Reimagined's frames, more crushed the blue out of grass and leaves)
 		// (z: the generated normals' bevels are baked, bound at texture 27: PbrAtlas.bake)
-		put(1.04f, 0.08f, PbrAtlas.bevel && !PbrAtlas.on ? 1f : 0f, 0f);
+		// (w, Build C1: the desert look's share of the grade and the sand, imGrade and imShade: how much the camera is in a dry
+		// biome, as of the last frame)
+		put(1.04f, 0.08f, PbrAtlas.bevel && !PbrAtlas.on ? 1f : 0f, Settings.desertLook && dim == 0 ? Math.clamp(Haze.dry, 0f, 1f) : 0f);
 		BUF.putInt(dim).putInt(Settings.debug).putInt(Live.isOff() ? 0 : 1).putInt(frame++);  // (z 0: plain lighting, shaders off live)
 		// how far underground the player is (by the sky light at their eyes, eased so walking into a cave fades) and how much it's
 		// night: the picture's grade (Bloom's resolve) darkens the dark parts more in both
@@ -425,6 +474,8 @@ public final class ImagineFrame {
 			if (camera.fogType == net.minecraft.world.level.material.FogType.WATER)
 				for (int i = 0; i < 64 && !level.getFluidState(eye).isEmpty(); i++) eye = eye.above();
 			eyeNow = level.getBrightness(net.minecraft.world.level.LightLayer.SKY, eye) / 15f;
+			// (Build C1: under something high overhead it's still the open air)
+			if (Settings.shadowOpenAir && dim == 0 && eyeNow < 1f) eyeNow = Math.max(eyeNow, highCover(level, eye));
 		}
 		eyeSky += (eyeNow - eyeSky) * (1f - (float) Math.exp(-dt / 1.2f));
 		// (an open cave, where the sky's light still reaches the player, isn't a cave: counted as one, the whole picture was darkened
@@ -432,9 +483,13 @@ public final class ImagineFrame {
 		cave = dim == 0 ? 1f - smoothstep(0.08f, 0.4f, eyeSky) : 0f;
 		// something overhead (leaves, a cave roof, an arch: the sky light where the player stands below full): Reimagined's
 		// scene-aware light shafts, eased in and out over a couple of seconds
-		shaftCover += ((eyeNow < 0.97f ? 1f : 0f) - shaftCover) * (1f - (float) Math.exp(-dt / 2f));
+		// (Build C1: a ramp, not a step: any level below 15, one leaf block over the player's head, was full strength; now nothing
+		// at 14 (0.93), full only from 9 (0.6) down, a real canopy or a cave mouth)
+		float coverNow = Settings.shaftVeilFix ? 1f - smoothstep(0.6f, 0.93f, eyeNow) : eyeNow < 0.97f ? 1f : 0f;
+		shaftCover += (coverNow - shaftCover) * (1f - (float) Math.exp(-dt / 2f));
 		night = dim == 0 ? 1f - day : 0f;
-		put(cave, night, 0f, 0f);
+		// (z, Build C1: the light shafts' ceiling, the most light a ray's whole length may add (bloom.metal); 0: none, as before)
+		put(cave, night, Settings.shaftVeilFix ? 0.35f : 0f, 0f);
 		for (int c = 0; c < 2; c++) for (int i = 0; i < 16; i++) BUF.putFloat(Shadows.MATRIX[c][i]);
 		// shadow: near cascade normal offset, valid, far cascade normal offset
 		put(Shadows.normalOffset(0), Shadows.valid() ? 1f : 0f, Shadows.normalOffset(1), Settings.pbr ? 1f : 0f);

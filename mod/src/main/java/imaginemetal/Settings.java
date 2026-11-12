@@ -15,7 +15,8 @@ public final class Settings {
 
 	// live
 	public static volatile boolean shadows = Engine.flag("imaginemetal.shadows", true);
-	public static volatile float shadowRange = Config.number("imaginemetal.shadowRange", 160, 64, 256);
+	/** (Build C1: 256 by default, the whole view at render distance 16; a saved 160, the old default, is moved up once: Config.migrate) */
+	public static volatile float shadowRange = Config.number("imaginemetal.shadowRange", 256, 64, 256);
 	public static volatile boolean coloredLight = Engine.flag("imaginemetal.coloredLight", true);
 	public static volatile boolean sky = Engine.flag("imaginemetal.sky", true);
 	public static volatile float haze = Config.number("imaginemetal.airFog", 1f, 0f, 3f);
@@ -82,6 +83,33 @@ public final class Settings {
 	 * to be this and not the far cache). -Dimaginemetal.shadowNearViewCull=true turns it on.
 	 */
 	public static volatile boolean shadowNearViewCull = Engine.flag("imaginemetal.shadowNearViewCull", false);
+	// ---- Build C1: each change behind its own switch (Settings > Advanced > Debug), none saved; a -D starts with it off ----
+	/**
+	 * The light shafts' "something overhead" mode kept to where something is: its strength from a ramp on the sky light at the eyes
+	 * (ImagineFrame.shaftCover), only for rays that pass through shadow, and the veil's total capped (bloom.metal). Off: as Build B2
+	 * (any sky light below 15 at the eyes = full strength: the whiteout). -Dimaginemetal.shaftVeilFix=false.
+	 */
+	public static volatile boolean shaftVeilFix = Engine.flag("imaginemetal.shaftVeilFix", true);
+	/**
+	 * Flat things drawn as translucent mobs (Simple Blood's splats on the ground) pulled toward the camera by the depth their own
+	 * slope spans in a pixel and a half: the terrain is drawn with the TAA's sub-pixel offset and they are not, so the depth test
+	 * between the two flipped from frame to frame and whole splats blinked. -Dimaginemetal.decalBias=false.
+	 */
+	public static volatile boolean decalBias = Engine.flag("imaginemetal.decalBias", true);
+	/** The TAA steadier far away while the camera is still (bloom.metal im_bloom_taa). -Dimaginemetal.taaFarSteady=false. */
+	public static volatile boolean taaFarSteady = Engine.flag("imaginemetal.taaFarSteady", true);
+	/** The far shadow cascade softer the farther the caster, and a wider fade at its edge (lighting.metal imShadow). -Dimaginemetal.shadowSoftFar=false. */
+	public static volatile boolean shadowSoftFar = Engine.flag("imaginemetal.shadowSoftFar", true);
+	/**
+	 * Daylight under something high overhead (a sky island, a tall overhang): Minecraft's sky light is 0 there, as in a cave, which
+	 * cut the sun and the sky's light to a black, block-edged patch. The sun's shadow maps decide instead where the caster is far
+	 * away, and a cover high above the player isn't "underground" (ImagineFrame). -Dimaginemetal.shadowOpenAir=false.
+	 */
+	public static volatile boolean shadowOpenAir = Engine.flag("imaginemetal.shadowOpenAir", true);
+	/** Dry biomes toward Reimagined's desert: colder, darker shade, warmer sand, less vibrance on beige. -Dimaginemetal.desertLook=false. */
+	public static volatile boolean desertLook = Engine.flag("imaginemetal.desertLook", true);
+	/** Our clouds drawn after the opaque world, behind what's in front of them (Sky.drawCloudsLate). -Dimaginemetal.cloudsLate=false. */
+	public static volatile boolean cloudsLate = Engine.flag("imaginemetal.cloudsLate", true);
 	public static volatile boolean ssao = Engine.flag("imaginemetal.ssao", true);
 	public static volatile float ssaoStrength = Config.number("imaginemetal.ssaoStrength", 0.7f, 0f, 1f);
 	public static volatile boolean shafts = Engine.flag("imaginemetal.shafts", true);
@@ -160,6 +188,7 @@ public final class Settings {
 		v.put("imaginemetal.bloom", String.valueOf(bloom));
 		v.put("imaginemetal.bloomStrength", String.format(java.util.Locale.ROOT, "%.2f", bloomStrength));
 		v.put("imaginemetal.debug", String.valueOf(debug));
+		v.put("imaginemetal.configVersion", String.valueOf(Config.VERSION));
 		Config.save(v);
 	}
 }

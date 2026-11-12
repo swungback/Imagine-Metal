@@ -30,7 +30,7 @@ struct ImBloomParams {
 	float4x4 prevClip; // the last frame's clip, from this frame's camera-relative world (the shafts' history)
 	float4 taa;        // TAA: xy this frame's jitter in uv, z 1 = the history is usable, w the world's size as a share of the screen's
 	                   // (the resolve: w 1 = the TAA pass follows and dithers)
-	float4 taaPrev;    // TAA: xy the last frame's jitter in uv
+	float4 taaPrev;    // TAA: xy the last frame's jitter in uv, z 1 = steadier far away (Build C1)
 };
 
 // The history sampled with a Catmull-Rom filter (9 taps folded into 5 bilinear ones): plain bilinear blurs it a little every
@@ -149,7 +149,7 @@ struct ImVlFrame {
 	float4 lightColor;
 	float4 pad0[6];
 	int4 flags;
-	float4 env;
+	float4 env;          // z the light shafts' ceiling (Build C1; 0: none)
 	float4x4 shadowNear;
 	float4x4 shadowFar;
 	float4 shadow;       // y 1 = the maps are valid this frame
@@ -340,6 +340,28 @@ static float4 imbEnd(float3 dir, float len, bool open, float j, depth2d_array<fl
 	return float4(vio, len, org, 1.0);
 }
 
+// How much the light shafts show for a view ray (toward the light, toward the horizon) at this time of day; intense: how much
+// the "something overhead" mode counts (0..1).
+static inline float imbVlMult(float intense, float len, float maxD, float vdotl, float vdotu, constant ImVlFrame &f) {
+	float rain = f.dayUp.w, sunVis = f.nightMiddle.w, invNoon = f.sunsetDown.w;
+	float vdotlm = max((vdotl + 1.0) * 0.5, 0.0);
+	float up = max(vdotu, 0.0);
+	float vdotum = imbSmooth(mix((1.0 - up) * (1.0 - up), 1.0, 0.5 * intense));
+	vdotum = pow(vdotum, min(len / maxD, 1.0) * (3.0 - 2.0 * intense));
+	float vlTime = saturate((min(abs(f.sunDir.y) - 0.05, 0.15)) / 0.15);
+	float rainyNight = (1.0 - sunVis) * rain;
+	float m = mix(vdotum * vdotlm, 1.0, 0.4 * rainyNight) * vlTime;
+	m *= mix(invNoon * invNoon * 0.875 + 0.125, 1.0, max(intense, rain * rain));
+	m *= 1.4 - 0.4 * rain;
+	// (straight into a low sun less: the beams there summed into a white glare over the whole view)
+	float vl8 = vdotlm * vdotlm;
+	vl8 *= vl8;
+	vl8 *= vl8;
+	m *= 1.0 - 0.45 * vl8;
+	if (sunVis < 0.5) m *= 0.3 + 0.4 * rain * rain + 0.5 * max(f.fogParams.x - len, 0.0) / max(f.fogParams.x, 1.0);
+	return m;
+}
+
 // Light shafts: Complementary Reimagined's volumetric light (lib/atmospherics/volumetricLight/volumetricLight.glsl), at half size.
 // Along each pixel's view ray out to the render distance, points checked against the sun's shadow maps (more of them near the eye),
 // each standing for its slice of a fog that thickens with distance; the lit share of that fog is the light scattered toward the eye.
@@ -367,28 +389,15 @@ static float4 imbShaftsNow(ImBloomOut in, depth2d<float> depth, depth2d_array<fl
 
 	// how much: by the view (toward the light, toward the horizon) and the time of day
 	float vdotl = dot(dir, f.lightDir.xyz), vdotu = dir.y;
-	float vlMult = 1.0;
 	if (sunVis < 0.5) intense = 0.0;
-	float vdotlm = max((vdotl + 1.0) * 0.5, 0.0);
-	float up = max(vdotu, 0.0);
-	float vdotum = imbSmooth(mix((1.0 - up) * (1.0 - up), 1.0, 0.5 * intense));
 	float maxD = max(f.fogParams.x * 0.98, 128.0);
 	if (water) maxD = 128.0;
-	vdotum = pow(vdotum, min(len / maxD, 1.0) * (3.0 - 2.0 * intense));
-	float sdotu = f.sunDir.y;
-	float vlTime = saturate((min(abs(sdotu) - 0.05, 0.15)) / 0.15);
-	float rainyNight = (1.0 - sunVis) * rain;
-	vlMult *= mix(vdotum * vdotlm, 1.0, 0.4 * rainyNight) * vlTime;
-	float invNoon2 = invNoon * invNoon;
-	vlMult *= mix(invNoon2 * 0.875 + 0.125, 1.0, max(intense, rain * rain));
-	vlMult *= 1.4 - 0.4 * rain;
-	// (straight into a low sun less: the beams there summed into a white glare over the whole view)
-	float vl8 = vdotlm * vdotlm;
-	vl8 *= vl8;
-	vl8 *= vl8;
-	vlMult *= 1.0 - 0.45 * vl8;
-	if (sunVis < 0.5) vlMult *= 0.3 + 0.4 * rain * rain + 0.5 * max(f.fogParams.x - len, 0.0) / max(f.fogParams.x, 1.0);
-	if (vlMult < 0.0001) return float4(0.0, len, 0.0, 1.0);
+	float vlMult = imbVlMult(intense, len, maxD, vdotl, vdotu, f);
+	// (Build C1, f.env.z > 0: the "something overhead" strength only for rays that pass through shadow, see below; a ray the
+	// light reaches all along gets the open air's strength, vlPlain)
+	bool veilFix = f.env.z > 0.0 && !water;
+	float vlPlain = veilFix && intense > 0.0 ? imbVlMult(0.0, len, maxD, vdotl, vdotu, f) : vlMult;
+	if (max(vlMult, vlPlain) < 0.0001) return float4(0.0, len, 0.0, 1.0);
 
 	// the march
 	// (12 and 8: the jitter changes every frame and the history smooths it, so fewer shadow-map reads give the same beams)
@@ -401,8 +410,9 @@ static float4 imbShaftsNow(ImBloomOut in, depth2d<float> depth, depth2d_array<fl
 	float j = fract(52.9829189 * fract(dot(in.pos.xy, float2(0.06711056, 0.00583715))) + 0.61803399 * float(f.flags.w & 1023));
 	float eyeBright = saturate(p.shaft.x);  // (beyond the shadow maps: as lit as where the player stands, by the sky light there)
 	float vl = 0.0, last = 0.0;
+	float mapLit = 0.0, mapAll = 0.0;  // (of the part of the ray the shadow maps cover: how much the light reaches, and all of it)
 	for (int i = 0; i <= nearN + 1; i++) {
-		float next, dens;
+		float next, dens, lit = 1.0;
 		if (i <= nearN) {
 			float t = (float(i) + j) / float(nearN);
 			next = pow(t, distrib) * active;
@@ -413,12 +423,18 @@ static float4 imbShaftsNow(ImBloomOut in, depth2d<float> depth, depth2d_array<fl
 			dens = eyeBright;
 			float4 c1 = f.shadowFar * float4(q, 1.0);
 			float e1 = max(abs(c1.x), abs(c1.y));
-			if (e1 < 0.98 && c1.z > 0.0 && c1.z < 1.0)
-				dens = mix(smap.sample_compare(cmp, float2(0.5 + 0.5 * c1.x, 0.5 - 0.5 * c1.y), 1, c1.z - 0.0002), eyeBright, smoothstep(0.75, 0.98, e1));
+			if (e1 < 0.98 && c1.z > 0.0 && c1.z < 1.0) {
+				float s1 = smap.sample_compare(cmp, float2(0.5 + 0.5 * c1.x, 0.5 - 0.5 * c1.y), 1, c1.z - 0.0002), k1 = smoothstep(0.75, 0.98, e1);
+				dens = mix(s1, eyeBright, k1);
+				lit = mix(s1, 1.0, k1);
+			}
 			float4 c0 = f.shadowNear * float4(q, 1.0);
 			float e0 = max(abs(c0.x), abs(c0.y));
-			if (e0 < 0.95 && c0.z > 0.0 && c0.z < 1.0)
-				dens = mix(smap.sample_compare(cmp, float2(0.5 + 0.5 * c0.x, 0.5 - 0.5 * c0.y), 0, c0.z - 0.0001), dens, smoothstep(0.75, 0.95, e0));
+			if (e0 < 0.95 && c0.z > 0.0 && c0.z < 1.0) {
+				float s0 = smap.sample_compare(cmp, float2(0.5 + 0.5 * c0.x, 0.5 - 0.5 * c0.y), 0, c0.z - 0.0001), k0 = smoothstep(0.75, 0.95, e0);
+				dens = mix(s0, dens, k0);
+				lit = mix(s0, lit, k0);
+			}
 			if (water && dens > 0.0) {
 				// (the waves above focus the light into moving beams: a pattern on the surface, carried down along the light)
 				float3 wq = q + f.world.xyz;
@@ -436,9 +452,24 @@ static float4 imbShaftsNow(ImBloomOut in, depth2d<float> depth, depth2d_array<fl
 		float cw = imbSmooth(pow(saturate(last / maxD), fogCurve));
 		float nw = imbSmooth(pow(saturate(next / maxD), fogCurve));
 		vl += dens * (nw - cw);
+		if (i <= nearN) {
+			mapLit += lit * (nw - cw);
+			mapAll += nw - cw;
+		}
 		last = next;
 	}
-	return float4(vl * vlMult, len, 0.0, 1.0);
+	float v = vl * vlMult;
+	if (veilFix) {
+		// (Build C1, the whiteout: with anything overhead, one leaf block or a sky island far above, every ray took the
+		// "something overhead" strength, at any time of day; over open ground or sea the light reaches the whole ray, and that
+		// summed to a flat veil in the shafts' colour over the picture, pink at sunrise, blue-white later. That strength is for
+		// beams: now by how much of the ray lies in shadow (none below 8 %, all of it from 40 %); and whatever the mode, the
+		// light one ray adds levels off toward a ceiling, f.env.z)
+		float shadowed = mapAll > 1e-5 ? saturate(1.0 - mapLit / mapAll) : 0.0;
+		v = vl * mix(vlPlain, vlMult, smoothstep(0.08, 0.4, shadowed));
+		v = f.env.z * (1.0 - exp(-v / f.env.z));
+	}
+	return float4(v, len, 0.0, 1.0);
 }
 
 fragment float4 im_bloom_shafts(ImBloomOut in [[stage_in]], depth2d<float> depth [[texture(1)]], texture2d<float> hist [[texture(2)]],
@@ -852,7 +883,13 @@ fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur 
 			// only place the detail between this frame's pixels lives, and a box of one spread (as it was) cut that detail back
 			// out every frame, to a different place each time as the sub-pixel offset moved: blurry and shimmering at once
 			// (the method is GaelQuinta's TAAU's: 1.25 spreads, more while still; here up to 2 at 67 %)
-			float gam = 1.25 + still * (0.25 + 0.5 * scaled);
+			// (Build C1, taaPrev.z: far away, while the picture holds still, the history is trusted more. There a block edge or a
+			// leaf is under a pixel of the smaller frame, so this frame's 3x3 box is a different one every frame as the sub-pixel
+			// offset moves, the history was pulled into it each time and the far land flickered. From 48 blocks out, fully at 144:
+			// a wider box, 40 % of the history's part outside it kept (gone within a few frames if something really changed),
+			// more of the history, and less of the takeover below. Not the sky.)
+			float farS = p.taaPrev.z > 0.5 && dmin > 0.00001 ? smoothstep(48.0, 144.0, length(P)) * still : 0.0;
+			float gam = 1.25 + still * (0.25 + 0.5 * scaled) + 0.75 * farS;
 			float3 lo3 = max(mn, m1 - gam * sd), hi3 = min(mx, m1 + gam * sd);
 			float3 ctr = 0.5 * (lo3 + hi3), ext = 0.5 * (hi3 - lo3) + 1.0 / 400.0;
 			// (pulled toward the box's middle along its own line, not channel by channel: the hue kept)
@@ -860,10 +897,12 @@ fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur 
 			float3 au = abs(dv) / ext;
 			float outside = max(au.x, max(au.y, au.z));  // (how far out, in box sizes: 1 = on its edge)
 			float3 h = outside > 1.0 ? ctr + dv / outside : hc;
+			h = mix(h, hc, 0.4 * farS);
 			// (less history where the picture moved a lot on screen: sharper in motion)
 			float k = mix(0.88, 0.6, saturate(moved / 8.0));
 			// (with a render scale a still picture keeps more of it: each screen pixel only gets a near sample every few frames)
 			k = mix(k, max(k, 0.94), scaled * (1.0 - saturate(moved / 2.0)));
+			k = mix(k, max(k, 0.965), farS);
 			// (beside a waving plant less history, near the camera, where its sway is many pixels: the sway left ghost copies of
 			// grass on the sand. Not far off, and less so with a render scale: with little history the picture there is this
 			// frame's alone, shifted by a new sub-pixel offset every frame: "leaves look jittery all around")
@@ -875,13 +914,15 @@ fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur 
 			float a = (1.0 - k) * mix(lo, 1.0, nearW);
 			// (and where the history lay well outside the box, something changed there that the camera's motion doesn't explain:
 			// this frame takes over, from one box size out. Before, any pull at all cut the history's share)
-			a = max(a, 0.5 * saturate((outside - 1.0) / 2.5));
+			a = max(a, 0.5 * saturate((outside - 1.0) / 2.5) * (1.0 - 0.6 * farS));
 			res = mix(h, c, a);
 			// (a light sharpen against what's left of the softness, on the screen only: fed back into the history it sharpened
 			// the already sharpened picture every frame, the finest grain growing until the colour box stopped it, a crawling
 			// static over walls and floors)
 			// (0.3 at full size, 0.5 at 67 %; kept inside the neighbourhood's own colours, so edges get no halos)
-			shown = clamp(res + (res - m1) * mix(0.3, 0.5, scaled), min(loC, res), max(hiC, res));
+			// (Build C1: less of it far away, moving or not: there it sharpened the flicker)
+			float farSharp = p.taaPrev.z > 0.5 && dmin > 0.00001 ? 1.0 - 0.6 * smoothstep(48.0, 144.0, length(P)) : 1.0;
+			shown = clamp(res + (res - m1) * (mix(0.3, 0.5, scaled) * farSharp), min(loC, res), max(hiC, res));
 		}
 	}
 	o.screen = float4(shown + imbDither8(in.pos.xy), 1.0);

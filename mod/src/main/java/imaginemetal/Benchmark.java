@@ -63,6 +63,13 @@ public final class Benchmark {
 		steps.add(new Step("shadow range 96", () -> Settings.shadowRange = Math.min(Settings.shadowRange, 96f)));
 		steps.add(new Step("far shadow map drawn every other frame (not kept)", () -> Settings.shadowFarCache = false));
 		steps.add(new Step("near shadow map drawn every frame", () -> Settings.shadowNearAlternate = false));
+		// (Build C1: what each of its changes costs; "off" = as Build B2)
+		steps.add(new Step("shadow range 160 (as before C1)", () -> Settings.shadowRange = Math.min(Settings.shadowRange, 160f)));
+		steps.add(new Step("soft far shadows off (C1)", () -> Settings.shadowSoftFar = false));
+		steps.add(new Step("daylight under sky islands off (C1)", () -> Settings.shadowOpenAir = false));
+		steps.add(new Step("clouds drawn before the land (C1 off)", () -> Settings.cloudsLate = false));
+		steps.add(new Step("shaft veil fix off (C1)", () -> Settings.shaftVeilFix = false));
+		steps.add(new Step("TAA steadier far away off (C1)", () -> Settings.taaFarSteady = false));
 		steps.add(new Step("air pass off (the haze in every terrain fragment)", () -> Settings.airPass = false));
 		steps.add(new Step("deferred lighting off (every terrain fragment lit, as Build B1)", () -> Settings.deferred = false));
 		steps.add(new Step("near shadow casters culled to the view (experimental, off)", () -> Settings.shadowNearViewCull = true));

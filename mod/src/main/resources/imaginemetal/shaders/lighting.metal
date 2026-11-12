@@ -18,14 +18,17 @@ using namespace metal;
 struct ImFrame {
 	float4 lightDir;     // xyz unit direction toward the light that casts this frame's light (sun by day, moon by night), w 1 = sun
 	float4 lightColor;   // rgb direct light (linear), w rain 0..1
-	float4 ambientUp;    // rgb sky light from above (linear)
-	float4 ambientDown;  // rgb light bounced up from the ground (linear)
+	float4 ambientUp;    // rgb sky light from above (linear), w 1 = daylight under something high overhead by the shadow maps (Build C1)
+	float4 ambientDown;  // rgb light bounced up from the ground (linear), w the far shadows' softness: a shadow's blur in blocks per
+	                     // block between caster and receiver (0: off; Build C1)
 	float4 blockColor;   // rgb torch light at level 15 (linear), w how much daylight there is 0..1 (torches give way to it)
 	float4 minLight;     // rgb the least light anything gets (caves), w exposure
 	float4 tonemap;      // Lottes 2016: y = x^a / (x^(a d) b + c); x a, y d, z b, w c
-	float4 grade;        // x saturation, y vibrance, z 1 = the generated normals' bevels are baked (texture 27), w 0
+	float4 grade;        // x saturation, y vibrance, z 1 = the generated normals' bevels are baked (texture 27), w the desert look
+	                     // (Build C1: how much the camera is in a dry biome, 0..1: less vibrance on beige, warmer sand)
 	int4 flags;          // x dimension (0 overworld, 1 Nether, 2 End), y debug view, z 1 = the engine filled this frame, w frame index
-	float4 env;          // x how far underground the player is (0..1, eased), y how much it's night (0..1)
+	float4 env;          // x how far underground the player is (0..1, eased), y how much it's night (0..1), z the light shafts'
+	                     // ceiling (bloom.metal; 0: none)
 	float4x4 shadowNear; // camera-relative world -> the near cascade's light clip (orthographic)
 	float4x4 shadowFar;  // ... the far cascade's
 	float4 shadow;       // x near cascade normal offset (blocks), y 1 = the maps are valid this frame, z far cascade normal offset,
@@ -177,7 +180,11 @@ static inline float3 imGrade(float3 c, constant ImFrame &f) {
 	// (and a little more colour where it's muted, Reimagined's vibrance: the picture read bland, washed out)
 	// (but not near-grey colours: the boost for muted ones turned netherite's faint purple tint, a sword in the hand, plainly purple)
 	float muted = smoothstep(0.03, 0.12, sat);
-	return mix(float3(l), c, f.grade.x + (f.grade.y * (1.0 - sat) + 0.12 * (1.0 - saturate(sat * 2.5))) * muted);
+	float boost = (f.grade.y * (1.0 - sat) + 0.12 * (1.0 - saturate(sat * 2.5))) * muted;
+	// (Build C1, the desert look: the boost for muted colours pushed beige, sand above all, toward yellow: "pale lemon". Warm
+	// hues between orange and yellow (red over green over blue, green well clear of blue) keep only a third of it)
+	if (f.grade.w > 0.0 && c.r >= c.g && c.g >= c.b) boost *= 1.0 - 0.67 * f.grade.w * saturate((c.g - c.b) / max(sat, 1e-4) * 2.0 - 0.6);
+	return mix(float3(l), c, f.grade.x + boost);
 }
 
 // light (linear, before the tone curve) as the terrain's own light ends up: exposure, the tone curve, the grade (linear after)
@@ -242,7 +249,9 @@ static inline float imSlopeBias(float4x4 m, float slope, float k, uint res) {
 // where it covers p, the far one beyond, blended across a band so the switch doesn't show. Both are snapped to world-fixed texel
 // grids, so a shadow stays put as the player walks. x: 1 lit, 0 shadowed; y: how much the maps cover p (1 inside, fading to 0 at
 // the far cascade's edge, 0 outside or with no maps this frame), so the caller blends to its sky-light fallback without a seam.
-static float2 imShadow(float3 p, float3 n, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp) {
+static float2 imShadowX(float3 p, float3 n, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp, bool wantOpen,
+	thread float &openAir) {
+	openAir = 0.0;
 	if (f.shadow.y < 0.5) return float2(1.0, 0.0);
 	// the normal offset grows as the light grazes the face (a low sun across the ground): there one shadow texel spans a long strip
 	// of the surface and a fixed offset leaves the surface shadowing itself in crawling stripes
@@ -251,6 +260,9 @@ static float2 imShadow(float3 p, float3 n, float2 pixel, constant ImFrame &f, de
 	// (and a depth bias growing with the slope: on ground the light grazes, one shadow texel spans more depth than a fixed bias
 	// covers, and past the near cascade, with its coarser texels, the ground shadowed itself in stripes, line, gap, line)
 	float slope = min(sqrt(saturate(1.0 - nl * nl)) / max(abs(nl), 0.05), 4.0);
+	// (Build C1) the far cascade's softness (0: off, everything below as it was before)
+	float soft = f.ambientDown.w;
+	bool search = soft > 0.0 || wantOpen;
 	// the near cascade
 	float4 c0 = f.shadowNear * float4(p + n * (f.shadow.x * grazing), 1.0);
 	float e0 = max(abs(c0.x), abs(c0.y));
@@ -259,19 +271,83 @@ static float2 imShadow(float3 p, float3 n, float2 pixel, constant ImFrame &f, de
 	if (nearW > 0.0) {
 		float2 uv = float2(0.5 + 0.5 * c0.x, 0.5 - 0.5 * c0.y);
 		litNear = imShadowPcf(smap, cmp, uv, c0.z - 0.00006 - imSlopeBias(f.shadowNear, slope, 2.0, smap.get_width()), 0);
-		if (nearW >= 1.0) return float2(litNear, 1.0);
+		if (nearW >= 1.0 && !search) return float2(litNear, 1.0);
 	}
 	// the far cascade
 	float4 c1 = f.shadowFar * float4(p + n * (f.shadow.z * grazing), 1.0);
 	float e1 = max(abs(c1.x), abs(c1.y));
 	if (e1 > 0.98 || c1.z > 1.0 || c1.z < 0.0) return nearW > 0.0 ? float2(litNear, nearW) : float2(1.0, 0.0);
+	float res = float(smap.get_width());
 	float2 uv1 = float2(0.5 + 0.5 * c1.x, 0.5 - 0.5 * c1.y);
-	float o1 = 0.75 / float(smap.get_width());
-	float z1 = c1.z - 0.00012 - imSlopeBias(f.shadowFar, slope, 1.5, smap.get_width());
-	float litFar = 0.25 * (smap.sample_compare(cmp, uv1 + float2(-o1, -o1), 1, z1) + smap.sample_compare(cmp, uv1 + float2(o1, -o1), 1, z1)
-		+ smap.sample_compare(cmp, uv1 + float2(-o1, o1), 1, z1) + smap.sample_compare(cmp, uv1 + float2(o1, o1), 1, z1));
-	float cover = 1.0 - smoothstep(0.9, 0.98, e1);
+	float biasFar = 0.00012 + imSlopeBias(f.shadowFar, slope, 1.5, smap.get_width());
+	float z1 = c1.z - biasFar;
+	float litFar = 1.0;
+	if (nearW < 1.0) {
+		float o1 = 0.75 / res;
+		litFar = 0.25 * (smap.sample_compare(cmp, uv1 + float2(-o1, -o1), 1, z1) + smap.sample_compare(cmp, uv1 + float2(o1, -o1), 1, z1)
+			+ smap.sample_compare(cmp, uv1 + float2(-o1, o1), 1, z1) + smap.sample_compare(cmp, uv1 + float2(o1, o1), 1, z1));
+	}
+	// (Build C1: with the soft far shadows the fade out at the far cascade's edge starts sooner, over the last fifth of its reach)
+	float cover = 1.0 - smoothstep(soft > 0.0 ? 0.8 : 0.9, 0.98, e1);
+	if (search) {
+		// (Build C1) Softer the farther the caster (after percentage-closer soft shadows): five looks at the far map around the
+		// point, up to two blocks away along its own face, find what stands between it and the light and how far off that is;
+		// the shadow is then averaged over a disc that grows with that distance. A fence post's shadow stays as sharp as it was;
+		// a sky island's, a hundred blocks up, gets an edge blocks wide instead of its blocks' outlines.
+		// The looks and the taps lie in the face's own plane, so each has its own exact depth there and a face the light grazes
+		// doesn't shadow itself however wide the disc; turned by a different angle per pixel and frame, which the TAA evens out.
+		float4x4 m = f.shadowFar;
+		float xs = length(float3(m[0][0], m[1][0], m[2][0])), zs = length(float3(m[0][2], m[1][2], m[2][2]));
+		float texel = 2.0 / max(xs * res, 1e-6);  // (a far texel, in blocks)
+		float3 up = abs(n.y) > 0.9 ? float3(1.0, 0.0, 0.0) : float3(0.0, 1.0, 0.0);
+		float3 T = normalize(cross(n, up)), B = cross(n, T);
+		float3 dT = (m * float4(T, 0.0)).xyz, dB = (m * float4(B, 0.0)).xyz;
+		float dth = fract(dot(pixel, float2(0.06711056, 0.00583715)) * 52.9829189);
+		if (f.taa.z > 0.5) dth = fract(dth + 0.61803399 * float(f.flags.w & 63));
+		float ca = cos(dth * 6.2831853), sa = sin(dth * 6.2831853);
+		const float reach = 2.0;  // (blocks: the widest a shadow's edge gets is twice this)
+		const float2 k5[5] = {float2(0.3162, 0.0), float2(-0.4039, 0.3700), float2(0.0618, -0.7044), float2(0.5091, 0.6640), float2(-0.9342, -0.1652)};
+		float nb = 0.0, bsum = 0.0;
+		for (int i = 0; i < 5; i++) {
+			float2 o = float2(k5[i].x * ca - k5[i].y * sa, k5[i].x * sa + k5[i].y * ca) * reach;
+			float3 q = c1.xyz + dT * o.x + dB * o.y;
+			float2 quv = clamp(float2(0.5 + 0.5 * q.x, 0.5 - 0.5 * q.y), 0.0, 0.9999);
+			float d = smap.read(uint2(quv * res), 1);
+			float gap = (q.z - biasFar) - d;
+			if (gap > 0.0) {
+				nb += 1.0;
+				bsum += gap;
+			}
+		}
+		float away = nb > 0.0 ? bsum / (nb * max(zs, 1e-9)) : 0.0;  // (blocks from here to what shadows it, along the light)
+		// (how open the air toward the light is: lit, or shadowed only by something far off, a sky island and not a cave's roof)
+		if (wantOpen) openAir = ((5.0 - nb) + nb * smoothstep(24.0, 64.0, away)) * 0.2 * cover;
+		if (soft > 0.0 && nb > 0.0) {
+			float rB = min(away * soft, reach);  // (the disc's radius, blocks)
+			if (rB > texel) {
+				const float2 k8[8] = {float2(0.25, 0.0), float2(-0.3193, 0.2925), float2(0.0489, -0.5569), float2(0.4024, 0.5249),
+					float2(-0.7385, -0.1306), float2(0.6996, -0.4450), float2(-0.2340, 0.8705), float2(-0.4463, -0.8593)};
+				float pcf = 0.0;
+				for (int i = 0; i < 8; i++) {
+					float2 o = float2(k8[i].x * ca - k8[i].y * sa, k8[i].x * sa + k8[i].y * ca) * rB;
+					float3 q = c1.xyz + dT * o.x + dB * o.y;
+					pcf += smap.sample_compare(cmp, float2(0.5 + 0.5 * q.x, 0.5 - 0.5 * q.y), 1, q.z - biasFar);
+				}
+				pcf *= 0.125;
+				// (from one far texel's width the disc takes over from the four fixed taps; and inside the near cascade too once
+				// the edge is a block wide or more (a caster 20 to 50 blocks off along the light): a sky island's shadow is as soft
+				// at the player's feet as farther off, a tree's keeps the near map's leaves)
+				litFar = mix(litFar, pcf, nearW < 1.0 ? smoothstep(1.0, 2.5, rB / texel) : 1.0);
+				if (nearW > 0.0) litNear = mix(litNear, pcf, smoothstep(0.6, 1.5, rB));
+			}
+		}
+	}
 	return float2(mix(litFar, litNear, nearW), max(cover, nearW));
+}
+
+static float2 imShadow(float3 p, float3 n, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp) {
+	float open;
+	return imShadowX(p, n, pixel, f, smap, cmp, false, open);
 }
 
 // Material classes (the low 4 bits of a face's material byte, imaginemetal.Materials).
@@ -1097,7 +1173,10 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// (sand and sandstone a little richer and less bright: in full sun they washed out to a flat white)
 	if (cls == IM_MAT_SAND && kind == 0u) {
 		float al = imLuma(albedo);
-		albedo = max(al + (albedo - al) * 1.3, 0.0) * 0.93;
+		// (Build C1, the desert look: less of the extra colour and a touch toward peach: in the sun it came out a pale lemon
+		// where Reimagined's sand is a warm beige)
+		float3 was = max(al + (albedo - al) * 1.3, 0.0) * 0.93;
+		albedo = f.grade.w > 0.0 ? mix(was, max(al + (albedo - al) * 1.18, 0.0) * float3(0.955, 0.905, 0.925), f.grade.w) : was;
 	}
 	float3 base = pow(max(albedo, 0.0), 2.2);
 	bool pbr = IM_FC_PBR && f.shadow.w > 0.5 && f.flags.y == 0;
@@ -1158,12 +1237,21 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	if (leafy) wrap = slanted ? max(wrap, saturate(f.lightDir.y) * 0.9 + 0.1) : mix(wrap, 1.0, 0.35);
 	// sunlight: the shadow map where it reaches; the sky light stands in beyond it. Underground (no sky light at all) the sun is
 	// off regardless, so a cave never catches sunlight through an imprecision of the map.
-	float2 sm = IM_FC_SHADOWS ? imShadow(p, n, pixel, f, smap, cmp) : float2(1.0, 0.0);
-	float open = smoothstep(0.45, 0.9, sky);
+	// (Build C1: under something high overhead, a sky island, a tall overhang, Minecraft's sky light is 0 as in a cave, which cut
+	// the sun and the sky's light there to a black patch with block-stepped edges on open ground. Where the sky light is low
+	// the far shadow map is asked how open the air toward the sun is (imShadowX: lit, or shadowed only by something 24 to 64
+	// blocks off or more), and by that much the sky's light and the sun are let back in. Not while the player is underground:
+	// caves stay as dark as they were)
+	float oa = 0.0;
+	bool wantOpen = IM_FC_SHADOWS && f.ambientUp.w > 0.5 && f.flags.x == 0 && sky < 0.45 && f.env.x < 0.99 && f.water.z < 0.5;
+	float2 sm = IM_FC_SHADOWS ? imShadowX(p, n, pixel, f, smap, cmp, wantOpen, oa) : float2(1.0, 0.0);
+	oa *= 1.0 - f.env.x;
+	if (oa > 0.0) skyF = max(skyF, 0.8 * oa);
+	float open = max(smoothstep(0.45, 0.9, sky), oa);
 	float sun = mix(open, sm.x, sm.y);
 	// (under water the light is scattered: shadows there are soft and shallow, not the hard dark shapes cast on dry land)
 	if (f.water.z > 0.5 && f.flags.x == 0) sun = (0.45 + 0.55 * sun) * (0.3 + 0.7 * smoothstep(0.0, 0.6, sky));
-	else sun *= smoothstep(0.0, 0.07, sky);
+	else sun *= max(smoothstep(0.0, 0.07, sky), oa);
 	// mobs' and items' shadows (they aren't in the shadow map): a short trace toward the sun through the last frame's depth
 	// (a fixed step pattern, no per-pixel jitter: the jitter, against the last frame's depth of grass and petals, was a crawling
 	// grain over the ground)

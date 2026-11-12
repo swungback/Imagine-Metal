@@ -103,6 +103,18 @@ final class ImNative {
 	private static final MethodHandle UNDER_CAPTURE = fn("im_under_capture", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG,
 		JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_INT), false);
 
+	// (Build C1) the clouds after the opaque world: handed to the next im_under_capture (imssr.m)
+	private static final MethodHandle UNDER_CLOUDS = fn("im_under_clouds", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG), false);
+
+	/** sky: Sky's native state; target: the level's picture; rot, clipInv: 16 floats each. Followed at once by underCapture. */
+	static void underClouds(long state, long sky, long target, long rot, long clipInv) {
+		try {
+			UNDER_CLOUDS.invokeExact(state, sky, target, rot, clipInv);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
 	/** air: 16 floats (this frame's inverse clip) for the air pass over airTarget, or 0; lib the terrain library; frame the ImFrame. */
 	static int underCapture(long enc, long state, long color, long depth, long airTarget, long lib, long air, long frame, int frameBytes, long err, int errCap) {
 		try {

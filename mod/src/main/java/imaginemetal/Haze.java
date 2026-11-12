@@ -58,6 +58,11 @@ public final class Haze {
 	// (warm sun, but the shade kept cool and nearly the sky's: pulled most of the way to the sun's own yellow, the whole desert
 	// came out one flat piss-yellow, its shadows no different from its light)
 	private static final float[] LOOK_DRY = {1.05f, 1.0f, 0.9f, 0.94f, 0.97f, 1.06f, 0.15f};
+	/**
+	 * (Build C1, Settings.desertLook) toward Reimagined's desert, Jack's reference shot: the sun a touch warmer (peach, not lemon),
+	 * the shade a cold blue-grey and darker, pulled half way instead of a seventh.
+	 */
+	private static final float[] LOOK_DRY_C1 = {1.07f, 0.99f, 0.86f, 0.5f, 0.68f, 1.15f, 0.5f};
 	// (the shade a warm olive green, not the sky's blue pulled toward green: stone in a jungle's shade read teal-cyan)
 	private static final float[] LOOK_JUNGLE = {1.03f, 1.0f, 0.88f, 0.98f, 1.04f, 0.72f, 0.4f};
 	private static final float[] LOOK_SWAMP = {1.0f, 0.98f, 0.85f, 0.8f, 0.95f, 0.72f, 0.45f};
@@ -76,7 +81,7 @@ public final class Haze {
 		if (n.contains("pale_garden")) return LOOK_PALE;
 		if (n.contains("swamp") || n.contains("mangrove")) return LOOK_SWAMP;
 		if (n.contains("jungle") || n.contains("bamboo")) return LOOK_JUNGLE;
-		if (n.contains("desert") || n.contains("badlands") || n.contains("mesa") || n.contains("savanna")) return LOOK_DRY;
+		if (n.contains("desert") || n.contains("badlands") || n.contains("mesa") || n.contains("savanna")) return Settings.desertLook ? LOOK_DRY_C1 : LOOK_DRY;
 		if (n.contains("cherry")) return LOOK_CHERRY;
 		if (n.contains("snowy") || n.contains("frozen") || n.contains("ice") || n.contains("grove") || n.contains("jagged") || n.contains("peaks"))
 			return LOOK_SNOWY;

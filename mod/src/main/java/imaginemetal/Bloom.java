@@ -166,7 +166,8 @@ public final class Bloom {
 				}
 				ImNative.bloomFog(state, Settings.bloomFog ? fogK : 0f, fogMode, Settings.rainbows ? ImagineFrame.rainbow : 0f);
 				// (the jitter in uv: Minecraft's clip units halved; the uv's y runs with clip y)
-				ImNative.bloomTaa(state, ImagineFrame.jitterX * 0.5f, ImagineFrame.jitterY * 0.5f, Settings.taa && Reflections.valid ? 1f : 0f);
+				// (on: 1, or 2 with Build C1's steadier far distance, Settings.taaFarSteady: imbloom.m hands it on as taaPrev.z)
+				ImNative.bloomTaa(state, ImagineFrame.jitterX * 0.5f, ImagineFrame.jitterY * 0.5f, Settings.taa && Reflections.valid ? (Settings.taaFarSteady ? 2f : 1f) : 0f);
 				long clips = stack.nmalloc(4, 192);
 				Reflections.CLIP.get(MemoryUtil.memFloatBuffer(clips, 16));
 				Reflections.CLIP_INV.get(MemoryUtil.memFloatBuffer(clips + 64, 16));

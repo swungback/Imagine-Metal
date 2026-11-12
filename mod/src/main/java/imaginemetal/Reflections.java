@@ -45,6 +45,19 @@ public final class Reflections {
 
 	private static boolean underFailed;
 
+	/**
+	 * (Build C1) Whether captureUnder can run this frame (Sky.drawAfter: the clouds wait for it): the state exists, classic
+	 * transparency (the hook is in its pass).
+	 */
+	static boolean underWillRun() {
+		if (state == 0 || underFailed || failed || !Engine.TERRAIN || Live.isOff()) return false;
+		try {
+			return !Minecraft.getInstance().gameRenderer.useImprovedTransparency();
+		} catch (Throwable t) {
+			return false;
+		}
+	}
+
 	/** Before the translucent pass: the opaque picture and depth, for water's refraction and shore foam (ImFrame.toggles.w). */
 	public static void captureUnder() {
 		boolean water = Settings.waterFx && Settings.waterStyle > 0;
@@ -52,7 +65,8 @@ public final class Reflections {
 		// water's surface over shallows doesn't count as something between the seabed and the sun: dark straight-edged patches)
 		boolean air = airPromised;
 		airPromised = false;
-		if (state == 0 || underFailed || !(water || Settings.mobShadows || air) || !Engine.TERRAIN) {
+		boolean clouds = Sky.latePending();
+		if (state == 0 || underFailed || !(water || Settings.mobShadows || air || clouds) || !Engine.TERRAIN) {
 			underDepthReady = false;
 			return;
 		}
@@ -75,11 +89,19 @@ public final class Reflections {
 					new Matrix4f(clipNow).invert().get(MemoryUtil.memFloatBuffer(airM, 16));
 					lib = ImNative.terrainLibrary(own.ownHandle());
 				}
+				// (Build C1: the clouds, after the air and before the colour copy: the sky pass left them for here)
+				if (clouds && nowSet && Sky.nativeState() != 0 && Math.abs(clipNow.determinant()) > 1e-12f) {
+					long rot = stack.ncalloc(4, 16, 4), inv = stack.ncalloc(4, 16, 4);
+					Sky.rotNow().get(MemoryUtil.memFloatBuffer(rot, 16));
+					new Matrix4f(clipNow).invert().get(MemoryUtil.memFloatBuffer(inv, 16));
+					ImNative.underClouds(state, Sky.nativeState(), MetalBridge.textureHandle(color), rot, inv);
+				}
 				int rc = ImNative.underCapture(MetalBridge.enc(encoder), state, water ? MetalBridge.textureHandle(color) : 0L, MetalBridge.textureHandle(depth),
 					airM != 0 && lib != 0 ? MetalBridge.textureHandle(color) : 0L, lib, airM, ImagineFrame.address(), ImagineFrame.SIZE, err, 1024);
 				if (rc == 1) throw new IllegalStateException(MemoryUtil.memUTF8(err));
 				// (2: the open pass was ended for the copy and reopened: its pipeline, buffers and scissor bound again)
 				if ((rc & 2) != 0) MetalBridge.restorePass(encoder);
+				if ((rc & 8) != 0) Sky.lateDrawn();
 				if ((rc & 4) != 0) {
 					airMisses = 0;
 					if (!airLogged) {

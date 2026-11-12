@@ -57,6 +57,11 @@ final class MetalPipeline implements BackendRenderPipeline {
 	final boolean wireframe;
 	final float depthBiasConstant;
 	final float depthBiasSlope;
+	/**
+	 * (Imagine Metal, Build C1) Minecraft's translucent entity pipeline: mods draw flat marks on the ground with it (Simple Blood's
+	 * splats: RenderTypes.entityTranslucent). See {@link #biasSlope()}.
+	 */
+	final boolean imDecal;
 	final int primitive;
 	final String name;
 	/** MTLCompareFunction of depthState, for MetalProbe. */
@@ -80,7 +85,25 @@ final class MetalPipeline implements BackendRenderPipeline {
 		DepthStencilState depth = info.depthStencilState();
 		this.depthBiasConstant = depth != null ? depth.depthBiasConstant() : 0;
 		this.depthBiasSlope = depth != null ? depth.depthBiasScaleFactor() : 0;
+		String n = this.name == null ? "" : this.name.toLowerCase(java.util.Locale.ROOT);
+		this.imDecal = depth != null && (n.endsWith("pipeline/entity_translucent") || n.endsWith("pipeline/entity_translucent_cull"));
 		this.primitive = MetalConst.primitive(info.primitiveTopology());
+	}
+
+	/**
+	 * (Imagine Metal, Build C1) The depth bias to draw with. The terrain is drawn with the TAA's sub-pixel offset (up to half a
+	 * pixel each way, a new one every frame) and Minecraft's own pipelines are not, so something lying flat on a block, a few
+	 * thousandths of a block above it, came out behind the terrain in some frames and in front in others: whole blood splats
+	 * blinked. Half a pixel each way moves the terrain's depth by at most the surface's own depth slope per pixel, which is what
+	 * Metal's slope-scaled bias measures: one and a half of it, toward the camera (the game's depth is reversed: nearer is
+	 * greater), covers it at any angle and distance. Only while the offset is on (Settings.decalBias, TAA, its sub-pixel offset).
+	 */
+	float biasSlope() {
+		return this.imDecal && imaginemetal.Settings.decalBias && imaginemetal.Settings.taa && imaginemetal.Settings.taaJitter ? this.depthBiasSlope + 1.5f : this.depthBiasSlope;
+	}
+
+	float biasConstant() {
+		return this.imDecal && imaginemetal.Settings.decalBias && imaginemetal.Settings.taa && imaginemetal.Settings.taaJitter ? this.depthBiasConstant + 4f : this.depthBiasConstant;
 	}
 
 	/** Time spent creating pipelines so far, by step, for the bench's startup breakdown (read reflectively). */

@@ -199,6 +199,22 @@ public final class SettingsScreen extends OptionsSubScreen {
 					"Not saved. The opaque terrain lit once per screen pixel in the GPU's tile memory (Build B2) instead of every fragment lighting itself. Off to compare speed and picture: both should look the same."),
 					toggle("Air pass", Settings.airPass, v -> Settings.airPass = v,
 						"Not saved. The haze and the fade into the sky drawn once per pixel after the opaque world, instead of in every terrain fragment."));
+				this.list.addSmall(toggle("Near shadow every 2nd frame", Settings.shadowNearAlternate, v -> Settings.shadowNearAlternate = v,
+					"Not saved. The near shadow map drawn every other frame (Build B1), the frame between served by the same map. Off: every frame, to check whether flickering beams or leaf shadows come from it."),
+					toggle("Shaft veil fix", Settings.shaftVeilFix, v -> Settings.shaftVeilFix = v,
+						"Build C1, not saved. The light shafts' strong \"something overhead\" mode only under a real canopy or roof and only through shadow, and their total capped. Off: as before (the whiteout under one leaf block or a sky island)."));
+				this.list.addSmall(toggle("Soft far shadows", Settings.shadowSoftFar, v -> Settings.shadowSoftFar = v,
+					"Build C1, not saved. Past 32 blocks a shadow is softer the farther its caster is from the ground it falls on, and the shadows fade out wider at their far edge. Off: as before."),
+					toggle("Daylight under sky islands", Settings.shadowOpenAir, v -> Settings.shadowOpenAir = v,
+						"Build C1, not saved. Under something high overhead (a sky island, a tall overhang) the sun and the sky's light still reach the ground where the shadow maps say so, instead of a black patch as in a cave. Off: as before."));
+				this.list.addSmall(toggle("Desert look", Settings.desertLook, v -> Settings.desertLook = v,
+					"Build C1, not saved. Deserts, badlands and savannas toward Reimagined's desert: colder, darker shade, warmer sand, less yellow. Off: as before. (Eases over a few seconds.)"),
+					toggle("Clouds behind the land", Settings.cloudsLate, v -> Settings.cloudsLate = v,
+						"Build C1, not saved. Our clouds drawn after the land, so a mountain or sky island beyond or above them is hidden by them. Off: drawn first, the land always in front."));
+				this.list.addSmall(toggle("Blood splat depth fix", Settings.decalBias, v -> Settings.decalBias = v,
+					"Build C1, not saved. Flat marks drawn as translucent mobs (Simple Blood's splats) nudged toward the camera, so the TAA's sub-pixel offset of the terrain no longer makes them blink. Off: as before."),
+					toggle("TAA steadier far away", Settings.taaFarSteady, v -> Settings.taaFarSteady = v,
+						"Build C1, not saved. Past about 50 blocks, while the camera is still, the TAA keeps more of the frames before and sharpens less: distant block edges flicker less. Off: as before."));
 				this.list.addBig(toggle("TAA sub-pixel offset", Settings.taaJitter, v -> Settings.taaJitter = v,
 					"Not saved. The terrain drawn a fraction of a pixel off in a new direction each frame, which the TAA averages into smooth edges and, with a render scale, into the full-size picture. Off to check whether a shimmer or wobble comes from it."));
 				String[] views = {"Off", "Light levels", "Normals", "Bloom glow only", "Coloured light grid", "Shadow maps"};
