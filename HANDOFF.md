@@ -29,6 +29,17 @@ Where things stand, for picking the work up in a new conversation.
   terrain.metal's faked total internal reflection (surface from below past a steep angle) painted the surface opaque in the
   water fog colour x0.2. Now imWaterFog's colour (Settings.waterSurfaceFog, Debug "Water surface from below: no dark ring",
   env.w bit 16). Not bloom fog (Jack checked).
+- 23:50: water fix DEPLOYED (mods = sha1 388bef08..., main 0cc9a2e). Copy kept as `imagine-metal-c2b-water.jar`.
+- OPEN, shadow pop-in case 2 (Jack 23:48, screenshots 2026-11-12_23.48.17 at 299 79 -341 and 23.48.22 at 292 79 -354, both
+  facing north, low sun from the west/north-west; 23.48.30 at 281 78 -375 shows shadows fine): terraces 9-20 blocks ahead
+  (blocks ~55 px tall in a 720-line copy) show no cast shadows; after moving ~13 blocks closer the same terraces have them.
+  NOT the C2b cause (the camera is at the terrain's height there). Ruled out so far: near-map coverage (y' = world z +-25.6
+  around the anchor, x' ~ -cos(e)*dy within +-14 for terraces up to 15 above); solid-section occlusion in the shadow cull
+  (off: needs -Dmcopt.own.solidOcc); list overflow (listCap >= records in use). Suspects: casters missing from the near map
+  (OwnTerrain.shadowCull / own_cull facing test: with the sun path in the x-y plane L.z = 0, so for z-facing units the
+  "light point" z is the camera's), the near map kept a frame (shadowNearAlternate), or a receiver-side cut. Next: at that
+  spot use Debug view "Shadow maps" and flip "Near shadow every 2nd frame" / "Far shadow cache"; consider logging the near
+  cascade's unit count.
 
 ## 2026-11-12 23:15, Build C2 DEPLOYED (main f48edd7, CI green run 43316738527). NOT tested by Jack yet.
 - mods folder = C2: jar sha1 9e558ce5..., 1523792 bytes. Fallbacks OUTSIDE mods in `instances/Imagine metal/`:
