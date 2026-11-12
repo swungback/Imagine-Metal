@@ -149,10 +149,16 @@ public final class MetaGen {
 			}
 		} else if (t.canopyHi[i] >= t.canopyLo[i] && t.canopyState[i] != null) {
 			// the game's own trees (level 0)
+			// (a column the tree stands in: its trunk up to its top block, as LodNoise.dressTrees draws it; a crown floating over
+			// the ground: its leaves from its lowest block to its top)
 			int lo = Math.max(at, vy(t.canopyLo[i], minY, level, h)), hi = vy(t.canopyHi[i], minY, level, h);
-			if (t.standing[i] && t.trunk[i] != null && lo > at) n = put(seg, n, at, lo, ids.block(t.trunk[i]) | biome << 16);
-			if (hi >= lo) {
-				n = put(seg, n, lo, hi + 1, ids.block(t.canopyState[i]) | biome << 16);
+			if (hi >= at) {
+				if (t.standing[i] && t.trunk[i] != null) {
+					if (hi > at) n = put(seg, n, at, hi, ids.block(t.trunk[i]) | biome << 16);
+					n = put(seg, n, hi, hi + 1, ids.block(t.canopyState[i]) | biome << 16);
+				} else if (hi >= lo) {
+					n = put(seg, n, lo, hi + 1, ids.block(t.canopyState[i]) | biome << 16);
+				}
 				at = hi + 1;
 			}
 		} else if (t.impostorTrees && t.height[i] > ground && bh != null) {

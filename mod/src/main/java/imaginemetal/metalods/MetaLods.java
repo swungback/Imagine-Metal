@@ -31,7 +31,7 @@ import org.jspecify.annotations.Nullable;
  */
 public final class MetaLods {
 	private static final int ARENA_PAGES = 65536;  // 128 MB of quads (16.8 million)
-	private static boolean failed, saidNoG;
+	private static boolean failed, saidNoG, saidDrawn;
 	private static long lib;
 	private static @Nullable MetaArena arena;
 	private static @Nullable MetaWorld world;
@@ -97,8 +97,12 @@ public final class MetaLods {
 			int pages = w.prepare(clip, camX, camY, camZ, renderDistance);
 			if (pages > 0 && atlas != 0) {
 				int slot = w.slot();
-				MetaNative.draw(lib, enc, a.frame, MetaArena.FRAME_BYTES, a.visBuf[slot], 0, pages, a.infoBuf, a.quadBuf, a.modelBuf, a.biomeBuf, a.mask,
-					MetaArena.MASK_BYTES, atlas);
+				int drawn = MetaNative.draw(lib, enc, a.frame, MetaArena.FRAME_BYTES, a.visBuf[slot], 0, pages, a.infoBuf, a.quadBuf, a.modelBuf, a.biomeBuf,
+					a.mask, MetaArena.MASK_BYTES, atlas);
+				if (drawn == 1 && !saidDrawn) {
+					saidDrawn = true;
+					System.out.println("[MetaLODS] first LODs drawn (" + pages + " pages)");
+				}
 			}
 		} catch (Throwable t) {
 			failed = true;

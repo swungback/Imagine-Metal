@@ -49,6 +49,7 @@ final class MetaWorld {
 	private volatile @Nullable MetaGen gen;
 	private volatile boolean genTried, genFailed;
 	private final Object genLock = new Object();
+	private volatile int saidLevel;
 
 	// ---- render thread only ----
 	private final HashMap<Long, Col> cols = new HashMap<>();
@@ -272,8 +273,12 @@ final class MetaWorld {
 			} finally {
 				this.tileLocks.remove(key(level, tx, tz));
 			}
-			this.genNanos.addAndGet(System.nanoTime() - t0);
-			this.generatedTiles.incrementAndGet();
+			long ns = System.nanoTime() - t0;
+			this.genNanos.addAndGet(ns);
+			if (this.generatedTiles.incrementAndGet() <= 3 || (this.saidLevel & (1 << level)) == 0) {
+				this.saidLevel |= 1 << level;
+				System.out.println(String.format(java.util.Locale.ROOT, "[MetaLODS] generated a level-%d tile at %d, %d in %.1f ms", level, tx, tz, ns / 1e6));
+			}
 			for (int q = 0; q < 4; q++) {
 				int qx = 2 * tx + (q & 1), qz = 2 * tz + (q >> 1);
 				long k = key(level, qx, qz);
