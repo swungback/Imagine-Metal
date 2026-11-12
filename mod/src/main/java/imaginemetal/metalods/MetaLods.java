@@ -97,8 +97,11 @@ public final class MetaLods {
 			int pages = w.prepare(clip, camX, camY, camZ, renderDistance);
 			if (pages > 0 && atlas != 0) {
 				int slot = w.slot();
-				int drawn = MetaNative.draw(lib, enc, a.frame, MetaArena.FRAME_BYTES, a.visBuf[slot], 0, pages, a.infoBuf, a.quadBuf, a.modelBuf, a.biomeBuf,
-					a.mask, MetaArena.MASK_BYTES, atlas);
+				int cut = Math.min(w.maskedPages, pages), drawn = 0;
+				if (cut > 0) drawn |= MetaNative.draw(lib, enc, a.frame, MetaArena.FRAME_BYTES, a.visBuf[slot], 0, cut, a.infoBuf, a.quadBuf, a.modelBuf,
+					a.biomeBuf, a.mask, MetaArena.MASK_BYTES, atlas, true);
+				if (pages > cut) drawn |= MetaNative.draw(lib, enc, a.frame, MetaArena.FRAME_BYTES, a.visBuf[slot], 4L * cut, pages - cut, a.infoBuf, a.quadBuf,
+					a.modelBuf, a.biomeBuf, a.mask, MetaArena.MASK_BYTES, atlas, false);
 				if (drawn == 1 && !saidDrawn) {
 					saidDrawn = true;
 					System.out.println("[MetaLODS] first LODs drawn (" + pages + " pages)");

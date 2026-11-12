@@ -147,6 +147,9 @@ final class MetaWorld {
 	// ======================================================= workers
 
 	private void work() {
+		// (Apple silicon: the utility QoS class, so the game's own threads always come first; background would keep the
+		// workers on the efficiency cores only, too slow to fill the view)
+		mcopt.metal.lod.LodGenQos.once(0x11, "MetaLODS worker");
 		MetaMesher mesher = new MetaMesher();
 		while (!this.closed) {
 			try {
@@ -504,6 +507,17 @@ final class MetaWorld {
 		}
 	}
 
+	/** Pages at the start of this frame's list that need the mask (the rest don't). */
+	int maskedPages;
+
+	/** Whether the real terrain draws any chunk of the square (x0, z0, w blocks). */
+	private boolean anyMasked(int x0, int z0, int w) {
+		int c0x = Math.max(x0 >> 4, this.maskX), c0z = Math.max(z0 >> 4, this.maskZ);
+		int c1x = Math.min((x0 + w - 1) >> 4, this.maskX + this.maskSize - 1), c1z = Math.min((z0 + w - 1) >> 4, this.maskZ + this.maskSize - 1);
+		for (int z = c0z; z <= c1z; z++) for (int x = c0x; x <= c1x; x++) if (this.masked(x, z)) return true;
+		return false;
+	}
+
 	private boolean masked(int chx, int chz) {
 		int mx = chx - this.maskX, mz = chz - this.maskZ;
 		if (mx < 0 || mz < 0 || mx >= this.maskSize || mz >= this.maskSize) return false;
@@ -550,9 +564,15 @@ final class MetaWorld {
 		int slot = (int) (this.frame % MetaArena.RING);
 		long vis = this.arena.vis[slot];
 		int n = 0, quadsDrawn = 0, colsDrawn = 0;
+		// (two passes: first the columns the real terrain's chunks cut into (drawn with the mask), then the rest (without: no
+		// discard, so the GPU's hidden-surface removal stays fully on for them))
+		for (int pass = 0; pass < 2; pass++) {
+		if (pass == 1) this.maskedPages = n;
 		for (Col c : this.draw) {
 			int w = 32 << c.level;
 			int bx = c.cx * w, bz = c.cz * w;
+			boolean cut = MetaSettings.hideUnderReal && this.anyMasked(bx, bz, w);
+			if (cut != (pass == 0)) continue;
 			float rx = (float) (bx - camX), rz = (float) (bz - camZ);
 			if (!this.frustum.testAab(rx, (float) (c.minYb - camY), rz, rx + w, (float) (c.maxYb - camY), rz + w)) continue;
 			colsDrawn++;
@@ -571,6 +591,7 @@ final class MetaWorld {
 					quadsDrawn += MetaArena.QUADS_PER_PAGE;
 				}
 			}
+		}
 		}
 		this.lastDrawPages = n;
 		this.lastDrawCols = colsDrawn;

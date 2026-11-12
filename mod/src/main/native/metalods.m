@@ -12,8 +12,8 @@ const uint8_t *mco_im_frame(void);
 typedef struct {
 	Ctx *ctx;
 	id<MTLLibrary> lib;
-	id<MTLFunction> vs, fs;
-	id<MTLRenderPipelineState> pso;
+	id<MTLFunction> vs, fs[2];  // fs[1]: with the real terrain's mask (ML_MASK), fs[0]: without
+	id<MTLRenderPipelineState> pso[2];
 	MTLPixelFormat formats[5], depth;
 	id<MTLDepthStencilState> ds;
 	id<MTLSamplerState> smp;
@@ -45,8 +45,13 @@ void *mml_new(Enc *enc, const char *source, char *err, int cap) {
 		m->ctx = ctx;
 		m->lib = lib;
 		m->vs = [lib newFunctionWithName:@"ml_vs"];
-		m->fs = [lib newFunctionWithName:@"ml_fs"];
-		if (!m->vs || !m->fs) {
+		for (int i = 0; i < 2; i++) {
+			MTLFunctionConstantValues *cv = [[MTLFunctionConstantValues new] autorelease];
+			bool on = i == 1;
+			[cv setConstantValue:&on type:MTLDataTypeBool atIndex:0];
+			m->fs[i] = [lib newFunctionWithName:@"ml_fs" constantValues:cv error:&e];
+		}
+		if (!m->vs || !m->fs[0] || !m->fs[1]) {
 			if (err && cap > 0) snprintf(err, cap, "metalods.metal: missing ml_vs / ml_fs");
 			return NULL;
 		}
@@ -94,16 +99,25 @@ int mml_g_open(Enc *enc) {
 	return mco_im_g_open(enc);
 }
 
-static id<MTLRenderPipelineState> mlPipeline(MetaLods *m, Enc *enc, char *err, int cap) {
+static id<MTLRenderPipelineState> mlPipeline(MetaLods *m, Enc *enc, int masked, char *err, int cap) {
 	MTLPixelFormat f[5];
 	for (int i = 0; i < 5; i++) f[i] = enc->colors[i] ? enc->colors[i].pixelFormat : MTLPixelFormatInvalid;
 	MTLPixelFormat d = enc->depth ? enc->depth.pixelFormat : MTLPixelFormatInvalid;
-	if (m->pso && memcmp(f, m->formats, sizeof f) == 0 && d == m->depth) return m->pso;
+	if (memcmp(f, m->formats, sizeof f) != 0 || d != m->depth) {
+		// (the attachments changed: both variants are made again)
+		for (int i = 0; i < 2; i++) {
+			[m->pso[i] release];
+			m->pso[i] = nil;
+		}
+		memcpy(m->formats, f, sizeof f);
+		m->depth = d;
+	}
+	if (m->pso[masked]) return m->pso[masked];
 	@autoreleasepool {
 		MTLRenderPipelineDescriptor *pd = [[MTLRenderPipelineDescriptor new] autorelease];
 		pd.label = @"MetaLODS";
 		pd.vertexFunction = m->vs;
-		pd.fragmentFunction = m->fs;
+		pd.fragmentFunction = m->fs[masked];
 		for (int i = 0; i < 5; i++) {
 			if (f[i] == MTLPixelFormatInvalid) continue;
 			pd.colorAttachments[i].pixelFormat = f[i];
@@ -117,10 +131,7 @@ static id<MTLRenderPipelineState> mlPipeline(MetaLods *m, Enc *enc, char *err, i
 			mlErr(err, cap, "MetaLODS pipeline", e);
 			return nil;
 		}
-		[m->pso release];
-		m->pso = pso;
-		memcpy(m->formats, f, sizeof f);
-		m->depth = d;
+		m->pso[masked] = pso;
 		return pso;
 	}
 }
@@ -129,10 +140,10 @@ static id<MTLRenderPipelineState> mlPipeline(MetaLods *m, Enc *enc, char *err, i
 // offset is filled in here from this frame's ImFrame). 1 drawn, 0 nothing to draw into, -1 err set.
 int mml_draw(MetaLods *m, Enc *enc, const void *frame, int frameLength, id<MTLBuffer> visible, uint64_t visOffset, int count,
 	id<MTLBuffer> pages, id<MTLBuffer> quads, id<MTLBuffer> models, id<MTLBuffer> biomes, const void *mask, int maskLength,
-	id<MTLTexture> atlas, char *err, int cap) {
+	id<MTLTexture> atlas, int masked, char *err, int cap) {
 	if (!m || count <= 0 || !mco_im_g_open(enc) || !atlas) return 0;
 	id<MTLRenderCommandEncoder> r = enc->render;
-	id<MTLRenderPipelineState> pso = mlPipeline(m, enc, err, cap);
+	id<MTLRenderPipelineState> pso = mlPipeline(m, enc, masked ? 1 : 0, err, cap);
 	if (!pso) return -1;
 	uint8_t f[256];
 	if (frameLength > (int) sizeof f) frameLength = (int) sizeof f;

@@ -8,6 +8,10 @@
 #include <metal_stdlib>
 using namespace metal;
 
+// (0: the fragment stage hides what lies in chunks the real terrain draws. Off for the columns wholly outside them: a stage that
+// can't discard keeps the GPU's hidden-surface removal fully on, so only the visible LOD pixels are shaded)
+constant bool ML_MASK [[function_constant(0)]];
+
 struct MLFrame {
 	float4x4 clip;     // camera-relative world -> clip (Minecraft's, y up, reversed Z): the terrain's own transform this frame
 	int4 camBlock;     // the camera's block (floor), w unused
@@ -112,7 +116,7 @@ fragment MLGOut ml_fs(MLOut in [[stage_in]], constant MLFrame &f [[buffer(0)]], 
 	device const uint4 *biomes [[buffer(5)]], constant uint *mask [[buffer(6)]], texture2d<float> atlas [[texture(16)]],
 	sampler smp [[sampler(14)]]) {
 	// where the real terrain is drawn, it shows instead (the LODs there are only the estimate of what it holds)
-	if (f.params.x > 0.5 && f.mask.z > 0) {
+	if (ML_MASK && f.params.x > 0.5 && f.mask.z > 0) {
 		int2 wb = f.camBlock.xz + int2(floor(in.rel.xz + f.camFrac.xz));
 		int2 ch = (wb - (wb & int2(15))) / 16 - f.mask.xy;  // (floor division by 16, negatives too)
 		if (ch.x >= 0 && ch.y >= 0 && ch.x < f.mask.z && ch.y < f.mask.z) {

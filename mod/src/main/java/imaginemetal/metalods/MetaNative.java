@@ -90,11 +90,11 @@ final class MetaNative {
 
 	/** 1 drawn, 0 nothing to draw into; throws with the native error on -1. */
 	static int draw(long m, long enc, long frame, int frameLength, long visible, long visOffset, int count, long pages, long quads, long models,
-		long biomes, long mask, int maskLength, long atlas) {
+		long biomes, long mask, int maskLength, long atlas, boolean masked) {
 		try (MemoryStack stack = MemoryStack.stackPush()) {
 			long err = stack.ncalloc(1, 2048, 1);
-			int r = (int) DRAW.invokeExact(m, enc, frame, frameLength, visible, visOffset, count, pages, quads, models, biomes, mask, maskLength, atlas, err,
-				2048);
+			int r = (int) DRAW.invokeExact(m, enc, frame, frameLength, visible, visOffset, count, pages, quads, models, biomes, mask, maskLength, atlas,
+				masked ? 1 : 0, err, 2048);
 			if (r < 0) throw new IllegalStateException(MemoryUtil.memUTF8(err));
 			return r;
 		} catch (Throwable t) {
