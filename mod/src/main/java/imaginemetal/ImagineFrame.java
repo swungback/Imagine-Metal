@@ -495,8 +495,9 @@ public final class ImagineFrame {
 		// and as Build C2 has it (Settings.shaftsFull))
 		// (w, Build C2, bits: 1 the shafts' strong mode only through shadow (C1's whiteout fix, until C2 keyed on z), 2 the plants'
 		// shadow slice is valid, 4 the far shadow map's receivers without the oversized offsets, 8 (benchmark) water and glass
-		// reflect the sky alone, no trace)
-		int envBits = (Settings.shaftVeilFix ? 1 : 0) | (Shadows.plantsValid() ? 2 : 0) | (Settings.shadowFarFix ? 4 : 0) | (Settings.waterTrace ? 0 : 8);
+		// reflect the sky alone, no trace; 16 (C2b) the water's surface seen from below past the window in the water's fog colour)
+		int envBits = (Settings.shaftVeilFix ? 1 : 0) | (Shadows.plantsValid() ? 2 : 0) | (Settings.shadowFarFix ? 4 : 0) | (Settings.waterTrace ? 0 : 8)
+			| (Settings.waterSurfaceFog ? 16 : 0);
 		put(cave, night, Settings.shaftVeilFix && !Settings.shaftsFull ? 0.35f : 0f, envBits);
 		for (int c = 0; c < 2; c++) for (int i = 0; i < 16; i++) BUF.putFloat(Shadows.MATRIX[c][i]);
 		// shadow: near cascade normal offset, valid, far cascade normal offset

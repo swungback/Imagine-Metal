@@ -152,6 +152,11 @@ public final class Settings {
 	 * -Dimaginemetal.shadowNearGround=false.
 	 */
 	public static volatile boolean shadowNearGround = Engine.flag("imaginemetal.shadowNearGround", true);
+	/**
+	 * (Build C2b) Under water, the surface seen from below past the see-through window (where it mirrors the water) in the
+	 * water's own fog colour, not that colour at a fifth: it was a dark murky ring around the window. -Dimaginemetal.waterSurfaceFog=false.
+	 */
+	public static volatile boolean waterSurfaceFog = Engine.flag("imaginemetal.waterSurfaceFog", true);
 	/** (benchmark only) Water and glass reflections traced through the screen; false: the sky alone. */
 	public static volatile boolean waterTrace = true;
 	public static volatile boolean ssao = Engine.flag("imaginemetal.ssao", true);

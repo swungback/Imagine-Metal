@@ -2496,7 +2496,12 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 				float3 wfc0 = pow(max(fog.FogColor.rgb, 1e-3), float3(0.33, 0.21, 0.26)) * 0.2;
 				float fb = 1.0 - saturate(abs(dot(fnT, normalize(in.imPos))));
 				float tir = smoothstep(0.25, 0.55, fb);
-				color.rgb = mix(color.rgb, pow(imPresent(wfc0, imf), 1.0 / 2.2), tir);
+				// (Build C2b, ImFrame.env.w bit 16: the water's own fog colour there, as everything under water fades into, instead of
+				// that colour a fifth as bright: around the see-through window straight up it made a dark, murky ring, near black at
+				// night, that the fog only half turned teal)
+				float3 tirC = (uint(imf.env.w + 0.5) & 16u) != 0u ? imWaterFog(fog.FogColor.rgb, length(in.imPos), imf).rgb
+					: pow(imPresent(wfc0, imf), 1.0 / 2.2);
+				color.rgb = mix(color.rgb, tirC, tir);
 				color.a = mix(color.a, 1.0, tir);
 			}
 			// what's under the water turns blue (Reimagined's translucentMult: the biome's water colour, normalized; less far away;
