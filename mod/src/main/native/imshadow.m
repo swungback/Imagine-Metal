@@ -1,6 +1,6 @@
 // Imagine Metal: the sun/moon shadow map (imaginemetal.Shadows on the Java side).
 //
-// Two cascades in one Depth32Float 2D array (slice 0 near, slice 1 far), each drawn every frame in a depth-only render encoder of its own on the frame's command buffer, before the
+// Two cascades in one Depth32Float 2D array (slice 0 near, slice 1 far; slice 2, Build C2: the near cascade's plants alone), each drawn every frame in a depth-only render encoder of its own on the frame's command buffer, before the
 // level's passes: the terrain units OwnTerrain.shadowCull listed for the light (its lists and indirect arguments: solid at 0,
 // cutout at 20 bytes), through im_shadow_vs / im_shadow_cutout_fs (shadow.metal, built into the terrain library). Receivers
 // (own_fs, lighting.metal imShadow) bind the map at fragment texture 20 with the compare sampler at sampler 13 (mcown.m).
@@ -34,7 +34,7 @@ ImShadow *im_shadow_new(Ctx *ctx, int resolution, char *err, int errCap) {
 		MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float width:resolution
 			height:resolution mipmapped:NO];
 		td.textureType = MTLTextureType2DArray;
-		td.arrayLength = 2;
+		td.arrayLength = 3;  // (2: the near cascade's plants, Build C2)
 		td.storageMode = MTLStorageModePrivate;
 		td.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
 		s->map = [ctx->device newTextureWithDescriptor:td];
@@ -120,7 +120,7 @@ int im_shadow_pipelines(ImShadow *s, id<MTLLibrary> lib, int compact, int fat, c
 // the block atlas (nil: the cutout layer is drawn as solid). Binds the map for the terrain's receivers afterwards.
 void im_shadow_render(Enc *enc, ImShadow *s, const void *frame, int frameBytes, id<MTLBuffer> arena, id<MTLBuffer> sections,
 	id<MTLBuffer> recs, id<MTLBuffer> lists, id<MTLBuffer> args, int listCap, id<MTLTexture> atlas, float slopeScale, int cascade) {
-	if (!s || !s->solid || !arena || !args || frameBytes > 256 || cascade < 0 || cascade > 1) return;
+	if (!s || !s->solid || !arena || !args || frameBytes > 256 || cascade < 0 || cascade > 2) return;
 	id<MTLCommandBuffer> cmd = mc_frame_cmd(enc);
 	@autoreleasepool {
 		MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
@@ -149,7 +149,8 @@ void im_shadow_render(Enc *enc, ImShadow *s, const void *frame, int frameBytes, 
 		}
 		uint8_t f[256];
 		memcpy(f, frame, (size_t) frameBytes);
-		for (int layer = 0; layer < 2; layer++) {
+		// (slice 2, the plants: only the cutout list holds any; the vertex stage keeps only the plants' quads)
+		for (int layer = cascade == 2 ? 1 : 0; layer < 2; layer++) {
 			// ImShadowFrame.listBase sits after the matrix (64), camBlock (16), camOffset (16), reserved (16)
 			uint32_t listBase = (uint32_t) (layer * listCap);
 			memcpy(f + 112, &listBase, 4);

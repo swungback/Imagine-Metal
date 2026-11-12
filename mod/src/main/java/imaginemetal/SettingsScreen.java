@@ -215,6 +215,21 @@ public final class SettingsScreen extends OptionsSubScreen {
 					"Build C1, not saved. Flat marks drawn as translucent mobs (Simple Blood's splats) nudged toward the camera, so the TAA's sub-pixel offset of the terrain no longer makes them blink. Off: as before."),
 					toggle("TAA steadier far away", Settings.taaFarSteady, v -> Settings.taaFarSteady = v,
 						"Build C1, not saved. Past about 50 blocks, while the camera is still, the TAA keeps more of the frames before and sharpens less: distant block edges flicker less. Off: as before."));
+				this.list.addSmall(toggle("Shafts as strong as B2", Settings.shaftsFull, v -> Settings.shaftsFull = v,
+					"Build C2, not saved. No ceiling on the light shafts and their canopy strength as in Build B2; the whiteout stays fixed (Shaft veil fix). Off: as C1."),
+					toggle("Plant shadows", Settings.plantShadows, v -> Settings.plantShadows = v,
+						"Build C2, not saved. Grass, flowers and tall grass cast soft, lighter shadows that sway with them, from a shadow map of their own. Off: as C1 (small plants none, tall grass hard and dark)."));
+				this.list.addSmall(toggle("Far shadow fix", Settings.shadowFarFix, v -> Settings.shadowFarFix = v,
+					"Build C2, not saved. Past the near shadow map (about 28 blocks) small things (steps, fences, bushes) still cast shadows. Off: as C1 (they stop at a line)."),
+					toggle("Petals don't sway", Settings.petalsStill, v -> {
+						Settings.petalsStill = v;
+						Materials.clearCache();
+						rebuildChunks();
+					}, "Build C2, not saved. Pink petals and wildflowers stay still (their stems swayed, their flat heads didn't). Rebuilds the chunks."));
+				this.list.addSmall(toggle("Old level's chunks dropped", Settings.levelGuard, v -> Settings.levelGuard = v,
+					"Build C2, not saved. Chunks of a level you just left (the End) that finish loading after the change aren't drawn in the new one (the floating ghost slabs). Takes effect at the next dimension change."),
+					toggle("Mobs with TAA offset", Settings.entityJitter, v -> Settings.entityJitter = v,
+						"Build C2, not saved. Mobs, items and particles drawn with the TAA's sub-pixel offset like the terrain, so the TAA doesn't shift them back and forth (a pig's eyes swimming). Off: as C1."));
 				this.list.addBig(toggle("TAA sub-pixel offset", Settings.taaJitter, v -> Settings.taaJitter = v,
 					"Not saved. The terrain drawn a fraction of a pixel off in a new direction each frame, which the TAA averages into smooth edges and, with a render scale, into the full-size picture. Off to check whether a shimmer or wobble comes from it."));
 				String[] views = {"Off", "Light levels", "Normals", "Bloom glow only", "Coloured light grid", "Shadow maps"};

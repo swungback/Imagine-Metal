@@ -84,7 +84,10 @@ public final class Materials {
 	public static byte of(BlockState state) {
 		Byte c = CACHE.get(state);
 		if (c == null) {
-			c = (byte) (classify(state) | (Settings.waving ? wave(state) : 0) << 4);
+			int w = Settings.waving ? wave(state) : 0;
+			// (bit 6, Build C2: a tall plant's upper half, which waves whole like leaves but is a plant: OwnQuads gives its quads the
+			// corner pattern 1010 instead of 1111, so the shadow casters can tell it from leaves (shadow.metal))
+			c = (byte) (classify(state) | (w & 3) << 4 | (w == 2 && tallTop(state) ? 0x40 : 0));
 			CACHE.put(state, c);
 		}
 		return c;
@@ -109,12 +112,25 @@ public final class Materials {
 			if (name.contains("lichen") || name.contains("vein") || name.contains("carpet") || name.contains("roots") || name.contains("clump")
 				|| name.contains("lily_pad") || name.contains("litter")) return 0;
 			if (!plant || state.isSolidRender()) return 0;
+			// (Build C2, Settings.petalsStill: pink petals and wildflowers lie flat with short stems; only the stems' tops swayed,
+			// their flat heads stayed put and came apart from them)
+			if (Settings.petalsStill && (name.contains("petals") || name.contains("wildflowers"))) return 0;
 			if (!state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).isEmpty()) return 0;
 			if (state.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF) && state.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF) == DoubleBlockHalf.UPPER)
 				return 2;
 			return 1;
 		} catch (Throwable t) {
 			return 0;
+		}
+	}
+
+	/** The upper half of a two-block plant (tall grass, large fern, sunflower...), not leaves or hanging vines. */
+	private static boolean tallTop(BlockState state) {
+		try {
+			return !state.is(BlockTags.LEAVES) && state.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF)
+				&& state.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF) == DoubleBlockHalf.UPPER;
+		} catch (Throwable t) {
+			return false;
 		}
 	}
 

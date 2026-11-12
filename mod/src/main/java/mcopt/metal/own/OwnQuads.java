@@ -430,7 +430,7 @@ public final class OwnQuads {
 				for (int i = 0, n = this.count[b]; i < n; i++) {
 					int m = mt[i];
 					int gb = grid[m & 4095], wave = gb >> 4 & 3;
-					int corners = wave == 2 ? 15 : wave == 1 ? m >>> 12 & 15 : 0;
+					int corners = wave == 2 ? ((gb & 0x40) != 0 ? 10 : 15) : wave == 1 ? m >>> 12 & 15 : 0;  // (10: a tall plant's top, Materials)
 					// (Imagine Metal: an ore's upper bits are which ore it is, not corners: ores don't wave)
 					int cls = gb & 15;
 					MemoryUtil.memPutByte(dst++, (byte) (cls == 4 || cls == 6 ? gb : cls | corners << 4));

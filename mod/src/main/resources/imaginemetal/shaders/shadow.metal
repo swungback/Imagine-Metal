@@ -13,7 +13,8 @@ struct ImShadowFrame {
 	float4x4 lightClip;   // camera-relative world -> light clip (orthographic, before the warp)
 	int4 camBlock;        // xyz floor(camera)
 	float4 camOffset;     // xyz camera block - camera position (the terrain's CameraOffset)
-	float4 reserved;
+	float4 reserved;      // x which casters (Build C2): 0 as C1 (no small plants), 1 all but plants, 2 plants only (their own slice);
+	                      // y Minecraft's GameTime (the waving's clock, as the terrain's Globals have it)
 	uint listBase;
 	uint pad0, pad1, pad2;
 };
@@ -65,17 +66,40 @@ vertex ImShadowOut im_shadow_vs(uint vid [[vertex_id]], uint iid [[instance_id]]
 		o.uv = float2(0);
 		return o;
 	}
-	// (small plants on the ground cast none: a dead bush's, a flower's or grass's thin, sharp, pale shadow lay beside it like a
-	// ghost copy. Their quads are the ones with only their upper corners waving (terrain.metal); leaves, tall plants' tops and
-	// vines wave whole and still cast)
+	// Plants: quads that wave but aren't leaves (1111) or vines (0101): grass, flowers, ferns, crops (their upper corners) and a
+	// tall plant's upper half (1010, Build C2). Mode 0 (as C1): small plants cast none (their thin shadows lay detached beside
+	// them, "ghost copies": the receivers' bias for big flat faces pushed them off the plant's foot), tall plants' tops cast here.
+	// Mode 1: no plants (they have their own slice). Mode 2: plants only, swaying as they do on screen (terrain.metal).
+	uint mode = uint(f.reserved.x + 0.5);
+	bool plant = false;
 	if (matOff != 0xffffffffu) {
 		uint m = ((device const uchar *) arenaRaw)[matOff + quad];
 		uint wc = (m >> 4) & 15u, cls = m & 15u;
-		if (cls != 4u && cls != 6u && wc != 0u && wc != 15u && wc != 5u) {
+		plant = cls != 4u && cls != 6u && wc != 0u && wc != 15u && wc != 5u;
+		bool skip = mode == 0u ? plant && wc != 10u : mode == 1u ? plant : !plant;
+		if (skip) {
 			o.pos = float4(0, 0, 2, 1);
 			o.uv = float2(0);
 			return o;
 		}
+		if (plant && mode == 2u && (wc == 10u || ((wc >> corner) & 1u) != 0u)) {
+			// (the breeze of terrain.metal's own_vs, the same numbers: the shadow sways with the plant)
+			Vtx w0 = imShadowFetch((quadStart + quad) * 4 + corner, arenaRaw);
+			float3 wp = float3(origin & 1023) + float3(w0.pos);
+			float tw = f.reserved.y * 1200.0;
+			float ph = wp.x * 0.55 + wp.z * 0.38;
+			float3 d = float3(sin(tw * 1.6 + ph) * 0.7 + sin(tw * 2.9 + wp.z * 1.3) * 0.3,
+				sin(tw * 2.1 + wp.x * 0.9 + wp.z * 0.7) * 0.15,
+				cos(tw * 1.3 + ph * 0.8) * 0.6 + sin(tw * 3.3 + wp.x * 1.1) * 0.3) * 0.065;
+			float3 pos = float3(w0.pos) + d + float3(origin - f.camBlock.xyz) + f.camOffset.xyz;
+			o.pos = f.lightClip * float4(pos, 1.0);
+			o.uv = float2(w0.uv0);
+			return o;
+		}
+	} else if (mode == 2u) {
+		o.pos = float4(0, 0, 2, 1);  // (no material bytes: nothing is known to be a plant)
+		o.uv = float2(0);
+		return o;
 	}
 	Vtx v = imShadowFetch((quadStart + quad) * 4 + corner, arenaRaw);
 	float3 pos = float3(v.pos) + float3(origin - f.camBlock.xyz) + f.camOffset.xyz;

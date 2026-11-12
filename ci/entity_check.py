@@ -41,7 +41,11 @@ def patch_vs(vs, particle):
     elif particle: return None
     if 'out.lightMapColor' in v: c += '        out.lightMapColor = float4(1.0);\n'
     c += '    }'
-    return before_last_return(v, c)
+    v = before_last_return(v, c)
+    # (Build C2: the TAA's sub-pixel offset in the level's pass, EntityShade.patchVs)
+    if v is not None and 'out.gl_Position' in v:
+        v = before_last_return(v, '    if (imOn.x > 0.5 && imOn.x < 1.5) out.gl_Position.xy += float2(imOn.z, -imOn.w) * out.gl_Position.w;')
+    return v
 
 def patch_fs(fs):
     m = FS_MAIN.search(fs)

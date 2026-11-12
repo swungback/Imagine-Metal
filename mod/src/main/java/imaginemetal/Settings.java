@@ -110,6 +110,44 @@ public final class Settings {
 	public static volatile boolean desertLook = Engine.flag("imaginemetal.desertLook", true);
 	/** Our clouds drawn after the opaque world, behind what's in front of them (Sky.drawCloudsLate). -Dimaginemetal.cloudsLate=false. */
 	public static volatile boolean cloudsLate = Engine.flag("imaginemetal.cloudsLate", true);
+	// ---- Build C2: each change behind its own switch (Settings > Advanced > Debug), none saved; a -D starts with it off ----
+	/**
+	 * The light shafts as strong as Build B2 under a canopy and at sunrise: C1's ceiling on a ray's light gone (ImFrame.env.z 0)
+	 * and the "something overhead" strength back to B2's (any sky light below 15 at the eyes). The whiteout stays fixed by C1's
+	 * other half (shaftVeilFix): the strong mode only for rays that pass through shadow. -Dimaginemetal.shaftsFull=false.
+	 */
+	public static volatile boolean shaftsFull = Engine.flag("imaginemetal.shaftsFull", true);
+	/**
+	 * Grass, flowers and tall grass cast shadows again, from a map of their own (slice 2 of the shadow map, near cascade only):
+	 * soft, lighter (they let some light through) and swaying with the plant. The old "ghost copies" were the receivers' normal
+	 * offset and slope bias, made for big flat faces, pushing a plant's small shadow off its foot; the ground isn't in the plants'
+	 * map, so it needs no bias there. Off: as C1 (small plants cast none, tall grass's top half hard in the main map).
+	 * -Dimaginemetal.plantShadows=false.
+	 */
+	public static volatile boolean plantShadows = Engine.flag("imaginemetal.plantShadows", true);
+	/**
+	 * The far shadow map (past ~28 blocks) without the receivers' oversized offsets: its normal offset was 1.5 of its texels (a
+	 * quarter block each) times up to 2.2, and its slope bias on top, which lifted the ground about a block over itself, so
+	 * anything a block tall or less (steps, fences, bushes) cast nothing past the near map's edge: the line where shadows ended.
+	 * Its taps now lie in the receiving face's own plane (each with its exact depth), the casters' own raster bias does the rest.
+	 * -Dimaginemetal.shadowFarFix=false.
+	 */
+	public static volatile boolean shadowFarFix = Engine.flag("imaginemetal.shadowFarFix", true);
+	/** Pink petals and wildflowers don't sway (their heads are flat and stayed still while the stems moved). Rebuilds the chunks. */
+	public static volatile boolean petalsStill = Engine.flag("imaginemetal.petalsStill", true);
+	/**
+	 * A section compiled for a level that's already gone (the End, after respawning) isn't drawn: its compile finished after the
+	 * level change, landed in a slot of the new level's table and stayed there (the ghost slabs). -Dimaginemetal.levelGuard=false.
+	 */
+	public static volatile boolean levelGuard = Engine.flag("imaginemetal.levelGuard", true);
+	/**
+	 * Mobs, items, block entities and particles drawn with the TAA's sub-pixel offset as the terrain is. The TAA takes the offset
+	 * back out of the whole picture, so things drawn without it were shifted by it every frame: a pig's eyes swam.
+	 * -Dimaginemetal.entityJitter=false.
+	 */
+	public static volatile boolean entityJitter = Engine.flag("imaginemetal.entityJitter", true);
+	/** (benchmark only) Water and glass reflections traced through the screen; false: the sky alone. */
+	public static volatile boolean waterTrace = true;
 	public static volatile boolean ssao = Engine.flag("imaginemetal.ssao", true);
 	public static volatile float ssaoStrength = Config.number("imaginemetal.ssaoStrength", 0.7f, 0f, 1f);
 	public static volatile boolean shafts = Engine.flag("imaginemetal.shafts", true);

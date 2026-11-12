@@ -164,7 +164,13 @@ public final class EntityShade {
 		} else if (particle) return null;
 		if (v.contains("out.lightMapColor")) c.append("        out.lightMapColor = float4(1.0);\n");
 		c.append("    }");
-		return beforeLastReturn(v, c.toString());
+		v = beforeLastReturn(v, c.toString());
+		// (Build C2, Settings.entityJitter: in the level's pass, the TAA's sub-pixel offset as the terrain has it (terrain.metal
+		// own_vs; imOn.zw, mcown.m mc_im_entity_bind, 0 when off). After SPIRV-Cross's flip of y, as own_vs's position is. The
+		// TAA takes the offset back out of the whole picture: drawn without it, mobs were shifted by it every frame)
+		if (v != null && v.contains("out.gl_Position"))
+			v = beforeLastReturn(v, "    if (imOn.x > 0.5 && imOn.x < 1.5) out.gl_Position.xy += float2(imOn.z, -imOn.w) * out.gl_Position.w;");
+		return v;
 	}
 
 	private static String patchFs(String fs, String kind) {
@@ -204,7 +210,7 @@ public final class EntityShade {
 				var symbol = MetalBridge.library().find("mc_im_entity_bind").orElseThrow();
 				bind = Linker.nativeLinker().downcallHandle(symbol, FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT), Linker.Option.critical(false));
 			}
-			bind.invokeExact(enc, (!Settings.entityLight ? 0 : level ? 1 : 2) | Settings.outline << 4);
+			bind.invokeExact(enc, (!Settings.entityLight ? 0 : level ? 1 : 2) | Settings.outline << 4 | (Settings.entityJitter ? 1 << 8 : 0));
 		} catch (Throwable t) {
 			bindFailed = true;
 			System.out.println("[Imagine Metal] entity light off: " + t);

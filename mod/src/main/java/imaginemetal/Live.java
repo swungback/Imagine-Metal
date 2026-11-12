@@ -22,7 +22,7 @@ public final class Live {
 	private static java.lang.reflect.Method getKey;
 
 	/** Fields that only take effect after a restart (or a chunk rebuild): never switched live. */
-	private static final java.util.Set<String> FIXED = java.util.Set.of("retina", "output", "terrain", "shadowRes", "waving", "debug");
+	private static final java.util.Set<String> FIXED = java.util.Set.of("retina", "output", "terrain", "shadowRes", "waving", "debug", "petalsStill", "levelGuard");
 
 	private Live() {
 	}

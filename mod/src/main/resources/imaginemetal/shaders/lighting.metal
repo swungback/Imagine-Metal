@@ -28,7 +28,9 @@ struct ImFrame {
 	                     // (Build C1: how much the camera is in a dry biome, 0..1: less vibrance on beige, warmer sand)
 	int4 flags;          // x dimension (0 overworld, 1 Nether, 2 End), y debug view, z 1 = the engine filled this frame, w frame index
 	float4 env;          // x how far underground the player is (0..1, eased), y how much it's night (0..1), z the light shafts'
-	                     // ceiling (bloom.metal; 0: none)
+	                     // ceiling (bloom.metal; 0: none), w bits (Build C2): 1 the shafts' strong mode only through shadow, 2 the
+	                     // plants' shadow slice (2) is valid, 4 the far map's receivers without the oversized offsets, 8 water and
+	                     // glass reflect the sky alone (benchmark)
 	float4x4 shadowNear; // camera-relative world -> the near cascade's light clip (orthographic)
 	float4x4 shadowFar;  // ... the far cascade's
 	float4 shadow;       // x near cascade normal offset (blocks), y 1 = the maps are valid this frame, z far cascade normal offset,
@@ -245,6 +247,29 @@ static inline float imSlopeBias(float4x4 m, float slope, float k, uint res) {
 	return zs * texel * slope * k * 0.5;
 }
 
+// (Build C2) The plants' shadow (slice 2: grass, flowers, tall grass of the near map, nothing else), 1 lit .. 0.3: soft, and lighter
+// than a wall's, the blades let some light through (Jack's reference: Reimagined's grass shadows on a path). The ground and the
+// walls aren't in this slice, so they need no offset against themselves: the shadow starts at the plant's foot (the "ghost
+// copies" of before were the main map's offsets for big faces pushing a plant's small shadow away from it). A plant receiving
+// (a slanted face) is moved a quarter block toward the light, past its own caster. Four taps 2.5 texels out (a twelfth of a
+// block), turned per pixel and frame (the TAA blends them).
+static float imPlantShadow(float3 p, float3 n, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp) {
+	float3 a = abs(n);
+	bool plantRecv = max(max(a.x, a.y), a.z) < 0.9;
+	float3 q = plantRecv ? p + f.lightDir.xyz * 0.25 : p + n * 0.01;
+	float4 c = f.shadowNear * float4(q, 1.0);
+	if (c.z <= 0.0 || c.z >= 1.0) return 1.0;
+	float2 uv = float2(0.5 + 0.5 * c.x, 0.5 - 0.5 * c.y);
+	float r = 2.5 / float(smap.get_width());
+	float dth = fract(dot(pixel, float2(0.06711056, 0.00583715)) * 52.9829189);
+	if (f.taa.z > 0.5) dth = fract(dth + 0.61803399 * float(f.flags.w & 63));
+	float ca = cos(dth * 6.2831853) * r, sa = sin(dth * 6.2831853) * r;
+	float ref = c.z - 0.00003;
+	float lit = 0.25 * (smap.sample_compare(cmp, uv + float2(ca, sa), 2, ref) + smap.sample_compare(cmp, uv - float2(ca, sa), 2, ref)
+		+ smap.sample_compare(cmp, uv + float2(-sa, ca) * 0.5, 2, ref) + smap.sample_compare(cmp, uv + float2(sa, -ca) * 0.5, 2, ref));
+	return 1.0 - 0.7 * (1.0 - lit);
+}
+
 // How much of the sun reaches p (camera-relative, n its face normal), from two cascades: the near one (sharp, around the player)
 // where it covers p, the far one beyond, blended across a band so the switch doesn't show. Both are snapped to world-fixed texel
 // grids, so a shadow stays put as the player walks. x: 1 lit, 0 shadowed; y: how much the maps cover p (1 inside, fading to 0 at
@@ -271,21 +296,49 @@ static float2 imShadowX(float3 p, float3 n, float2 pixel, constant ImFrame &f, d
 	if (nearW > 0.0) {
 		float2 uv = float2(0.5 + 0.5 * c0.x, 0.5 - 0.5 * c0.y);
 		litNear = imShadowPcf(smap, cmp, uv, c0.z - 0.00006 - imSlopeBias(f.shadowNear, slope, 2.0, smap.get_width()), 0);
-		if (nearW >= 1.0 && !search) return float2(litNear, 1.0);
 	}
+	// (Build C2) the plants' own slice, near only, eased out from 18 to 28 blocks (past that their shadows would be the far map's
+	// quarter-block texels: blobs)
+	uint bits = uint(f.env.w + 0.5);
+	float plantK = 1.0;
+	if (nearW > 0.0 && (bits & 2u) != 0u) {
+		float pw = nearW * (1.0 - smoothstep(18.0, 28.0, length(p)));
+		if (pw > 0.0) plantK = mix(1.0, imPlantShadow(p, n, pixel, f, smap, cmp), pw);
+	}
+	if (nearW >= 1.0 && !search) return float2(litNear * plantK, 1.0);
 	// the far cascade
-	float4 c1 = f.shadowFar * float4(p + n * (f.shadow.z * grazing), 1.0);
+	// (Build C2, env.w bit 4, the line where shadows ended: this map's normal offset was 1.5 of its texels (a quarter block each)
+	// times up to 2.2, with a slope bias on top: the ground was looked up about a block above itself, so steps, fences and bushes
+	// cast nothing here. Now a quarter of that offset, and the four taps lie in the receiving face's own plane, each with its own
+	// exact depth there: a flat face can't shadow itself however it slopes, and the casters' raster bias (two texels of slope,
+	// imshadow.m) covers what the 2x2 filter reaches. A small depth bias against the depth's own precision.)
+	bool farFix = (bits & 4u) != 0u;
+	float4 c1 = f.shadowFar * float4(p + n * (f.shadow.z * grazing * (farFix ? 0.25 : 1.0)), 1.0);
 	float e1 = max(abs(c1.x), abs(c1.y));
-	if (e1 > 0.98 || c1.z > 1.0 || c1.z < 0.0) return nearW > 0.0 ? float2(litNear, nearW) : float2(1.0, 0.0);
+	if (e1 > 0.98 || c1.z > 1.0 || c1.z < 0.0) return nearW > 0.0 ? float2(litNear * plantK, nearW) : float2(1.0, 0.0);
 	float res = float(smap.get_width());
 	float2 uv1 = float2(0.5 + 0.5 * c1.x, 0.5 - 0.5 * c1.y);
-	float biasFar = 0.00012 + imSlopeBias(f.shadowFar, slope, 1.5, smap.get_width());
+	float biasFar = farFix ? 0.00004 : 0.00012 + imSlopeBias(f.shadowFar, slope, 1.5, smap.get_width());
 	float z1 = c1.z - biasFar;
 	float litFar = 1.0;
 	if (nearW < 1.0) {
 		float o1 = 0.75 / res;
-		litFar = 0.25 * (smap.sample_compare(cmp, uv1 + float2(-o1, -o1), 1, z1) + smap.sample_compare(cmp, uv1 + float2(o1, -o1), 1, z1)
-			+ smap.sample_compare(cmp, uv1 + float2(-o1, o1), 1, z1) + smap.sample_compare(cmp, uv1 + float2(o1, o1), 1, z1));
+		if (farFix) {
+			float4x4 m = f.shadowFar;
+			float xs = length(float3(m[0][0], m[1][0], m[2][0]));
+			float ob = 0.75 * 2.0 / max(xs * res, 1e-6);  // (three quarters of a far texel, in blocks)
+			float3 up = abs(n.y) > 0.9 ? float3(1.0, 0.0, 0.0) : float3(0.0, 1.0, 0.0);
+			float3 T = normalize(cross(n, up)), B = cross(n, T);
+			float3 dT = (m * float4(T, 0.0)).xyz * ob, dB = (m * float4(B, 0.0)).xyz * ob;
+			float3 q0 = c1.xyz - dT - dB, q1 = c1.xyz + dT - dB, q2 = c1.xyz - dT + dB, q3 = c1.xyz + dT + dB;
+			litFar = 0.25 * (smap.sample_compare(cmp, float2(0.5 + 0.5 * q0.x, 0.5 - 0.5 * q0.y), 1, q0.z - biasFar)
+				+ smap.sample_compare(cmp, float2(0.5 + 0.5 * q1.x, 0.5 - 0.5 * q1.y), 1, q1.z - biasFar)
+				+ smap.sample_compare(cmp, float2(0.5 + 0.5 * q2.x, 0.5 - 0.5 * q2.y), 1, q2.z - biasFar)
+				+ smap.sample_compare(cmp, float2(0.5 + 0.5 * q3.x, 0.5 - 0.5 * q3.y), 1, q3.z - biasFar));
+		} else {
+			litFar = 0.25 * (smap.sample_compare(cmp, uv1 + float2(-o1, -o1), 1, z1) + smap.sample_compare(cmp, uv1 + float2(o1, -o1), 1, z1)
+				+ smap.sample_compare(cmp, uv1 + float2(-o1, o1), 1, z1) + smap.sample_compare(cmp, uv1 + float2(o1, o1), 1, z1));
+		}
 	}
 	// (Build C1: with the soft far shadows the fade out at the far cascade's edge starts sooner, over the last fifth of its reach)
 	float cover = 1.0 - smoothstep(soft > 0.0 ? 0.8 : 0.9, 0.98, e1);
@@ -342,7 +395,7 @@ static float2 imShadowX(float3 p, float3 n, float2 pixel, constant ImFrame &f, d
 			}
 		}
 	}
-	return float2(mix(litFar, litNear, nearW), max(cover, nearW));
+	return float2(mix(litFar, litNear, nearW) * plantK, max(cover, nearW));
 }
 
 static float2 imShadow(float3 p, float3 n, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp) {
@@ -1522,7 +1575,8 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			float dither = imDither(pixel, f);
 			// (traced only within 64 blocks: past that the reflection is the sky, cheaper and without the depth's banding)
 			float dist = length(p);
-			float4 hit = f.histShift.w > 0.5 && dist < 64.0 ? imReflect(p, n, R, kind == 1u ? 0.0 : 1.5, dither, f, hc, hd, hs, false) : float4(0.0);
+			// (env.w bit 8: the benchmark's step, the sky alone)
+			float4 hit = f.histShift.w > 0.5 && dist < 64.0 && (uint(f.env.w + 0.5) & 8u) == 0u ? imReflect(p, n, R, kind == 1u ? 0.0 : 1.5, dither, f, hc, hd, hs, false) : float4(0.0);
 			hit.a = hit.a > 0.0 ? hit.a * (1.0 - smoothstep(40.0, 64.0, dist)) : hit.a;
 			// (from 0.3 to 0.85: sky light is interpolated per triangle, and over 0.6..1 the two triangles of one face read
 			// differently: obsidian and polished blocks showed a diagonal seam, one half reflecting more sky than the other)

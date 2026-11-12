@@ -2433,7 +2433,16 @@ id<MTLLibrary> mco_library(Own *w) {
 void mc_im_entity_bind(Enc *enc, int on) {
 	id<MTLRenderCommandEncoder> r = enc->render;
 	if (!r) return;
-	float flag[4] = {(float) (on & 15), (float) (on >> 4), 0.0f, 0.0f};  // (y: the selection outline's style)  // (0 Minecraft's light, 1 the level's, 2 outside it: the hand only)
+	float flag[4] = {(float) (on & 15), (float) ((on >> 4) & 15), 0.0f, 0.0f};  // (y: the selection outline's style)  // (0 Minecraft's light, 1 the level's, 2 outside it: the hand only)
+	// (Build C2, bit 8: zw the TAA's sub-pixel offset in the level's pass, ImFrame.taa xy at 816, as own_vs takes it; 0 with it off)
+	if ((on & 256) && (on & 15) == 1) {
+		float jit[4];
+		memcpy(jit, imFrame + 816, sizeof jit);
+		if (jit[2] > 0.5f) {
+			flag[2] = jit[0];
+			flag[3] = jit[1];
+		}
+	}
 	[r setVertexBytes:flag length:sizeof flag atIndex:25];
 	[r setFragmentBytes:flag length:sizeof flag atIndex:25];
 	[r setFragmentBytes:imFrame length:sizeof imFrame atIndex:30];

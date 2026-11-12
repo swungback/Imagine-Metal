@@ -99,8 +99,22 @@ abstract class OwnRenderSectionMixin {
 	@Inject(method = "setSectionMesh", at = @At("RETURN"))
 	private void mcopt$ownPublished(SectionMesh sectionMesh, CallbackInfoReturnable<SectionMesh> cir) {
 		OwnTerrain own = OwnTerrain.get();
-		if (own != null) own.published(this.index, sectionMesh, this.renderOrigin.getX(), this.renderOrigin.getY(), this.renderOrigin.getZ(), this.uploadedTime);
+		if (own == null) return;
+		// (Imagine Metal, Build C2, Settings.levelGuard) A section of a dispatcher that's no longer the level renderer's: the level
+		// it was compiled for is gone (the End, after respawning; vanilla resets its render data a frame after the change and makes
+		// a new dispatcher). Its compile finished after that reset, so nothing clears it any more, and our table is keyed by the
+		// section's index: it landed in a slot of the new level and stayed, the End's blocks floating over the Overworld ("ghost
+		// slabs", 2026-11-12 13:43). Dropped, and counted in the log.
+		if (imaginemetal.Settings.levelGuard && this.this$0 != net.minecraft.client.Minecraft.getInstance().levelRenderer.sectionRenderDispatcher()) {
+			if (mcopt$dropped++ < 20) System.out.println("[Imagine Metal] level guard: a section of the last level dropped (at " + this.renderOrigin.getX() + " "
+				+ this.renderOrigin.getY() + " " + this.renderOrigin.getZ() + ")");
+			return;
+		}
+		own.published(this.index, sectionMesh, this.renderOrigin.getX(), this.renderOrigin.getY(), this.renderOrigin.getZ(), this.uploadedTime);
 	}
+
+	@org.spongepowered.asm.mixin.Unique
+	private static int mcopt$dropped;
 
 	@Inject(method = "reset", at = @At("TAIL"))
 	private void mcopt$ownCleared(CallbackInfo ci) {

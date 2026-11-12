@@ -486,11 +486,18 @@ public final class ImagineFrame {
 		// (Build C1: a ramp, not a step: any level below 15, one leaf block over the player's head, was full strength; now nothing
 		// at 14 (0.93), full only from about 10 (0.7) down, a real canopy or a cave mouth; the veil itself is held down in
 		// bloom.metal, so this only keeps a single leaf from counting as a forest)
-		float coverNow = Settings.shaftVeilFix ? 1f - smoothstep(0.7f, 0.93f, eyeNow) : eyeNow < 0.97f ? 1f : 0f;
+		// (Build C2, Settings.shaftsFull: B2's step again; the ramp weakened real beams under trees, where the sky light at the eyes
+		// is often 11 to 13. The whiteout doesn't need it: the strong mode is only for rays through shadow, bloom.metal)
+		float coverNow = Settings.shaftVeilFix && !Settings.shaftsFull ? 1f - smoothstep(0.7f, 0.93f, eyeNow) : eyeNow < 0.97f ? 1f : 0f;
 		shaftCover += (coverNow - shaftCover) * (1f - (float) Math.exp(-dt / 2f));
 		night = dim == 0 ? 1f - day : 0f;
-		// (z, Build C1: the light shafts' ceiling, the most light a ray's whole length may add (bloom.metal); 0: none, as before)
-		put(cave, night, Settings.shaftVeilFix ? 0.35f : 0f, 0f);
+		// (z, Build C1: the light shafts' ceiling, the most light a ray's whole length may add (bloom.metal); 0: none, as before
+		// and as Build C2 has it (Settings.shaftsFull))
+		// (w, Build C2, bits: 1 the shafts' strong mode only through shadow (C1's whiteout fix, until C2 keyed on z), 2 the plants'
+		// shadow slice is valid, 4 the far shadow map's receivers without the oversized offsets, 8 (benchmark) water and glass
+		// reflect the sky alone, no trace)
+		int envBits = (Settings.shaftVeilFix ? 1 : 0) | (Shadows.plantsValid() ? 2 : 0) | (Settings.shadowFarFix ? 4 : 0) | (Settings.waterTrace ? 0 : 8);
+		put(cave, night, Settings.shaftVeilFix && !Settings.shaftsFull ? 0.35f : 0f, envBits);
 		for (int c = 0; c < 2; c++) for (int i = 0; i < 16; i++) BUF.putFloat(Shadows.MATRIX[c][i]);
 		// shadow: near cascade normal offset, valid, far cascade normal offset
 		put(Shadows.normalOffset(0), Shadows.valid() ? 1f : 0f, Shadows.normalOffset(1), Settings.pbr ? 1f : 0f);

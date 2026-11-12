@@ -70,6 +70,13 @@ public final class Benchmark {
 		steps.add(new Step("clouds drawn before the land (C1 off)", () -> Settings.cloudsLate = false));
 		steps.add(new Step("shaft veil fix off (C1)", () -> Settings.shaftVeilFix = false));
 		steps.add(new Step("TAA steadier far away off (C1)", () -> Settings.taaFarSteady = false));
+		// (Build C2: what each of its changes costs; "off" = as Build C1)
+		steps.add(new Step("plant shadows off (C2: their own map slice, a second near pass)", () -> Settings.plantShadows = false));
+		steps.add(new Step("far shadow fix off (C2)", () -> Settings.shadowFarFix = false));
+		steps.add(new Step("shafts as C1 (C2's full shafts off)", () -> Settings.shaftsFull = false));
+		// (what the water costs, part by part: the screen-space trace of its reflections, its waves (normals), its refraction)
+		steps.add(new Step("water and glass reflect only the sky (no screen trace)", () -> Settings.waterTrace = false));
+		steps.add(new Step("water waves off (Reimagined water, flat)", () -> Settings.waterStyle = Math.min(Settings.waterStyle, 1)));
 		steps.add(new Step("air pass off (the haze in every terrain fragment)", () -> Settings.airPass = false));
 		steps.add(new Step("deferred lighting off (every terrain fragment lit, as Build B1)", () -> Settings.deferred = false));
 		steps.add(new Step("near shadow casters culled to the view (experimental, off)", () -> Settings.shadowNearViewCull = true));

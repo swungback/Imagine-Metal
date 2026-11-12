@@ -149,7 +149,7 @@ struct ImVlFrame {
 	float4 lightColor;
 	float4 pad0[6];
 	int4 flags;
-	float4 env;          // z the light shafts' ceiling (Build C1; 0: none)
+	float4 env;          // z the light shafts' ceiling (Build C1; 0: none), w bits (Build C2): 1 the strong mode only through shadow
 	float4x4 shadowNear;
 	float4x4 shadowFar;
 	float4 shadow;       // y 1 = the maps are valid this frame
@@ -395,7 +395,8 @@ static float4 imbShaftsNow(ImBloomOut in, depth2d<float> depth, depth2d_array<fl
 	float vlMult = imbVlMult(intense, len, maxD, vdotl, vdotu, f);
 	// (Build C1, f.env.z > 0: the "something overhead" strength only for rays that pass through shadow, see below; a ray the
 	// light reaches all along gets the open air's strength, vlPlain)
-	bool veilFix = f.env.z > 0.0 && !water;
+	// (Build C2: its own flag, env.w bit 1; it was keyed on the ceiling, which C2 drops)
+	bool veilFix = (uint(f.env.w + 0.5) & 1u) != 0u && !water;
 	float vlPlain = veilFix && intense > 0.0 ? imbVlMult(0.0, len, maxD, vdotl, vdotu, f) : vlMult;
 	if (max(vlMult, vlPlain) < 0.0001) return float4(0.0, len, 0.0, 1.0);
 
@@ -467,7 +468,7 @@ static float4 imbShaftsNow(ImBloomOut in, depth2d<float> depth, depth2d_array<fl
 		// light one ray adds levels off toward a ceiling, f.env.z)
 		float shadowed = mapAll > 1e-5 ? saturate(1.0 - mapLit / mapAll) : 0.0;
 		v = vl * mix(vlPlain, vlMult, smoothstep(0.08, 0.4, shadowed));
-		v = f.env.z * (1.0 - exp(-v / f.env.z));
+		if (f.env.z > 0.0) v = f.env.z * (1.0 - exp(-v / f.env.z));  // (none with Build C2, Settings.shaftsFull)
 	}
 	return float4(v, len, 0.0, 1.0);
 }

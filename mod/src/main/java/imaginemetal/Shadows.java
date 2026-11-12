@@ -104,6 +104,11 @@ public final class Shadows {
 	private static int frameParity;
 	private static long farDraws, farSkips, farLogNs;
 	private static long state, atlas;
+	/**
+	 * (Build C2, Settings.plantShadows) Slice 2 holds the plants of the near map as it now serves (drawn with it, or kept with it
+	 * when the near map is kept a frame). False: the receivers leave slice 2 alone (it may hold nothing yet).
+	 */
+	private static volatile boolean plantsValid;
 	private static int pipelines; // 1 ready, -1 failed
 
 	private Shadows() {
@@ -117,6 +122,11 @@ public final class Shadows {
 	/** The block atlas as the terrain's last opaque draw bound it (the cutout casters' test reads it). */
 	public static void atlas(long texture) {
 		atlas = texture;
+	}
+
+	/** Whether the receivers may sample slice 2, the plants (ImFrame.env.w bit 2). */
+	static boolean plantsValid() {
+		return valid() && Settings.plantShadows && plantsValid;
 	}
 
 	/** Whether the receivers may sample the map this frame (ImFrame.shadow.y). */
@@ -378,6 +388,12 @@ public final class Shadows {
 				MemoryUtil.memPutFloat(f + 80, (float) (bx - cam.x));
 				MemoryUtil.memPutFloat(f + 84, (float) (by - cam.y));
 				MemoryUtil.memPutFloat(f + 88, (float) (bz - cam.z));
+				// (Build C2: reserved.y, Minecraft's GameTime as its Globals hold it, for the plants' sway in their own slice)
+				var lvl = Minecraft.getInstance().level;
+				float gt = lvl == null ? 0f
+					: (float) ((lvl.getGameTime() % 24000L) + Minecraft.getInstance().getDeltaTracker().getGameTimeDeltaPartialTick(false)) / 24000f;
+				MemoryUtil.memPutFloat(f + 100, gt);
+				boolean plants = Settings.plantShadows;
 				boolean drew = false;
 				boolean farDrawn = false;
 				for (int c = 0; c < 2; c++) {
@@ -400,7 +416,17 @@ public final class Shadows {
 						return;
 					}
 					for (int i = 0; i < 16; i++) MemoryUtil.memPutFloat(f + i * 4L, MATRIX[c][i]);
+					// (reserved.x, which casters: 0 as C1; with the plants' own slice (Build C2) 1, everything but the plants)
+					MemoryUtil.memPutFloat(f + 96, plants ? 1f : 0f);
 					ImNative.shadowRender(enc, state, f, FRAME_BYTES, b[0], b[1], b[2], b[3], b[4], (int) b[5], atlas, 2.0f, c);
+					if (c == 0) {
+						// (Build C2: the near map's plants alone into slice 2: the same casters' list, the same light clip)
+						if (plants) {
+							MemoryUtil.memPutFloat(f + 96, 2f);
+							ImNative.shadowRender(enc, state, f, FRAME_BYTES, b[0], b[1], b[2], b[3], b[4], (int) b[5], atlas, 2.0f, 2);
+						}
+						plantsValid = plants;
+					}
 					drew = true;
 					if (c == 0) {
 						nearClip.set(CLIP[0]);

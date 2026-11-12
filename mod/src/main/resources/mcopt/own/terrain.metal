@@ -1834,7 +1834,8 @@ vertex VOut own_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant Dr
 		uint wc = (ov.imMat >> 4) & 15u;
 		if ((ov.imMat & 15u) == 4u || (ov.imMat & 15u) == 6u) wc = 0u;  // (an ore's upper bits say which ore it is)
 		bool vine = wc == 5u;
-		if (wc != 0u && (wc == 15u || vine || ((wc >> corner) & 1u) != 0u)) {
+		// (10: a tall plant's upper half, Build C2: waves whole like leaves, marked apart from them for the shadow casters)
+		if (wc != 0u && (wc == 15u || wc == 10u || vine || ((wc >> corner) & 1u) != 0u)) {
 			float3 wp = float3(origin & 1023) + rel;
 			float tw = g.GameTime * 1200.0;
 			const float amp = 0.065;  // (one for every waving block: a tall plant's halves share their corners and must move alike)
