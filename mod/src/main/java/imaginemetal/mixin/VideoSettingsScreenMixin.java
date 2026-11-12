@@ -23,6 +23,8 @@ abstract class VideoSettingsScreenMixin extends OptionsSubScreen {
 	private void imaginemetal$button(CallbackInfo ci) {
 		Screen self = this;
 		this.list.addHeader(Component.literal("Imagine Metal"));
-		this.list.addBig(Button.builder(Component.literal("Imagine Metal settings..."), b -> this.minecraft.gui.setScreen(new SettingsScreen(self))).build());
+		// (MetaLODS beside Imagine Metal: its own settings, not a page of ours)
+		this.list.addSmall(Button.builder(Component.literal("Imagine Metal settings..."), b -> this.minecraft.gui.setScreen(new SettingsScreen(self))).bounds(0, 0, 150, 20).build(),
+			Button.builder(Component.literal("MetaLODS settings..."), b -> this.minecraft.gui.setScreen(new imaginemetal.metalods.MetaLodsScreen(self))).bounds(0, 0, 150, 20).build());
 	}
 }

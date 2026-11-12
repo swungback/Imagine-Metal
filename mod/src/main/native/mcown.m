@@ -2456,3 +2456,19 @@ void mc_im_entity_bind(Enc *enc, int on) {
 		[r setFragmentSamplerState:imShadowCmp atIndex:13];
 	}
 }
+
+// ---- (Imagine Metal, MetaLODS: metalods.m) the far terrain draws into the G-buffer before it is lit ----
+// Whether the open encoder is the G-buffer's pass (the opaque terrain drew into it this frame and its lighting hasn't run).
+int mco_im_g_open(Enc *enc) {
+	return enc && enc->render && enc->imG && enc->colorCount == 5 && enc->colors[0] && !imDeferFailed;
+}
+
+// Something was drawn into the G-buffer (its lighting must run).
+void mco_im_g_mark(void) {
+	imGDrawn = 1;
+}
+
+// This frame's ImFrame as the terrain got it (the TAA's offset is at 816).
+const uint8_t *mco_im_frame(void) {
+	return imFrame;
+}

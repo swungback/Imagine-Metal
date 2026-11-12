@@ -24,6 +24,9 @@ abstract class PauseScreenMixin extends Screen {
 		Screen self = this;
 		this.addRenderableWidget(Button.builder(Component.literal("Imagine Metal"), b -> Minecraft.getInstance().gui.setScreen(new SettingsScreen(self)))
 			.bounds(6, 6, 100, 20).build());
+		// (MetaLODS beside it)
+		this.addRenderableWidget(Button.builder(Component.literal("MetaLODS"), b -> Minecraft.getInstance().gui.setScreen(new imaginemetal.metalods.MetaLodsScreen(self)))
+			.bounds(110, 6, 100, 20).build());
 		// (the shaders off and on without a restart: F8 in game does the same)
 		this.addRenderableWidget(Button.builder(Component.literal("Shaders: " + (imaginemetal.Live.isOff() ? "off" : "on")), b -> {
 			imaginemetal.Live.toggle();

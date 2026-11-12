@@ -2098,6 +2098,7 @@ public final class OwnTerrain {
 		Matrix4f clip = new Matrix4f(proj).mul(view);
 		imaginemetal.Reflections.noteClip(clip, camera.pos.x, camera.pos.y, camera.pos.z);
 		imaginemetal.Deferred.frame(this.own, clip);  // (Imagine Metal, Build B2: deferred lighting for this frame's opaque draws)
+		imaginemetal.metalods.MetaLods.frame(clip, camera.pos.x, camera.pos.y, camera.pos.z, MetalBridge.viewHandle(atlas), renderDistance);  // (MetaLODS)
 		GpuBufferSlice terrain = RenderSystem.getDynamicUniforms().writeTerrainTransform(new Matrix4f(view), atlas.getWidth(0), atlas.getHeight(0));
 		try (MemoryStack stack = MemoryStack.stackPush()) {
 			long f = stack.ncalloc(16, 1, CULL_FRAME_BYTES);

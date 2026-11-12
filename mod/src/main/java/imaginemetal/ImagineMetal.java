@@ -19,5 +19,6 @@ public final class ImagineMetal implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		System.out.println("[Imagine Metal] " + version() + " on mcopt's Metal backend");
+		imaginemetal.metalods.MetaLods.init();
 	}
 }

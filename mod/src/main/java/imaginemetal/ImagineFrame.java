@@ -523,7 +523,7 @@ public final class ImagineFrame {
 		put(sunDir[0], sunDir[1], sunDir[2], ourFog ? 1f : 0f);
 		// the air fog (Photon's): Rayleigh by biome (rgb), Mie by time of day and weather (w)
 		put(Haze.rayleigh[0], Haze.rayleigh[1], Haze.rayleigh[2], dim == 0 ? Haze.mie(sunDir[0], sunDir[1], rain) : 0f);
-		put(mc.options.getEffectiveRenderDistance() * 16f, (float) cam.y, 1f - cave, Settings.haze);
+		put(Math.max(mc.options.getEffectiveRenderDistance() * 16f, imaginemetal.metalods.MetaLods.reach()), (float) cam.y, 1f - cave, Settings.haze);
 		// the reflections' history (Reflections): its transform and inverse, and how far the camera has moved since (w 1 = valid)
 		for (int c = 0; c < 4; c++) for (int r = 0; r < 4; r++) BUF.putFloat(Reflections.CLIP.get(c, r));
 		for (int c = 0; c < 4; c++) for (int r = 0; r < 4; r++) BUF.putFloat(Reflections.CLIP_INV.get(c, r));

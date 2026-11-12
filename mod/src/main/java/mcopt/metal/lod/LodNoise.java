@@ -603,6 +603,7 @@ final class LodNoise {
 				access.mcopt$updateY(2, 64, waterHeight, top - 1);
 				BlockState below = rule.tryApply(bx, top - 1, bz);
 				if (below == null) below = stone;
+				t.under[i] = below;
 				Biome b = biomes[i].value();
 				int topColor = LodColors.top(surface, b, bx, bz);
 				int belowColor = LodColors.top(below, b, bx, bz);

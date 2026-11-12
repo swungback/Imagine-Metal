@@ -37,6 +37,8 @@ final class LodTile {
 	final int[] tex;
 	/** The block at the surface (under the water where wet) and the column's biome. */
 	final BlockState[] state;
+	/** (MetaLODS) the block under the surface block, as the material rules put it (null until LodNoise's materials ran). */
+	final BlockState[] under;
 	final Holder<Biome>[] biome;
 	/** The ground's own top face (the surface before trees were added; == height where no tree stands). */
 	final short[] ground;
@@ -86,6 +88,7 @@ final class LodTile {
 		this.fringe = new boolean[n];
 		this.tex = new int[n];
 		this.state = new BlockState[n];
+		this.under = new BlockState[n];
 		this.biome = new Holder[n];
 		this.ground = new short[n];
 		this.canopyLo = new short[n];
