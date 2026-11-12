@@ -1,4 +1,4 @@
-# Imagine Metal: handoff (2026-11-11, ~23:45)
+# Imagine Metal: handoff (2026-11-12, ~11:50)
 
 Where things stand, for picking the work up in a new conversation.
 
@@ -11,7 +11,35 @@ Where things stand, for picking the work up in a new conversation.
   are chat lines in the log (`[CHAT] <herningstang> ...`) just before each screenshot.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
 
-## START HERE: 2026-11-11 23:45, Builds B1 + B2 built and B2 DEPLOYED, UNTESTED (Jack was away). MetalFX started on a branch.
+## START HERE: 2026-11-12 11:50, Jack TESTED B2 (00:32-01:15): it works, 58 fps. His issue screenshots are NOT looked at yet.
+B2 is still what's in mods (76b21cf); B1 jar still in the instance folder; MetalFX still only on branch `metalfx`.
+### B2 results (latest.log of the 00:32 session; jungle spot benchmark, RD16, world 1158x724 -> 1728x1080)
+- Log: `generated normals baked: 2395 textures (72 worked out live), 4096x2048, 210 ms`; `deferred lighting on`; `air pass on`.
+- Everything on 58 fps / 17.3 ms (Build A: 47 / 21.3). Estimates had been ~60 for B1 and 75-90 for B2: B2 fell SHORT, say so.
+- deferred lighting off: -3.8 ms (45 fps) = what B2 buys (hoped ~9). far shadow map not kept: -2.9 ms (50 fps). near shadow map
+  every frame: -0.3. air pass off: +0.2 (i.e. the air pass buys nothing measurable with deferred on). parallax off -1.3 (noise?).
+- Still costing: shaders off +8.8 (124 fps); render distance 8 +4.1 (78 fps); generated normals +3.4 (the bake did NOT make
+  them cheap: look at why, imMaterial runs per G-buffer fragment incl. the tangent frame maths); sky and air +2.1; shadows
+  +1.9; coloured light +1.4; PBR +1.2; TAA +1.1; render scale 100 %: -6.9 (41 fps).
+- Passes: terrain 11.8 of 18.7 ms GPU (still the bulk, and now the G-buffer + lighting are one number), shadow maps 1.6,
+  taa 1.2, resolve 0.8. So the terrain pass is still ~12 ms with lighting once per pixel: the G-buffer fill itself
+  (own_fs_g on small leaf triangles: texture sample, imMaterial, alpha test) is the next thing to measure and cut.
+### His notes after the benchmark (chat line, then the screenshots taken right after it; READ THE SCREENSHOTS FIRST)
+- 00:52:58 "wtf is going on on the left side look at that blur": 00.53.01, 00.53.02
+- 00:55:14 "blur in bamboo": 00.55.15, 00.55.16
+- 00:57:43 "flickering": 00.57.44, 00.57.45, 00.57.45_2, 00.57.49, 00.57.49_2
+- 00:58:26 "the mountain looks like baby vomit": 00.58.27
+- 01:03:14 "no shadows that far looks alil off maybe is there a cheap fix or skip?": 01.03.15, 01.03.44
+- 01:05:59 "stuff above clouds can be seen through": 01.06.01 (clouds are a blended sky pass drawn BEFORE the terrain, with no
+  depth: known, see Build B1 notes)
+- 01:06:53 "shadows from the sky island looks off": 01.06.55, 01.06.59
+- 01:07:15 "whiteout", 01:07:24 "what happened", 01:09:37 "whiteout shit": 01.07.17 .. 01.07.33, 01.09.33 .. 01.09.45 (ten
+  shots; suspects to check against them: the air pass's tone-curve inversion or border fade high up / far out, im_air_fs)
+- 01:14:48 "blood flickering": 01.14.50, 01.14.50_2, 01.14.57, 01.14.57_2
+Which of these are new with B1/B2 and which are old (blur = TAAU, known) is NOT sorted yet: compare with Debug > "Deferred
+lighting" / "Air pass" off, and the benchmark doesn't cover them.
+
+## Builds B1 + B2 as written (2026-11-11 23:45; superseded above where they differ)
 State: mods folder = B2 (main 76b21cf, sha256 f494b26f...). Fallback = `instances/Imagine metal/imagine-metal-b1.jar` (B1, 7bda686,
 sha256 9509c5a6...; OUTSIDE mods). Swap: quit the game, copy that file over `minecraft/mods/imagine-metal-0.1.0.jar`.
 Softer switch first (no jar swap): Settings > Advanced > Debug > "Deferred lighting" off (live) or `-Dimaginemetal.deferred=false`:
