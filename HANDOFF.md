@@ -11,6 +11,17 @@ Where things stand, for picking the work up in a new conversation.
   are chat lines in the log (`[CHAT] <herningstang> ...`) just before each screenshot.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
 
+## START HERE: 2026-11-13 ~01:00, MetaLODS built overnight on branch `metalods` (NOT deployed, NOT on main)
+- Jack's ask (11-13 00:00): a Voxy-style LOD system inside our shader, Metal-native, as fast as possible, its own menu next to
+  Imagine Metal's, named MetaLODS; unexplored land from the seed like SeedGen; default 128 chunks. He closed the lid: nothing
+  tested in game. Design, limits and his test plan: docs/METALODS.md.
+- Deploy in the morning only with Jack's OK: the branch's CI artifact (`gh run list -R swungback/Imagine-Metal --branch metalods`,
+  `gh run download <run> -n imagine-metal`), game closed, over `mods/imagine-metal-0.1.0.jar`. Fallback stays
+  `imagine-metal-c2b-water.jar` (= main 0cc9a2e, what's in mods now).
+- Look first in latest.log: `[MetaLODS]` lines (ready / dimension / stats every 10 s / "stopped: ..." with a stack trace).
+- Still open from before (Jack 00:00): under water he can only see out through a circle right above him (Snell's window from
+  terrain.metal's faked total internal reflection, the 23:50 fix only recoloured the ring). He said it can wait till tomorrow.
+
 ## START HERE: 2026-11-12 23:40, Build C2b DEPLOYED (main 168bd4a, CI green run 43320786647). NOT tested yet.
 - mods folder = C2b: jar sha1 200f0257..., 1524309 bytes. New fallback `imagine-metal-c2.jar` (C2, 9e558ce5...) next to c1/b2/b1.
 - Why C2b: Jack tested C2 at 23:27 (screenshots 2026-11-12_23.27.22 / 23.27.25, grassy terraces, flying ~15-20 above them,
