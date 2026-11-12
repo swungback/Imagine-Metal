@@ -484,8 +484,9 @@ public final class ImagineFrame {
 		// something overhead (leaves, a cave roof, an arch: the sky light where the player stands below full): Reimagined's
 		// scene-aware light shafts, eased in and out over a couple of seconds
 		// (Build C1: a ramp, not a step: any level below 15, one leaf block over the player's head, was full strength; now nothing
-		// at 14 (0.93), full only from 9 (0.6) down, a real canopy or a cave mouth)
-		float coverNow = Settings.shaftVeilFix ? 1f - smoothstep(0.6f, 0.93f, eyeNow) : eyeNow < 0.97f ? 1f : 0f;
+		// at 14 (0.93), full only from about 10 (0.7) down, a real canopy or a cave mouth; the veil itself is held down in
+		// bloom.metal, so this only keeps a single leaf from counting as a forest)
+		float coverNow = Settings.shaftVeilFix ? 1f - smoothstep(0.7f, 0.93f, eyeNow) : eyeNow < 0.97f ? 1f : 0f;
 		shaftCover += (coverNow - shaftCover) * (1f - (float) Math.exp(-dt / 2f));
 		night = dim == 0 ? 1f - day : 0f;
 		// (z, Build C1: the light shafts' ceiling, the most light a ray's whole length may add (bloom.metal); 0: none, as before)

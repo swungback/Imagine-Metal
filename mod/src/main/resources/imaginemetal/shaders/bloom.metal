@@ -385,7 +385,7 @@ static float4 imbShaftsNow(ImBloomOut in, depth2d<float> depth, depth2d_array<fl
 	}
 	bool water = p.shaft.x < -0.5;
 	float intense = water ? 1.0 : p.shaft.y;
-	float rain = f.dayUp.w, sunVis = f.nightMiddle.w, noon = f.dayDown.w, invNoon = f.sunsetDown.w;
+	float rain = f.dayUp.w, sunVis = f.nightMiddle.w;
 
 	// how much: by the view (toward the light, toward the horizon) and the time of day
 	float vdotl = dot(dir, f.lightDir.xyz), vdotu = dir.y;

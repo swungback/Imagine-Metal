@@ -1,4 +1,4 @@
-# Imagine Metal: handoff (2026-11-12, ~11:50)
+# Imagine Metal: handoff (2026-11-12, ~13:20)
 
 Where things stand, for picking the work up in a new conversation.
 
@@ -11,7 +11,88 @@ Where things stand, for picking the work up in a new conversation.
   are chat lines in the log (`[CHAT] <herningstang> ...`) just before each screenshot.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
 
-## START HERE: 2026-11-12 11:50, Jack TESTED B2 (00:32-01:15): it works, 58 fps. His issue screenshots are NOT looked at yet.
+## START HERE: 2026-11-12 13:20, Build C1 DEPLOYED (main), NOT tested by Jack yet. Nothing in it was seen running.
+C1 = commits dafc331 + the one after it ("C1: far shadow map at most every fifth of a second..."). Fallbacks, both OUTSIDE mods, in
+`instances/Imagine metal/`: `imagine-metal-b2.jar` (B2, 76b21cf, sha1 b623f298...) and `imagine-metal-b1.jar`. Swap: quit the game,
+copy the file over `minecraft/mods/imagine-metal-0.1.0.jar`. MetalFX: still only on branch `metalfx`, NOT deployed (B3, later).
+CI can only compile: every C1 change is logic nobody has looked at in game. Each has its own switch in Settings > Advanced >
+Debug (none saved; `-Dimaginemetal.<name>=false` starts with it off), so Jack can compare and a bad one can be turned off live.
+### What C1 changed (the six items of the project doc "C1 - next build", which replaced the plan below)
+1. WHITEOUT (`shaftVeilFix`, Debug "Shaft veil fix"). ImagineFrame.shaftCover from a ramp on the eye's sky light (0 at >= 0.93,
+   1 at <= 0.7; was a step at 0.97). bloom.metal imbShaftsNow: imbVlMult() is the old multiplier as a function; the "something
+   overhead" strength counts only by how much of the ray's map-covered part lies in shadow (mapLit / mapAll: none below 8 %, all
+   from 40 %), else the open-air strength (vlPlain); then a soft ceiling on what one ray adds, ImFrame.env.z = 0.35
+   (v = c (1 - exp(-v / c)), every mode but under water). The ceiling also dims the strongest sunrise shafts and forest beams: if
+   Jack misses them, raise env.z (ImagineFrame, "the light shafts' ceiling") before touching anything else.
+   NOT confirmed that the whiteout was the shafts: if a veil survives, Debug > "Air pass" off, then Light shafts off.
+2. BLOOD (`decalBias`, "Blood splat depth fix"). Simple Blood's ground splats are RenderTypes.entityTranslucent(its atlas)
+   (read from its SurfaceRenderer.class), i.e. `minecraft:pipeline/entity_translucent`. MetalPipeline.imDecal for that and
+   `_cull`: biasSlope() +1.5, biasConstant() +4 toward the camera (reversed Z: positive), only while TAA and its offset are on.
+   Why slope: the terrain's jitter moves its depth by at most the surface's depth slope per pixel. Every translucent mob part
+   gets the bias too (harmless as far as I can tell). The splats still aren't jittered (edges soft): that is B3.
+3. FAR FLICKER (`taaFarSteady`, "TAA steadier far away"). im_bloom_taa, p.taaPrev.z (Bloom passes on = 2): farS =
+   smoothstep(48, 144, distance) x still: box +0.75 spreads, 40 % of the history's out-of-box part kept, history share up to
+   0.965, takeover x0.4; sharpen x0.4 far away always. Risk: faint trails behind far moving things for a few frames.
+   Debug > "Near shadow every 2nd frame" (Settings.shadowNearAlternate) added for the village beam/dapple flicker suspect.
+4. SHADOWS. Range default 256; Config.migrate moves a saved 160 up once (file version key `imaginemetal.configVersion=1`,
+   written at the next save). Shadows.depth(1) = max(256, 1.5 x range) (corners of the square fell out of the depth range);
+   FAR_MOVE max(8, range / 16); FAR_MIN_GAP_NS: at range 256 the kept far map is redrawn at most every 200 ms (0 at 160): one
+   far drawing at 256 is ~2.5x the casters (estimated ~14 ms in the jungle, NOT measured), a low sun and loading chunks asked
+   for it every other frame. Far shadows therefore tick up to 5x a second at dusk; the near map is not held back.
+   `shadowSoftFar` ("Soft far shadows"): lighting.metal imShadowX: 5 reads of the far map on a disc of 2 blocks in the face's
+   plane (rotated per pixel/frame) find the blocker's distance along the light; radius = distance x ImFrame.ambientDown.w (0.03),
+   up to 2 blocks; from one far texel up an 8-tap disc replaces the 4 fixed taps; inside the near cascade it takes over from a
+   radius of 0.6..1.5 blocks (casters 20-50 blocks off). Edge fade 0.8..0.98 (was 0.9). Known side effect: a soft dark band at
+   the sunlit foot of tall cliffs (taps inside the cliff count as shadowed). Cost: 5 reads per lit pixel + 8 compares in penumbrae.
+   `shadowOpenAir` ("Daylight under sky islands"): READ THIS, it changes the diagnosis in the 12:20 section. The "near-black,
+   hard, block-stepped shadow" (01.06.59) is, as I now read the shot, not the sun's shadow (at sunrise that lies hundreds of
+   blocks away) but the island's footprint in Minecraft's SKY LIGHT: 15 blocks of falloff, then 0, where `sun *= smoothstep(0,
+   0.07, sky)` cut the sun with a block-stepped edge and the ambient is 0. C1: where sky < 0.45 and the player isn't
+   underground, imShadowX's openAir (lit, or blocker 24..64+ blocks off) lets the sky's light (x0.8) and the sun back in
+   (ImFrame.ambientUp.w). And ImagineFrame.highCover: first block above the eyes >= 16..40 blocks up AND full sky light at eye
+   height within 128 blocks => not a cave (cave grade, shaftCover). Under the middle of an island wider than that it is still
+   "a cave", as before. NOT verified in game; caves seen from outside may get some extra light.
+5. DESERT (`desertLook`, "Desert look"; direction from Jack's reference, screenshots/reference/reimagined-desert-2026-11-12.png:
+   sun-facing sand (227,199,148), lit tops (190,175,150), shade (84,88,76); ours at noon: lit (207,194,141), shade (133,131,114)).
+   Haze.LOOK_DRY_C1 (sun 1.07/0.99/0.86, shade colour 0.5/0.68/1.15 pulled 0.5), ambient x(1 - 0.22 dry) in ImagineFrame,
+   ImFrame.grade.w = Haze.dry: imGrade's vibrance boost x0.33 on beige, sand albedo saturation 1.3 -> 1.18 and x(0.955, 0.905,
+   0.925). Estimated: lit sand ~(210,189,144), shade ~18 % darker. The big part of his "samey" is item 4 (cast shadows to 256).
+6. CLOUDS (`cloudsLate`, "Clouds behind the land"). Sky.drawAfter leaves them (latePending) when Reflections.underWillRun();
+   Reflections.captureUnder hands sky state, target, rot and the inverse clip to imssr.m im_under_clouds; im_under_capture draws
+   them after the air pass and before the colour copy (imsky.m mode 3, sky.metal im_clouds_late_fs: cloud alpha x
+   saturate((terrain distance - cloud distance) / 4), aurora on sky pixels only). Not drawn for 20 frames running => back to
+   the sky pass for the session (log line). Log: `clouds on (after the opaque world, ...)`.
+Benchmark: new steps "shadow range 160 (as before C1)", "soft far shadows off (C1)", "daylight under sky islands off (C1)",
+"clouds drawn before the land (C1 off)", "shaft veil fix off (C1)", "TAA steadier far away off (C1)".
+### Open questions for Jack / not done
+- 12:36:40 "uhmm why no shadows here??" (12.36.41: short grass on a meadow): NOT a bug as far as I can see: short plants were
+  made to cast none on purpose (shadow.metal im_shadow_vs: "a ghost copy beside it"); tall grass casts. Asked him if he wants them.
+- 01.03.44 pale streak over the river: still to ask. C2 (performance) and B3 (jitter for everything, MetalFX): not agreed yet.
+- ImFrame's free slots are now used: ambientUp.w, ambientDown.w, grade.w, env.z. Free: env.w. Size still 928.
+
+## 2026-11-12 12:20 screenshot review of the B2 test (before C1; superseded above where they differ)
+### Diagnoses (screenshots 00.53 to 01.15, chat notes in latest.log)
+- WHITEOUT (01.07.17..33 ocean under a Terralith sky island; 01.09.33..45 forest; pink veil in 01.06.55): most likely the light
+  shafts' "something overhead" mode (Bloom.shafts / ImagineFrame.shaftCover), old code. shaftCover went to 1 whenever the sky
+  light at the eyes was < 0.97; then intense = 1: full strength at any time of day, and over open ground/sea the maps say "lit"
+  along the whole ray: a uniform veil. Evidence: in 01.07.17 the sky is whited too (the air pass skips sky pixels).
+- FLICKERING (00.57.44..49, village): Jack's correction: it was DISTANT blocks, he thinks the TAA. Between 00.57.49 and .49_2
+  the light-shaft beams on the wall and the leaf-shadow dapples also change shape (suspects: near shadow map every other frame,
+  the shafts' noise).
+- BLOOD (01.14.50/.57): Jack's correction: whole splats vanish and come back; caused by the TAA (he checked).
+- BLUR left side (00.53.01) and bamboo (00.55.15): TAAU at 67 % on sub-pixel leaf texels / thin stalks. Fix: B3 / MetalFX.
+- "mountain looks like baby vomit" (00.58.27): palette + no cast shadows that far. "no shadows that far" (01.03.15): range 160.
+- clouds see-through (01.06.01): drawn before the terrain without depth. sky island shadow (01.06.59): see C1 item 4.
+### Why B2 reached 58 fps, not 75-90
+- Terrain = a + b x pixels: 67 % -> 11.7 ms, 100 % -> 14.26 ms => b ~2.1 ms, a ~9.6 ms that does NOT depend on resolution: the
+  G-buffer fill on tiny/overlapping leaf triangles (geometry, alpha test, imMaterial), not per-fragment lighting.
+- Generated normals 3.4 ms (the bake saved ~0.5: imMaterial still runs per fragment). Leaf depth pre-pass off: +0.7.
+### C2 (performance; NOT agreed, ask when C1 is tested)
+Leaves solid beyond ~32 blocks (OwnMesher's cutoutLeaves / forceOpaque switch, per section by distance with hysteresis);
+generated normals for axis-aligned faces moved into the lighting pass; leaf pre-pass off by default; benchmark steps that
+split the G pass. Estimate given: 3-6 ms, flagged as a guess.
+
+## 2026-11-12 11:50, Jack TESTED B2 (00:32-01:15): it works, 58 fps (superseded above where they differ)
 B2 is still what's in mods (76b21cf); B1 jar still in the instance folder; MetalFX still only on branch `metalfx`.
 ### B2 results (latest.log of the 00:32 session; jungle spot benchmark, RD16, world 1158x724 -> 1728x1080)
 - Log: `generated normals baked: 2395 textures (72 worked out live), 4096x2048, 210 ms`; `deferred lighting on`; `air pass on`.

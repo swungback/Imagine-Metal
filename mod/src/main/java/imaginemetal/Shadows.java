@@ -69,6 +69,8 @@ public final class Shadows {
 	private static final double FAR_MOVE = 8.0;
 	/** The kept far cascade is drawn again at least this often, whatever else (a safety net for a change the checks missed). */
 	private static final long FAR_MAX_AGE_NS = 1_000_000_000L;
+	/** (Build C1) The least time between two drawings of the kept far cascade at the full reach of 256 blocks (see prepare). */
+	private static final long FAR_MIN_GAP_NS = 200_000_000L;
 
 	/** The far cascade as it was last drawn. */
 	private static final class Far {
@@ -209,6 +211,12 @@ public final class Shadows {
 			long ownFrame = own == null ? 0 : own.frameNumber();
 			long changed = farChangeFrame;
 			due = k.run != farRun || (changed > k.ownFrame && ownFrame >= changed) || System.nanoTime() - k.drawnNs > FAR_MAX_AGE_NS;
+			// (Build C1: with a reach past 160 blocks the far map holds up to two and a half times the casters, and one drawing of
+			// it is a frame's worth of time in a forest. A low sun turns a step of the map's every few frames, and chunks loading
+			// while flying change it all the time: drawn at most every fifth of a second at 256 blocks (falling to no limit at
+			// 160, as before), the old map, right for where the sun was a moment ago, serves in between. What's near the player
+			// is the near map's, which isn't held back.)
+			if (due && System.nanoTime() - k.drawnNs < (long) (Math.clamp((Settings.shadowRange - 160f) / 96f, 0f, 1f) * FAR_MIN_GAP_NS)) due = false;
 			// (never two frames running while the old map still serves: a stream of changes costs what every other frame did)
 			if (due && farDrawnLast && Settings.shadowFarAlternate) due = false;
 			// (and not in the frame the near map is drawn, once: the two take turns)
