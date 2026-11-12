@@ -1,4 +1,4 @@
-# Imagine Metal: handoff (2026-11-12, ~23:15)
+# Imagine Metal: handoff (2026-11-12, ~23:40)
 
 Where things stand, for picking the work up in a new conversation.
 
@@ -11,7 +11,20 @@ Where things stand, for picking the work up in a new conversation.
   are chat lines in the log (`[CHAT] <herningstang> ...`) just before each screenshot.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
 
-## START HERE: 2026-11-12 23:15, Build C2 DEPLOYED (main f48edd7, CI green run 43316738527). NOT tested by Jack yet.
+## START HERE: 2026-11-12 23:40, Build C2b DEPLOYED (main 168bd4a, CI green run 43320786647). NOT tested yet.
+- mods folder = C2b: jar sha1 200f0257..., 1524309 bytes. New fallback `imagine-metal-c2.jar` (C2, 9e558ce5...) next to c1/b2/b1.
+- Why C2b: Jack tested C2 at 23:27 (screenshots 2026-11-12_23.27.22 / 23.27.25, grassy terraces, flying ~15-20 above them,
+  looking toward a low sun): "shadows missing here, you didn't fix pop in, look when I get closer". The missing shadows were
+  ~15-20 blocks away (crosshair blocks ~32 px wide at FOV 70), INSIDE the near map's reach, so C2's item-4 diagnosis (the
+  near/far handover at 25-29 blocks + far-map offsets) was incomplete. Real cause: the near cascade is a box ACROSS the light
+  centred on the camera; its ground coverage is centred where the light ray through the camera lands, H/tan(e) away from the
+  sun (40+ blocks at H 20, low sun), so ground toward the sun left it ~17 blocks ahead. Fix (Settings.shadowNearGround, Debug
+  "Near shadows follow the ground"): Shadows.prepare centres the near cascade's anchor on the MOTION_BLOCKING heightmap under
+  the camera (min camera y, at most 48 below; camera y if the chunk isn't loaded or the heightmap is above the camera).
+- C2's far-map fix (shadowFarFix) stays; unverified whether it shows step shadows past the near map (ask Jack to flip it).
+- Ask Jack to retest at the same terraces, high up, facing the low sun; flip "Near shadows follow the ground".
+
+## 2026-11-12 23:15, Build C2 DEPLOYED (main f48edd7, CI green run 43316738527). NOT tested by Jack yet.
 - mods folder = C2: jar sha1 9e558ce5..., 1523792 bytes. Fallbacks OUTSIDE mods in `instances/Imagine metal/`:
   `imagine-metal-c1.jar` (C1, sha1 e45f9981...), `imagine-metal-b2.jar` (b623f298...), `imagine-metal-b1.jar`. Swap: quit the
   game, copy one over `minecraft/mods/imagine-metal-0.1.0.jar`.
