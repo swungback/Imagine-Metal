@@ -22,7 +22,7 @@ public final class MetaSettings {
 	 * Detail: a column of a level is split into the next finer level while the camera is closer than this many of its own
 	 * widths. More: finer LODs further out (sharper, more to draw and generate). 4 to 16.
 	 */
-	public static volatile int detail = 8;
+	public static volatile int detail = 6;
 	/** Terrain never visited is filled in from the world seed (singleplayer only: a server's seed isn't known). */
 	public static volatile boolean generate = true;
 	/** The game's own trees on the nearest generated LODs (slower to generate than the biome's estimate). */
@@ -74,7 +74,7 @@ public final class MetaSettings {
 			+ "enabled=" + enabled + "\n"
 			+ "# How far the LODs reach, in chunks (32 to 512).\n"
 			+ "distance=" + distance + "\n"
-			+ "# Detail (4 to 16): finer LODs further out with more. 8 is the default.\n"
+			+ "# Detail (4 to 16): finer LODs further out with more. 6 is the default.\n"
 			+ "detail=" + detail + "\n"
 			+ "# Fill in terrain you never visited from the world seed (singleplayer).\n"
 			+ "generate=" + generate + "\n"

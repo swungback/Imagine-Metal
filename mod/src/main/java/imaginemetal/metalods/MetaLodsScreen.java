@@ -27,7 +27,7 @@ public final class MetaLodsScreen extends OptionsSubScreen {
 			slider("LOD distance", 32, 512, 16, MetaSettings.distance, v -> MetaSettings.distance = Math.round(v), v -> Math.round(v) + " chunks",
 				"How far the LODs reach. Real chunks stay at your render distance; past it, the LODs."));
 		this.list.addSmall(slider("Detail", 4, 16, 1, MetaSettings.detail, v -> MetaSettings.detail = Math.round(v), v -> String.valueOf(Math.round(v)),
-			"How soon a LOD is swapped for a finer one: more is sharper further out, but more to make and draw. 8 is the default."),
+			"How soon a LOD is swapped for a finer one: more is sharper further out, but more to make and draw. 6 is the default."),
 			toggle("Generate unexplored", MetaSettings.generate, v -> {
 				MetaSettings.generate = v;
 				MetaLods.settingsChanged(true);

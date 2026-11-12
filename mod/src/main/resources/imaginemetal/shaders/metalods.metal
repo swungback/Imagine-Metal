@@ -28,7 +28,7 @@ struct Model {
 	uint topAvg, sideAvg;  // their average colours (0xRRGGBB, as stored)
 	uint flags;        // bits 0-2 the top's tint, 3-5 the side's (1 grass, 2 foliage, 3 water, 4 dry foliage, 5 constant), 8-15
 	                   // Imagine Metal's material byte, 16 leaves, 17 water
-	uint constant;     // a constant tint (0xRRGGBB)
+	uint fixedTint;    // a constant tint (0xRRGGBB)
 };
 
 struct MLOut {
@@ -139,7 +139,7 @@ fragment MLGOut ml_fs(MLOut in [[stage_in]], constant MLFrame &f [[buffer(0)]], 
 	bool leaves = (m.flags & (1u << 16)) != 0u, water = (m.flags & (1u << 17)) != 0u;
 	if (tex.a < 0.5) tex.rgb = avg * (leaves ? 0.72 : 1.0);  // (leaves' holes: the canopy's shade inside)
 	uint4 bt = biomes[in.biome];
-	uint tc = kind == 1u ? bt.x : kind == 2u ? bt.y : kind == 3u ? bt.z : kind == 4u ? bt.w : kind == 5u ? m.constant : 0xFFFFFFu;
+	uint tc = kind == 1u ? bt.x : kind == 2u ? bt.y : kind == 3u ? bt.z : kind == 4u ? bt.w : kind == 5u ? m.fixedTint : 0xFFFFFFu;
 	float3 color = tex.rgb * mlRgb(tc);
 	if (water) color *= 0.85;
 	uint mat = (m.flags >> 8) & 255u;

@@ -30,7 +30,7 @@ import org.jspecify.annotations.Nullable;
  * by the client (chunkLoaded, chunkUnloaded).
  */
 public final class MetaLods {
-	private static final int ARENA_PAGES = 32768;  // 64 MB of quads (8.4 million)
+	private static final int ARENA_PAGES = 65536;  // 128 MB of quads (16.8 million)
 	private static boolean failed, saidNoG;
 	private static long lib;
 	private static @Nullable MetaArena arena;
