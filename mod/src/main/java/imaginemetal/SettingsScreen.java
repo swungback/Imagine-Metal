@@ -232,6 +232,8 @@ public final class SettingsScreen extends OptionsSubScreen {
 						"Build C2, not saved. Mobs, items and particles drawn with the TAA's sub-pixel offset like the terrain, so the TAA doesn't shift them back and forth (a pig's eyes swimming). Off: as C1."));
 				this.list.addBig(toggle("Water surface from below: no dark ring", Settings.waterSurfaceFog, v -> Settings.waterSurfaceFog = v,
 					"Build C2b, not saved. Under water, the surface past the see-through window takes the water's own colour instead of a dark one (the murky ring around the window). Off: as before."));
+				this.list.addBig(toggle("Wide window up from under water", Settings.waterWideWindow, v -> Settings.waterWideWindow = v,
+					"Build C3, not saved. Under water you see out through the surface at most angles; only at a grazing angle it mirrors the water. Off: as C2b (a circle straight up)."));
 				this.list.addBig(toggle("Near shadows follow the ground", Settings.shadowNearGround, v -> Settings.shadowNearGround = v,
 					"Build C2b, not saved. The sharp near shadow map centred on the ground under you, not on the camera: up high, looking toward a low sun, it ended ~17 blocks ahead and shadows popped in as you came closer. Off: as C2."));
 				this.list.addBig(toggle("TAA sub-pixel offset", Settings.taaJitter, v -> Settings.taaJitter = v,

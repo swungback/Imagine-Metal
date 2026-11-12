@@ -157,6 +157,12 @@ public final class Settings {
 	 * water's own fog colour, not that colour at a fifth: it was a dark murky ring around the window. -Dimaginemetal.waterSurfaceFog=false.
 	 */
 	public static volatile boolean waterSurfaceFog = Engine.flag("imaginemetal.waterSurfaceFog", true);
+	/**
+	 * (Build C3) Under water, the window up through the surface wide: the surface only turns into the mirrored deep water at a
+	 * grazing angle (past ~70 degrees from straight up), not past ~45 (a real water surface's window, which is what Jack found
+	 * too small: "can't see out except a circle right above me"). -Dimaginemetal.waterWideWindow=false.
+	 */
+	public static volatile boolean waterWideWindow = Engine.flag("imaginemetal.waterWideWindow", true);
 	/** (benchmark only) Water and glass reflections traced through the screen; false: the sky alone. */
 	public static volatile boolean waterTrace = true;
 	public static volatile boolean ssao = Engine.flag("imaginemetal.ssao", true);

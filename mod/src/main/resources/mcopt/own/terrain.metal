@@ -2496,6 +2496,9 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 				float3 wfc0 = pow(max(fog.FogColor.rgb, 1e-3), float3(0.33, 0.21, 0.26)) * 0.2;
 				float fb = 1.0 - saturate(abs(dot(fnT, normalize(in.imPos))));
 				float tir = smoothstep(0.25, 0.55, fb);
+				// (Build C3, env.w bit 32: the window wide, the mirror only at a grazing angle, and never wholly: Jack could only see out
+				// through a circle straight up)
+				if ((uint(imf.env.w + 0.5) & 32u) != 0u) tir = 0.85 * smoothstep(0.62, 0.92, fb);
 				// (Build C2b, ImFrame.env.w bit 16: the water's own fog colour there, as everything under water fades into, instead of
 				// that colour a fifth as bright: around the see-through window straight up it made a dark, murky ring, near black at
 				// night, that the fog only half turned teal)
