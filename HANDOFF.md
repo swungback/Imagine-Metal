@@ -12,7 +12,8 @@ Where things stand, for picking the work up in a new conversation.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
 
 ## START HERE: 2026-11-12 13:20, Build C1 DEPLOYED (main), NOT tested by Jack yet. Nothing in it was seen running.
-C1 = commits dafc331 + the one after it ("C1: far shadow map at most every fifth of a second..."). Fallbacks, both OUTSIDE mods, in
+C1 = commits dafc331 + 4f73207 (CI runs 43214172540 and 43214849324 green; the jar in mods: sha1 e45f9981..., 1518996 bytes,
+deployed 13:09 with the game closed). Fallbacks, both OUTSIDE mods, in
 `instances/Imagine metal/`: `imagine-metal-b2.jar` (B2, 76b21cf, sha1 b623f298...) and `imagine-metal-b1.jar`. Swap: quit the game,
 copy the file over `minecraft/mods/imagine-metal-0.1.0.jar`. MetalFX: still only on branch `metalfx`, NOT deployed (B3, later).
 CI can only compile: every C1 change is logic nobody has looked at in game. Each has its own switch in Settings > Advanced >
