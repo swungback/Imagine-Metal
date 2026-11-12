@@ -1,4 +1,4 @@
-# Imagine Metal: handoff (2026-11-12, ~13:20)
+# Imagine Metal: handoff (2026-11-12, ~23:15)
 
 Where things stand, for picking the work up in a new conversation.
 
@@ -11,7 +11,80 @@ Where things stand, for picking the work up in a new conversation.
   are chat lines in the log (`[CHAT] <herningstang> ...`) just before each screenshot.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
 
-## START HERE: 2026-11-12 13:20, Build C1 DEPLOYED (main), NOT tested by Jack yet. Nothing in it was seen running.
+## START HERE: 2026-11-12 23:15, Build C2 DEPLOYED (main f48edd7, CI green run 43316738527). NOT tested by Jack yet.
+- mods folder = C2: jar sha1 9e558ce5..., 1523792 bytes. Fallbacks OUTSIDE mods in `instances/Imagine metal/`:
+  `imagine-metal-c1.jar` (C1, sha1 e45f9981...), `imagine-metal-b2.jar` (b623f298...), `imagine-metal-b1.jar`. Swap: quit the
+  game, copy one over `minecraft/mods/imagine-metal-0.1.0.jar`.
+- MetalFX: still only on branch `metalfx`, NOT deployed (needs Jack's OK).
+- Every C2 change has its own switch in Settings > Advanced > Debug (not saved; `-Dimaginemetal.<name>=false`): shaftsFull,
+  plantShadows, shadowFarFix, petalsStill (rebuilds chunks), levelGuard, entityJitter. Benchmark has C2 steps + two water steps.
+- Nothing in C2 was seen running. CI compiles only.
+
+### Jack's C1 test (13:36-13:56) and his requests for C2 (17:53)
+- Shafts: he did NOT want a cap, only the whiteout fixed. Beams under real canopy and at sunrise as strong as B2.
+- Short grass / flowers must CAST shadows (correction of the C1 notes below, which said he might not want them). The old
+  problem was a bug ("ghost copies": dark see-through copies beside the grass), not shadows; they had been turned off instead.
+  Reference: his photo of Reimagined grass shadows on a path (soft, lighter, dappled, attached to the plant).
+- Tall grass shadows "look off" (13.56.07 at 376 64 -66): dark, smeared, blocky.
+- Shadow pop-in (13.36.58, 13.37.00, gravel beach near 1108 82 -771): cast shadows end at a line ~25-30 blocks out.
+- Pink petal stems sway, heads don't (13.49.19): make them still.
+- Ghost slabs after respawning from the End (13.43.38, -6 110 -18): yellow stretched slabs over a desert village.
+- Pig's eyes look and move weird (13.55.18).
+- 36 fps at 101 67 -62 facing east over a river (13.54.52), 41 at the pond 185 63 -47 (13.55.18).
+- Desert look, clouds, blood, whiteout: no clear verdict yet ("maybe its not terrible idk" about shafts/whiteout).
+
+### What C2 does, and the cause found for each
+1. Shafts (shaftsFull): C1's ceiling (ImFrame.env.z 0.35, bloom.metal) removed, and the canopy strength back to B2's step
+   (C1's ramp 0.7..0.93 on the eye's sky light weakened beams under trees, where the sky light is often 11-13). The whiteout
+   fix kept = C1's "strong mode only for rays through shadow"; it was keyed on env.z > 0, now its own flag: env.w bit 1.
+2. Plant shadows (plantShadows). Cause of the old "ghost copies": the receivers' normal offset and slope bias are sized for big
+   faces (near map: 1.5 texels x up to 2.2 grazing, plus k=2 slope bias; the casters also get a 2-texel raster slope bias), which
+   push a half-block plant's shadow off its foot: detached, sharp, beside the plant (and, while mob/contact shadows were on, the
+   screen-space trace caught the waving plants). Fix: plants (quads that wave but aren't leaves 1111 or vines 0101; tall plant
+   tops now get corner pattern 1010, Materials bit 6 -> OwnQuads/OwnTerrain, terrain.metal waves 10 whole) go into their own
+   slice 2 of the shadow map, drawn right after the near cascade from the same cull list (cutout list only; shadow.metal
+   ImShadowFrame.reserved.x = 2), swaying with the same breeze as own_vs (reserved.y = GameTime). The main maps get everything
+   but plants (reserved.x 1). Receivers (lighting.metal imPlantShadow): the ground isn't in slice 2, so offset only 0.01 along
+   the normal; a plant receiving is moved 0.25 toward the light past its own caster; 4 rotated taps 2.5 texels out; 70 % dark at
+   most; near only, eased out 18..28 blocks. Valid flag env.w bit 2 (Shadows.plantsValid()).
+3. Tall grass: same as 2 (its top half was a hard caster in the main map, as dark as a wall, with the near map's sharp filter
+   stretched by a low sun).
+4. Shadow line (shadowFarFix). Proved from code + log: the far map IS drawn (log "far cascade drawn on N of M frames", N>0
+   every 10 s) and the cull lists can't overflow (listCap >= records in use). The line is the near map's edge (32 blocks
+   half-width, faded 0.8..0.92 = 25.6..29.4 blocks across the light). Past it the far map's receivers used a normal offset of
+   1.5 far texels (0.375 block) x up to 2.2 = up to 0.83 block, plus a slope bias (0.75 block at slope 4): the ground was looked
+   up nearly a block above itself, so 1-block steps, fences, bushes cast nothing there. Fix: a quarter of that offset, 4 taps in
+   the receiving face's own plane (each its exact depth), constant bias 0.00004; the casters' 2-texel raster bias covers acne.
+   Expect the far shadows still a bit shorter than near ones (raster bias = 0.5 x slope blocks there). Watch for stripes/acne
+   on far ground at sunrise; if so raise biasFar or the offset factor 0.25 in imShadowX.
+5. Petals (petalsStill): pink_petals / wildflowers return wave 0 (their flat heads have no corner above mid-height).
+6. Ghost slabs (levelGuard). Cause: vanilla resets level render data a frame after setLevel and makes a new
+   SectionRenderDispatcher; compiles of the old one (the End) finishing after that still called setSectionMesh ->
+   OwnTerrain.published(index...). Our table is keyed by the section INDEX, so an End section landed in the new level's slot and,
+   over empty air, was never overwritten (OwnSolidExtractorMixin's disposeAll at setLevel runs before those late compiles).
+   Fix: OwnRenderSectionMixin drops publishes whose dispatcher isn't levelRenderer.sectionRenderDispatcher(); logs
+   "[Imagine Metal] level guard: a section of the last level dropped (at x y z)" (first 20). NOTE: disposeAll's own line
+   ("mcopt-own reset") uses printf, which Minecraft's stdout redirect doesn't log, so it never shows in latest.log.
+   The stretched look is probably the stale section's exactPos indices read against the renewed table (table full: "4096 of
+   4096, ~1M rounded").
+7. Pig's eyes (entityJitter). Cause from code: the TAA (bloom.metal im_bloom_taa) reads the frame at uv + jitter, undoing the
+   terrain's sub-pixel offset; entities had none, so the TAA shifted them by the jitter every frame (up to 3/4 screen px at
+   67 %), and tiny high-contrast details (eyes) swam. Fix: EntityShade.patchVs adds the same offset after SPIRV-Cross's y flip,
+   in the level pass only (imOn.x 1; imOn.zw = ImFrame.taa xy, mcown.m mc_im_entity_bind, bit 8). Not covered: pipelines
+   EntityShade skips (eyes layer, text, beams). Moving mobs still have no motion vectors (history clamp only).
+8. FPS at the river: per-pass log at 13:54:37-13:55:17: translucent (water) 6-9 ms vs 0.1-0.4 ms elsewhere, terrain 9-11 ms
+   (autumn forest leaves) vs 7-8, shadow maps 0.8-1.6. So the water pass is the extra ~8 ms. Inside it: forward imShade per
+   water pixel plus the screen-space reflection trace (11 steps + 5 refinements within 64 blocks) and waves. Benchmark steps
+   added to split it: "water and glass reflect only the sky (no screen trace)" (Settings.waterTrace, env.w bit 8) and "water
+   waves off". Asked Jack to run the benchmark at 101 67 -62 facing east.
+
+### Not changed (noticed, not asked): vines don't sway on the OwnQuads mesh path (wave 3 maps to corners 0 there; OwnTerrain's
+path gives 0101). Ask Jack before touching.
+
+## 2026-11-12 13:20, Build C1 (superseded above where they differ: the shafts' ceiling is gone in C2; small plants DO cast
+## shadows in C2, Jack wants them)
+
+### START HERE: 2026-11-12 13:20, Build C1 DEPLOYED (main), NOT tested by Jack yet. Nothing in it was seen running.
 C1 = commits dafc331 + 4f73207 (CI runs 43214172540 and 43214849324 green; the jar in mods: sha1 e45f9981..., 1518996 bytes,
 deployed 13:09 with the game closed). Fallbacks, both OUTSIDE mods, in
 `instances/Imagine metal/`: `imagine-metal-b2.jar` (B2, 76b21cf, sha1 b623f298...) and `imagine-metal-b1.jar`. Swap: quit the game,
