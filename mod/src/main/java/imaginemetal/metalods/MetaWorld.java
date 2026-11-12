@@ -158,22 +158,13 @@ final class MetaWorld {
 					this.results.add(new Result(c, j.version, null, 0, null, Long.MIN_VALUE));
 					continue;
 				}
-				List<Long> generated = new ArrayList<>(4);
-				long t0 = System.nanoTime();
-				Rle center = this.derive(c.level, c.cx, c.cz, true, generated);
-				int[][] edges = new int[4][];
-				int known = 0;
-				int[][] nb = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
-				for (int s = 0; s < 4; s++) {
-					edges[s] = this.edge(c.level, c.cx + nb[s][0], c.cz + nb[s][1], s, center.h);
-					if (edges[s] != null) known |= 1 << s;
+				try {
+					this.job(c, j, mesher);
+				} catch (Throwable t) {
+					// (dropped: asked for again when next wanted)
+					this.results.add(new Result(c, j.version, null, 0, null, Long.MIN_VALUE));
+					throw t;
 				}
-				long t1 = System.nanoTime();
-				MetaMesher.Mesh m = mesher.mesh(center, edges);
-				this.meshNanos.addAndGet(System.nanoTime() - t1);
-				this.meshed.incrementAndGet();
-				long[] gk = generated.isEmpty() ? null : generated.stream().mapToLong(Long::longValue).toArray();
-				this.results.add(new Result(c, j.version, m, known, gk, Long.MIN_VALUE));
 			} catch (InterruptedException e) {
 				return;
 			} catch (Throwable t) {
@@ -181,6 +172,24 @@ final class MetaWorld {
 				t.printStackTrace(System.out);
 			}
 		}
+	}
+
+	private void job(Col c, Job j, MetaMesher mesher) {
+		List<Long> generated = new ArrayList<>(4);
+		Rle center = this.derive(c.level, c.cx, c.cz, true, generated);
+		int[][] edges = new int[4][];
+		int known = 0;
+		int[][] nb = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+		for (int s = 0; s < 4; s++) {
+			edges[s] = this.edge(c.level, c.cx + nb[s][0], c.cz + nb[s][1], s, center.h);
+			if (edges[s] != null) known |= 1 << s;
+		}
+		long t1 = System.nanoTime();
+		MetaMesher.Mesh m = mesher.mesh(center, edges);
+		this.meshNanos.addAndGet(System.nanoTime() - t1);
+		this.meshed.incrementAndGet();
+		long[] gk = generated.isEmpty() ? null : generated.stream().mapToLong(Long::longValue).toArray();
+		this.results.add(new Result(c, j.version, m, known, gk, Long.MIN_VALUE));
 	}
 
 	private @Nullable MetaGen generator() {

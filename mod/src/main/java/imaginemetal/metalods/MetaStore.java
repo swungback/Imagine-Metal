@@ -217,7 +217,7 @@ final class MetaStore {
 		this.closed = true;
 		this.io.shutdown();
 		try {
-			this.io.awaitTermination(20, java.util.concurrent.TimeUnit.SECONDS);
+			this.io.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS);
 		} catch (InterruptedException ignored) {
 			Thread.currentThread().interrupt();
 		}
