@@ -23,6 +23,12 @@ Where things stand, for picking the work up in a new conversation.
   the camera (min camera y, at most 48 below; camera y if the chunk isn't loaded or the heightmap is above the camera).
 - C2's far-map fix (shadowFarFix) stays; unverified whether it shows step shadows past the near map (ask Jack to flip it).
 - Ask Jack to retest at the same terraces, high up, facing the low sun; flip "Near shadows follow the ground".
+- 23:50: water fix pushed (main 0cc9a2e, CI green run 43322492829, jar sha1 388bef08...). NOT in mods yet (game was running):
+  it waits as `instances/Imagine metal/imagine-metal-c2b-next.jar`; copy it over the mods jar once the game is closed.
+  Jack's 23.41.20 / 23.41.23 (under water at night): a dark murky ring around the see-through window when looking up. Cause:
+  terrain.metal's faked total internal reflection (surface from below past a steep angle) painted the surface opaque in the
+  water fog colour x0.2. Now imWaterFog's colour (Settings.waterSurfaceFog, Debug "Water surface from below: no dark ring",
+  env.w bit 16). Not bloom fog (Jack checked).
 
 ## 2026-11-12 23:15, Build C2 DEPLOYED (main f48edd7, CI green run 43316738527). NOT tested by Jack yet.
 - mods folder = C2: jar sha1 9e558ce5..., 1523792 bytes. Fallbacks OUTSIDE mods in `instances/Imagine metal/`:
