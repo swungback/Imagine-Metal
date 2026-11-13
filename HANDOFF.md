@@ -19,6 +19,10 @@ Where things stand, for picking the work up in a new conversation.
   `gh run download <run> -n imagine-metal`), game closed, over `mods/imagine-metal-0.1.0.jar`. Fallback stays
   `imagine-metal-c2b-water.jar` (= main 0cc9a2e, what's in mods now).
 - Look first in latest.log: `[MetaLODS]` lines (ready / dimension / stats every 10 s / "stopped: ..." with a stack trace).
+- Branch state ~01:10: head = "columns clear of the real terrain drawn without the mask's discard" (CI green, run 43333077681),
+  includes C3 (merged from branch `underwater-window`: under water the window up through the surface is wide, Debug toggle
+  "Wide window up from under water"). Generated LODs are 3D ("Overhangs", default on). Offline tests (not in the repo):
+  runs/mips/meshing/file round trip and the 3D carve, against the bootstrapped 26.3 jar.
 - Still open from before (Jack 00:00): under water he can only see out through a circle right above him (Snell's window from
   terrain.metal's faked total internal reflection, the 23:50 fix only recoloured the ring). He said it can wait till tomorrow.
 

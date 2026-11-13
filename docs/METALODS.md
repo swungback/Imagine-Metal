@@ -59,6 +59,8 @@ supplies the seed generator (mcopt.metal.lod.LodNoise / LodForest / LodTrees / L
 - C3 (merged from branch `underwater-window`): under water the window up through the surface is wide (Debug toggle "Wide
   window up from under water", env.w bit 32), for Jack's "can only see out through a circle above me".
 - Debug: "Show levels" tints each level (0 red ... 5 blue), "Remake all LODs".
+- Apple silicon: workers at the utility QoS class (the game's threads first); columns clear of the real terrain are drawn with a
+  pipeline that can't discard (ML_MASK off), so the GPU's hidden-surface removal stays fully on for most LOD pixels.
 
 ## Next steps (not done)
 - LOD shadows, LODs in the forward path (deferred off),
