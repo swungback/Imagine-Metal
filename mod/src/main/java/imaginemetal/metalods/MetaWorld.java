@@ -61,6 +61,9 @@ final class MetaWorld {
 	private final int[] maskBits = new int[MetaArena.MASK_MAX * MetaArena.MASK_MAX / 32];
 	private int maskX, maskZ, maskSize, maskWords;
 	private boolean arenaFull;
+	/** -Dmetalods.handoffDrawn=false: the LODs step back from every loaded chunk in the render distance (the first build's rule). */
+	private static final boolean HANDOFF_DRAWN = !"false".equals(System.getProperty("metalods.handoffDrawn"));
+	private boolean saidMask, maskFromOwn;
 	private long statsTiles;
 
 	// ---- shared ----
@@ -155,14 +158,17 @@ final class MetaWorld {
 		// workers on the efficiency cores only, too slow to fill the view)
 		mcopt.metal.lod.LodGenQos.once(0x11, "MetaLODS worker");
 		MetaMesher mesher = new MetaMesher();
+		int turn = 0;
 		while (!this.closed) {
 			try {
-				Runnable r = this.ingest.poll();
+				// Real chunks and columns in turn (real chunks first once many wait: each holds a copy of its chunk). Real chunks
+				// alone going first starved the generation: joining a world queues ~1000 of them, a flight a steady stream.
+				Runnable r = (turn++ & 1) == 0 || this.ingest.size() > 192 ? this.ingest.poll() : null;
 				if (r != null) {
 					r.run();
 					continue;
 				}
-				Job j = this.jobs.poll(100, TimeUnit.MILLISECONDS);
+				Job j = this.jobs.poll(this.ingest.isEmpty() ? 100 : 0, TimeUnit.MILLISECONDS);
 				if (j == null) continue;
 				Col c = j.col;
 				if (frameNow - c.wanted > 240) {
@@ -489,7 +495,30 @@ final class MetaWorld {
 	}
 
 	/** Where the real terrain is drawn: loaded chunks inside the render distance (as the far terrain's mask in mcopt's LOD). */
-	private void updateMask(double camX, double camZ, int rd) {
+	private void updateMask(double camX, double camY, double camZ, int rd) {
+		// The chunks our terrain really draws whole this frame (mcopt's OwnSeam: every section of the chunk that can show is
+		// compiled, inside the game's own distance rule). Loaded isn't drawn: the client holds a ring of chunks it never draws and
+		// new chunks take a while to compile; masking those left a strip of sky between the real terrain and the LODs.
+		if (HANDOFF_DRAWN) {
+			mcopt.metal.own.OwnSeam.Window w = null;
+			try {
+				w = mcopt.metal.own.OwnSeam.mask(camX, camY, camZ, this.maskBits, MetaArena.MASK_MAX);
+			} catch (RuntimeException e) {
+				if (!this.saidMask) {
+					this.saidMask = true;
+					System.out.println("[MetaLODS] the drawn-chunk mask failed (" + e + "): loaded chunks instead");
+				}
+			}
+			if (w != null) {
+				this.maskX = w.x0;
+				this.maskZ = w.z0;
+				this.maskSize = w.size;
+				this.maskWords = w.words;
+				this.maskFromOwn = true;
+				return;
+			}
+		}
+		this.maskFromOwn = false;
 		int size = Math.min(MetaArena.MASK_MAX, 2 * rd + 5);
 		int ccx = (int) Math.floor(camX) >> 4, ccz = (int) Math.floor(camZ) >> 4;
 		this.maskX = ccx - size / 2;
@@ -561,7 +590,7 @@ final class MetaWorld {
 		this.reach = MetaSettings.distance * 16f;
 		this.detail = MetaSettings.detail;
 		this.frustum = new FrustumIntersection(clip, false);
-		this.updateMask(camX, camZ, renderDistance);
+		this.updateMask(camX, camY, camZ, renderDistance);
 		this.draw.clear();
 		int wTop = 32 << TOP;
 		int x0 = (int) Math.floor((camX - this.reach) / wTop), x1 = (int) Math.floor((camX + this.reach) / wTop);

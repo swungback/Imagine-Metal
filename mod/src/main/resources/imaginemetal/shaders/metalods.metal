@@ -83,6 +83,9 @@ vertex MLOut ml_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant ML
 	float3 rel = float3(org - f.camBlock.xyz) + p * s - f.camFrac.xyz;
 	o.pos = f.clip * float4(rel, 1.0);
 	o.pos.y = -o.pos.y;  // the backend's row order (as terrain.metal's own_vs)
+	// (reversed Z: a hair farther, 0.05 % of the distance, so in a chunk the real terrain draws only part of (the LODs stay until it
+	// draws the whole chunk) its faces win over the LOD's copy of the same blocks instead of flickering with them)
+	o.pos.z *= 0.9995;
 	if (f.jitter.z > 0.5) o.pos.xy += float2(f.jitter.x, -f.jitter.y) * o.pos.w;
 	float3 wb = float3(org & int3(1023)) + p * s;
 	o.uv = face < 2u ? wb.zy : face < 4u ? wb.xz : wb.xy;
