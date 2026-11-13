@@ -6,6 +6,14 @@ Where things stand, for picking the work up in a new conversation.
 Jack at 15:34: "does the handoff include the fps and eye flickering? what about the shading on lods? why dont u do the lods like
 voxy + seedgen? that looks way better and runs well. there are also some visual bugs in the latest screenshots."
 
+### 2026-11-13 ~15:50 (new chat): step 6 BUILT, not deployed (Mac link down the whole turn)
+- metalods 7e38f81, CI run 43445278355, jar sha1 48e2b2db...: EntityShade.jitterOnly gives the pipelines it skipped (names with
+  "eyes", "pipeline/text", "beam", "leash", "breeze", "energy_swirl", not "gui") the TAA's sub-pixel offset in the vertex stage
+  only; fragment stays Minecraft's. Same toggle as mobs ("Mobs with TAA offset", entityJitter). Log line: "[Imagine Metal] TAA
+  offset: <pipeline>". Copy in the sandbox at /mnt/user-data/outputs/imagine-metal-metalods-eyes1.jar; deploy it (and keep a copy
+  as instances/Imagine metal/imagine-metal-metalods-eyes1.jar) once the link is back and the game is closed.
+- Step 1 (fast1 session's screenshots + log) still NOT read. Step 2: asked Jack for the Voxy + SeedGen reference shots.
+
 ### Not done yet in that chat (the link to his Mac was down at 15:34)
 - His newest screenshots (taken after 11.30.23, in the session with the "fast1" jar) and that session's log were NOT read.
   First thing in the new chat: `ls -t screenshots/*.png | head` and read only the ones newer than 2026-11-13_11.30.23, plus
