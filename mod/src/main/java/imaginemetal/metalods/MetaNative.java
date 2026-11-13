@@ -20,7 +20,7 @@ final class MetaNative {
 	private static final MethodHandle RELEASE = fn("mml_release", null, JAVA_LONG);
 	private static final MethodHandle G_OPEN = fn("mml_g_open", JAVA_INT, JAVA_LONG);
 	private static final MethodHandle DRAW = fn("mml_draw", JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_LONG,
-		JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_INT);
+		JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_INT);  // (..., atlas, masked, err, cap)
 
 	private MetaNative() {
 	}
