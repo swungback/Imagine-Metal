@@ -37,6 +37,8 @@ public final class MetaSettings {
 	public static volatile boolean showLevels = false;
 	/** Log a stats line every 10 seconds. */
 	public static volatile boolean stats = true;
+	/** While LODs are being made: how many chunks' worth are ready, how many are left and the speed, top left (gone when done). */
+	public static volatile boolean progress = true;
 
 	private static boolean loaded;
 
@@ -70,6 +72,7 @@ public final class MetaSettings {
 		overhangs = bool(p, "overhangs", overhangs);
 		threads = Math.clamp(integer(p, "threads", threads), 0, 16);
 		stats = bool(p, "stats", stats);
+		progress = bool(p, "progress", progress);
 	}
 
 	public static synchronized void save() {
@@ -90,7 +93,9 @@ public final class MetaSettings {
 			+ "# Worker threads (0: automatic).\n"
 			+ "threads=" + threads + "\n"
 			+ "# A stats line in the log every 10 seconds.\n"
-			+ "stats=" + stats + "\n";
+			+ "stats=" + stats + "\n"
+			+ "# While LODs are being made: chunks ready, chunks left and the speed on screen (gone when done).\n"
+			+ "progress=" + progress + "\n";
 		try {
 			Files.createDirectories(f.getParent());
 			try (Writer w = Files.newBufferedWriter(f, StandardCharsets.UTF_8)) {

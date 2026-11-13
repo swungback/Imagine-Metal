@@ -190,6 +190,23 @@ public final class MetaLods {
 		}
 	}
 
+	// ---- on screen ----
+
+	/** (Hud.extractRenderState, MetaLodsHudMixin) while LODs are being made: chunks ready, left and the speed, top left. */
+	public static void hud(net.minecraft.client.gui.GuiGraphicsExtractor g) {
+		if (!MetaSettings.progress || !active()) return;
+		MetaWorld w = world;
+		String line = w == null ? null : w.progressLine();
+		if (line == null) return;
+		Minecraft mc = Minecraft.getInstance();
+		var font = mc.font;
+		int width = font.width(line);
+		// (top left; with the F3 screen up, top centre so it doesn't sit on its lines)
+		int x = mc.getDebugOverlay().showDebugScreen() ? (g.guiWidth() - width) / 2 : 4, y = 4;
+		g.fill(x - 2, y - 2, x + width + 2, y + 10, 0x90000000);
+		g.text(font, line, x, y, 0xFFFFFFFF, false);
+	}
+
 	// ---- fog ----
 
 	/** The fog when the LODs draw: as the game would set it for a render distance reaching their edge (mcopt's LOD does the same). */

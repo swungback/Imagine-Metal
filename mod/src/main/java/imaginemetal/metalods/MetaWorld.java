@@ -570,6 +570,12 @@ final class MetaWorld {
 	}
 
 	private final List<Col> draw = new ArrayList<>();
+	/** This frame's view in chunks' worth of area: all the columns it wants, and those of them with a mesh (the on-screen progress). */
+	private long areaAll, areaReady;
+	private final long[] progT = new long[8], progA = new long[8];
+	private int progN;
+	private long progDoneSince, progNext;
+	private double progRate;
 	private double camX, camY, camZ;
 	private float reach;
 	private int detail;
@@ -592,6 +598,8 @@ final class MetaWorld {
 		this.frustum = new FrustumIntersection(clip, false);
 		this.updateMask(camX, camY, camZ, renderDistance);
 		this.draw.clear();
+		this.areaAll = 0;
+		this.areaReady = 0;
 		int wTop = 32 << TOP;
 		int x0 = (int) Math.floor((camX - this.reach) / wTop), x1 = (int) Math.floor((camX + this.reach) / wTop);
 		int z0 = (int) Math.floor((camZ - this.reach) / wTop), z1 = (int) Math.floor((camZ + this.reach) / wTop);
@@ -678,6 +686,7 @@ final class MetaWorld {
 		double prio = (d + 1.0) / w * (inView ? 1.0 : 4.0) + (level == 0 ? 0.5 : 0.0);
 		boolean refine = level > 0 && d < this.detail * w;
 		if (!refine) {
+			this.count(level, c.ready());
 			if (c.state != 2 || c.dirty) this.request(c, prio);
 			if (c.ready()) this.draw.add(c);
 			return;
@@ -711,8 +720,39 @@ final class MetaWorld {
 			double cd = Math.sqrt(ex * ex + ez * ez);
 			if (cd > this.reach || cw <= 256 && this.allMasked(ax, az, cw)) continue;
 			Col child = this.col(cl, kx, kz);
+			this.count(cl, child.ready());
 			if (child.state != 2) this.request(child, (cd + 1.0) / cw * (inView ? 1.0 : 4.0));
 		}
+	}
+
+	/** A column the view wants at this level: its area in chunks into the progress. */
+	private void count(int level, boolean ready) {
+		long a = 4L << (2 * level);  // ((32 << level) / 16)^2
+		this.areaAll += a;
+		if (ready) this.areaReady += a;
+	}
+
+	/**
+	 * The on-screen progress line while the view isn't made yet, else null (also for 2 s after it is done, then gone until
+	 * something is missing again). The speed: chunks' worth of area made ready per second over the last ~3 s.
+	 */
+	@Nullable String progressLine() {
+		long now = System.currentTimeMillis();
+		if (now >= this.progNext) {
+			this.progNext = now + 500;
+			int i = this.progN++ % this.progT.length;
+			this.progT[i] = now;
+			this.progA[i] = this.areaReady;
+			int oldest = this.progN <= this.progT.length ? 0 : this.progN % this.progT.length;
+			long dt = now - this.progT[oldest];
+			if (dt > 0) this.progRate = Math.max(0.0, (this.areaReady - this.progA[oldest]) * 1000.0 / dt);
+		}
+		long left = Math.max(0, this.areaAll - this.areaReady);
+		if (left == 0) {
+			if (this.progDoneSince == 0) this.progDoneSince = now;
+			if (now - this.progDoneSince > 2000) return null;
+		} else this.progDoneSince = 0;
+		return String.format(java.util.Locale.ROOT, "MetaLODS: %,d chunks ready, %,d left, %,.0f chunks/s", this.areaReady, left, this.progRate);
 	}
 
 	private void housekeeping() {
