@@ -1172,6 +1172,13 @@ public final class OwnTerrain {
 		while (!this.deferred.isEmpty() && (long) this.deferred.peekFirst()[0] <= this.frame - FRAMES) ((Runnable) this.deferred.pollFirst()[1]).run();
 		int k = (int) (this.frame % FRAMES);
 		this.dirtyCount[k] = 0;
+		if (this.lateCount > 0) {
+			// (the slots changed since the last frame's table copy, by disposeAll: every copy takes them over the next FRAMES frames)
+			if (this.dirty[k].length < this.lateCount) this.dirty[k] = Arrays.copyOf(this.dirty[k], Integer.highestOneBit(this.lateCount) * 2);
+			System.arraycopy(this.late, 0, this.dirty[k], 0, this.lateCount);
+			this.dirtyCount[k] = this.lateCount;
+			this.lateCount = 0;
+		}
 		this.processEvents();
 		this.sweepOrphans();
 		if (OwnPosTable.ON) {
@@ -1199,6 +1206,21 @@ public final class OwnTerrain {
 			}
 		}
 		this.tableOpen = false;
+		if (this.frame - this.posCheckFrom >= 1 && this.frame - this.posCheckFrom <= FRAMES && this.slotCap > 0) {
+			// (phantom-blocks check: right after its update, this copy must equal the master; once for each copy after a level reset)
+			int bad = 0, n = Math.min(this.slotCap, this.maxSlot + 1);
+			for (int s = 0; s < n; s++) {
+				long a = this.master + (long) s * SECTION_BYTES, b = table + (long) s * SECTION_BYTES;
+				for (int o = 0; o < SECTION_BYTES; o += 4) {
+					if (MemoryUtil.memGetInt(a + o) != MemoryUtil.memGetInt(b + o)) {
+						bad++;
+						MemoryUtil.memCopy(a, b, SECTION_BYTES);
+						break;
+					}
+				}
+			}
+			System.out.println("[Imagine Metal] section table copy " + k + " after a level reset: " + (bad == 0 ? "matches" : bad + " stale slots of " + n + " (mended)"));
+		}
 		int live = (int) this.recAlloc.used();
 		// (-Dmcopt.own.frag.listGrowFault, tieClose test: this growth skipped, so the cull meets a real shortfall, listCap below the
 		// records in use; tieCloseFallback must grow the lists before encoding, counted as 'lists grown at the cull')
@@ -1475,10 +1497,24 @@ public final class OwnTerrain {
 		int cutoutUnits = m == null || m.layers[1] == null ? 0 : m.layers[1].runs.length / RUN_INTS;
 		MemoryUtil.memPutInt(a + 24, solidUnits <= 0xFFFF && cutoutUnits <= 0x7FFF ? 1 << 31 | cutoutUnits << 16 | solidUnits : 0);
 		if (OwnTieGroups.ON && OwnTieGroups.BLOCKS) MemoryUtil.memPutInt(a + 28, m == null ? 0 : m.grpStart);  // (Section.pad1: the tie-group block, 0 = none)
+		// (Imagine Metal, phantom blocks) A change made between frames (disposeAll: leaving a world, a dimension change, a resource
+		// reload) went into the list of a frame whose table copy was already made; that list is emptied before that copy is updated
+		// again, so one of the FRAMES copies kept the whole last level's section table (origins and record ranges that new meshes
+		// reuse) and every FRAMES-th frame drew it: the End's slabs over the Overworld, stretched grass after rejoining, phantom
+		// builds. Such changes now wait in their own list and join the next frame's, which every copy takes.
+		if (!this.tableOpen) {
+			if (this.lateCount == this.late.length) this.late = Arrays.copyOf(this.late, this.late.length * 2);
+			this.late[this.lateCount++] = slot;
+			return;
+		}
 		int k = (int) (this.frame % FRAMES);
 		if (this.dirtyCount[k] == this.dirty[k].length) this.dirty[k] = Arrays.copyOf(this.dirty[k], this.dirty[k].length * 2);
 		this.dirty[k][this.dirtyCount[k]++] = slot;
 	}
+
+	/** Slots changed between frames (setSlot with the table closed): moved into the next frame's dirty list by beginFrame0. */
+	private int[] late = new int[256];
+	private int lateCount;
 
 	private void release(Object mesh) {
 		OwnMesh m = this.meshes.remove(mesh);
