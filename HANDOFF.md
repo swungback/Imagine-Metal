@@ -2,6 +2,48 @@
 
 Where things stand, for picking the work up in a new conversation.
 
+## START HERE: 2026-11-13 16:25, fix2 DEPLOYED, bug list from the fast1 session (read this first)
+mods = fix2: metalods 529fecf, CI run 43451128240, jar sha1 eb129083... (copy `instances/Imagine metal/imagine-metal-metalods-fix2.jar`).
+Before it fast1 (57c2807b..., copy kept). Not seen in game yet. Contains, in order:
+- 7e38f81 TAA offset for the pipelines EntityShade skipped (eyes, text, beams, leads): dragon eyes flicker.
+- 68c285c on-screen progress (Jack asked 15:52, DH-style): "MetaLODS: N chunks ready, M left, R chunks/s", top left, gone 2 s after
+  done, setting "Progress on screen". MetaLodsHudMixin -> MetaLods.hud -> MetaWorld.progressLine / count().
+- 525ed8e no coarse stand-ins: a column whose children are wanted is no longer requested (COARSE_FIRST, -Dmetalods.coarseFirst=true
+  = old). Jack: DH "doesn't load in huge blocks"; his 13.52.27 / 13.52.42 "why it look like this?? dh is instant".
+- 529fecf (a) MetaArena frees pages by its own tick: release() used the world's frame, so a closed world's pages came back only
+  when the next world reached the same frame number (log 14:05: 50,000 -> 11,000 free in a minute); (b) LODs hidden in every
+  loaded chunk within rd - 2 on top of OwnSeam's drawn-whole mask (MetaWorld.addLoaded): a chunk with a never-compiled section
+  never counted as drawn, its LOD (stone-filled, no caves) showed through caves/ravines and as trees in near land (13.57.13/16,
+  13.58.58, 14.00.42 white quad in a cave, 14.06.06 "this after rejoining"); (c) sky light floor 10/15 in ml_fs (lq.y): real
+  chunks' air under thick canopies is sky 0 and the mips turn leaf faces toward it: pitch black (15.41.48, 15.42.11, 15.42.23).
+
+### Speed, measured (fast1, logs 2026-11-13-4 and latest)
+- First ~25 s cold: the first tiles took 1-7 s each (surface stage; JIT + the server generating spawn at the same time). Then the
+  whole 128-chunk view (~51,000 chunks of area) was done ~40-65 s after join; ~700 tiles of which L4/L5 were stand-ins only.
+- DH + SeedGen on Jack's screen (16:04): 125 chunks/s. "300,000 chunks in under a minute" was not what his DH showed.
+- With 525ed8e the view needs ~300-400 tiles (L0 ~113, L1 ~85, L2 ~85, L3 ~22 by area) and no L4/L5. L0 cost: trees ~150 ms of
+  ~230 ms a tile (the biggest stage). Cold start is the next thing to look at (warm the generator before the player is in).
+
+### Jack's notes not fixed yet (screenshot: note -> cause as far as known)
+- 13.55.21 "grass color on sides doesnt match": LOD sides use grass_block_side (its baked default green) without the biome-tinted
+  overlay; needs the overlay sprite (MetaPalette Model: a third rect) tinted by kind 1 over the side.
+- 13.56.49 "color change is too obvious": NOT identified (LOD vs real colour at the hand-over? a biome edge?). Ask him to point.
+- 13.54.46 "visual glitch in lod on house": NOT identified at 1100 px; look at the full-size file.
+- 13.56.08 / 13.56.13 "what is this": grey pixelated puff over a cave waterfall; shaders were OFF then (F8 13:55:54-13:56:26), so
+  not our lighting; likely a mod's mist particle (Streams Reflowing?). Ask.
+- 14.01.45 "cant really tell im underwater / when the water turns to air": the under-water look is too close to above-water (C3's
+  wide window + weak water fog). Tune with Jack (toggle "Wide window up from under water").
+- 14.02.01 "whales look blurry/pixelated underwater" and 15.43.56 / 15.44.00 "cape looks blurry / jittery": moving entities have no
+  motion vectors, the TAA's history clamp smears them (B3), plus the 67 % render scale. Brown squares around the whale in
+  14.02.01: unknown (particles?).
+- 14.05.33 / 14.05.36 "uhmm" (another world, New World (8...)): a huge flat purple-blue sheet over the land. Unknown: LOD water at
+  sea level from a generator that doesn't match that world, or LODs inside the near land (fixed by (b)?). Check with fix2.
+- 15.46.12 "only some of the iron is bright": Imagine Metal's ore glow picks pixels by colour; some of iron's pixels miss. Look at
+  the material code (imMaterial) and make it per sprite.
+- DH comparison (16:09, his DH shots): DH far land "fits more" with the near land; DH's own flaw: water colour switches at the
+  hand-over (near shader water vs far water). Ours should match the far water's colour to the near water.
+- Next planned: ambient occlusion on LOD faces (design below, 16:00 section), LOD water colour = near water, grass side overlay.
+
 ## START HERE: 2026-11-13 15:40, Jack's questions and THE PLAN
 Jack at 15:34: "does the handoff include the fps and eye flickering? what about the shading on lods? why dont u do the lods like
 voxy + seedgen? that looks way better and runs well. there are also some visual bugs in the latest screenshots."
