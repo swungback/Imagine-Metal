@@ -66,6 +66,10 @@ final class LodTile {
 	boolean waterKnown;
 	/** Impostor canopies from the biome (LodTrees) where no exact trees are planted. */
 	boolean impostorTrees = true;
+	/** (MetaLODS) Asked for by the caller: the terrain density's samples the surface was found in are kept in `volume`. */
+	boolean keepVolume;
+	/** With keepVolume: LodNoise.terrainVolume's samples for this tile (g x ny x g, index k + ny (x + g z)), else null. */
+	float @org.jspecify.annotations.Nullable [] volume;
 	int source;
 
 	/** A clipmap tile: tile (tx, tz) of level `level`. */

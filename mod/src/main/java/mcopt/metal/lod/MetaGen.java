@@ -30,6 +30,44 @@ public final class MetaGen {
 	private final LodNoise noise;
 	private final @Nullable LodForest forest;
 	private final BlockState stone, water, ice, snow;
+	/** Where the time goes, per level (0-7): nanoseconds in the surface (LodNoise), the trees, the 3D density, the columns; tiles. */
+	public static final java.util.concurrent.atomic.AtomicLongArray NANOS = new java.util.concurrent.atomic.AtomicLongArray(8 * 5);
+
+	/** LodNoise's own stages per level with tiles: "L0 n: density a + biomes b + materials c ms" (the tree runs' ground tiles count too). */
+	public String stages() {
+		StringBuilder b = new StringBuilder();
+		for (int l = 0; l < 8; l++) {
+			long n = this.noise.stageNanos.get(l * 4 + 3);
+			if (n == 0) continue;
+			if (b.length() > 0) b.append("; ");
+			b.append(String.format(java.util.Locale.ROOT, "L%d %d: density %.1f + biomes %.1f + materials %.1f ms", l, n, this.noise.stageNanos.get(l * 4) / 1e6 / n,
+				this.noise.stageNanos.get(l * 4 + 1) / 1e6 / n, this.noise.stageNanos.get(l * 4 + 2) / 1e6 / n));
+		}
+		if (this.forest != null && this.forest.runs.get() > 0) b.append(String.format(java.util.Locale.ROOT, "; tree chunks %d: %.2f ms each", this.forest.runs.get(),
+			this.forest.runNanos.get() / 1e6 / this.forest.runs.get()));
+		return b.toString();
+	}
+
+	public void resetStages() {
+		for (int i = 0; i < this.noise.stageNanos.length(); i++) this.noise.stageNanos.set(i, 0);
+		if (this.forest != null) {
+			this.forest.runs.set(0);
+			this.forest.runNanos.set(0);
+		}
+	}
+
+	/** NANOS as text: per level with tiles, "L0 n tiles: surface a + trees b + 3D c + columns d ms". */
+	public static String timings() {
+		StringBuilder b = new StringBuilder();
+		for (int l = 0; l < 8; l++) {
+			long n = NANOS.get(l * 5 + 4);
+			if (n == 0) continue;
+			if (b.length() > 0) b.append("; ");
+			b.append(String.format(java.util.Locale.ROOT, "L%d %d tiles: surface %.1f + trees %.1f + 3D %.1f + columns %.1f ms", l, n, NANOS.get(l * 5) / 1e6 / n,
+				NANOS.get(l * 5 + 1) / 1e6 / n, NANOS.get(l * 5 + 2) / 1e6 / n, NANOS.get(l * 5 + 3) / 1e6 / n));
+		}
+		return b.toString();
+	}
 
 	private MetaGen(LodNoise noise, @Nullable LodForest forest) {
 		this.noise = noise;
@@ -44,6 +82,8 @@ public final class MetaGen {
 	public static @Nullable MetaGen of(ServerLevel level, boolean trees) {
 		LodNoise n = LodNoise.of(level);
 		if (n == null) return null;
+		// (the surface from the terrain's shape at every level: see LodNoise.fineLevels)
+		n.fineLevels = 0;
 		LodForest f = null;
 		if (trees) {
 			try {
@@ -75,7 +115,11 @@ public final class MetaGen {
 		LodTile t = new LodTile(level, tx, tz);
 		LodForest forest = exactTrees && level == 0 ? this.forest : null;
 		t.impostorTrees = forest == null;
+		// (with overhangs the surface is found in the very samples the 3D carve uses: one volume for both)
+		t.keepVolume = overhangs;
+		long n0 = System.nanoTime();
 		this.noise.generate(t);
+		long n1 = System.nanoTime();
 		if (forest != null) {
 			try {
 				forest.offer(t);
@@ -84,6 +128,7 @@ public final class MetaGen {
 				// (planted trees are an extra: a failure leaves the bare ground)
 			}
 		}
+		long n2 = System.nanoTime();
 		int c = 1 << level, h = Math.max(1, height >> level);
 		Rle[] out = new Rle[4];
 		Rle.Builder b = new Rle.Builder(32, h, (airSky & 15) << 24);
@@ -95,15 +140,17 @@ public final class MetaGen {
 		int s = Math.max(c, 4), g = LodTile.SIZE * c / s + 1, ny = 0, y0 = 0;
 		if (overhangs) {
 			try {
-				dv = this.noise.terrainVolume(t.x0, t.z0, g, s);
+				dv = t.volume != null ? t.volume : this.noise.terrainVolume(t.x0, t.z0, g, s);
 				ny = this.noise.volumeNy();
 				y0 = this.noise.volumeY0();
 			} catch (RuntimeException e) {
 				dv = null;
 			}
 		}
+		long n3 = System.nanoTime();
 		int[] col = new int[h];
 		float[] dens = new float[h];
+		float[] cd = new float[Math.max(2, ny)];
 		for (int q = 0; q < 4; q++) {
 			int ox = (q & 1) * 32, oz = (q >> 1) * 32;
 			b.reset();
@@ -122,14 +169,14 @@ public final class MetaGen {
 					int ix = Math.min(g - 2, (int) bx), iz = Math.min(g - 2, (int) bz);
 					float fx = bx - ix, fz = bz - iz;
 					int a00 = (ix + iz * g) * ny, a10 = (ix + 1 + iz * g) * ny, a01 = (ix + (iz + 1) * g) * ny, a11 = (ix + 1 + (iz + 1) * g) * ny;
+					// (the column's own samples first, then each voxel between two of them: the same values as interpolating per voxel)
+					for (int k = 0; k < ny; k++) cd[k] = lerp2(dv[a00 + k], dv[a10 + k], dv[a01 + k], dv[a11 + k], fx, fz);
 					for (int v = 0; v < h; v++) {
 						float wy = minY + (v + 0.5F) * c;
 						float kf = (wy - y0) / 8.0F;
 						int k0 = Math.clamp((int) Math.floor(kf), 0, ny - 2);
 						float fk = Math.clamp(kf - k0, 0.0F, 1.0F);
-						float d0 = lerp2(dv[a00 + k0], dv[a10 + k0], dv[a01 + k0], dv[a11 + k0], fx, fz);
-						float d1 = lerp2(dv[a00 + k0 + 1], dv[a10 + k0 + 1], dv[a01 + k0 + 1], dv[a11 + k0 + 1], fx, fz);
-						dens[v] = d0 + (d1 - d0) * fk;
+						dens[v] = cd[k0] + (cd[k0 + 1] - cd[k0]) * fk;
 					}
 					this.carve(col, dens, h, info, (airSky & 15) << 24);
 					b.column(x, z, col);
@@ -137,6 +184,12 @@ public final class MetaGen {
 			}
 			out[q] = b.build();
 		}
+		int tl = Math.min(7, level) * 5;
+		NANOS.addAndGet(tl, n1 - n0);
+		NANOS.addAndGet(tl + 1, n2 - n1);
+		NANOS.addAndGet(tl + 2, n3 - n2);
+		NANOS.addAndGet(tl + 3, System.nanoTime() - n3);
+		NANOS.incrementAndGet(tl + 4);
 		return out;
 	}
 

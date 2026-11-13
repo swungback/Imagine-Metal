@@ -61,6 +61,7 @@ final class MetaWorld {
 	private final int[] maskBits = new int[MetaArena.MASK_MAX * MetaArena.MASK_MAX / 32];
 	private int maskX, maskZ, maskSize, maskWords;
 	private boolean arenaFull;
+	private long statsTiles;
 
 	// ---- shared ----
 	private final PriorityBlockingQueue<Job> jobs = new PriorityBlockingQueue<>();
@@ -74,6 +75,9 @@ final class MetaWorld {
 	private final ConcurrentHashMap<Long, Object> tileLocks = new ConcurrentHashMap<>();
 	final AtomicLong generatedTiles = new AtomicLong(), genNanos = new AtomicLong(), meshed = new AtomicLong(), meshNanos = new AtomicLong(),
 		ingested = new AtomicLong();
+	/** Chunks' worth of ground the generated tiles cover (a level-L tile: 16 x 4^L chunks), summed over the levels; when the first tile began and the last ended. */
+	final AtomicLong generatedChunks = new AtomicLong();
+	private volatile long genFirstNs, genLastNs;
 
 	static final class Col {
 		final int level, cx, cz;
@@ -279,8 +283,11 @@ final class MetaWorld {
 			} finally {
 				this.tileLocks.remove(key(level, tx, tz));
 			}
-			long ns = System.nanoTime() - t0;
+			long t1 = System.nanoTime(), ns = t1 - t0;
 			this.genNanos.addAndGet(ns);
+			if (this.genFirstNs == 0) this.genFirstNs = t0;
+			this.genLastNs = t1;
+			this.generatedChunks.addAndGet(16L << (2 * level));
 			if (this.generatedTiles.incrementAndGet() <= 3 || (this.saidLevel & (1 << level)) == 0) {
 				this.saidLevel |= 1 << level;
 				System.out.println(String.format(java.util.Locale.ROOT, "[MetaLODS] generated a level-%d tile at %d, %d in %.1f ms", level, tx, tz, ns / 1e6));
@@ -712,6 +719,14 @@ final class MetaWorld {
 					+ "tiles generated %d (%.1f ms each), meshes %d (%.1f ms each), real chunks %d",
 				ready, asked, this.jobs.size(), this.lastDrawCols, this.lastDrawPages, this.lastQuads, this.arena.freePages(), this.arena.pages, tiles,
 				tiles > 0 ? this.genNanos.get() / 1e6 / tiles : 0.0, meshes, meshes > 0 ? this.meshNanos.get() / 1e6 / meshes : 0.0, this.ingested.get()));
+			if (tiles > this.statsTiles) {
+				// (only while tiles are being made) where the time went and the rate: tiles per level x chunks per tile, over the time
+				// from the first tile's start to the last one's end
+				this.statsTiles = tiles;
+				double span = Math.max(1e-3, (this.genLastNs - this.genFirstNs) / 1e9);
+				System.out.println(String.format(java.util.Locale.ROOT, "[MetaLODS] generation: %d tiles in %.1f s with %d workers = %.1f tiles/s, %.0f chunks/s (%d chunks' worth, levels summed); %s",
+					tiles, span, this.workers.size(), tiles / span, this.generatedChunks.get() / span, this.generatedChunks.get(), mcopt.metal.lod.MetaGen.timings()));
+			}
 		}
 	}
 

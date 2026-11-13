@@ -129,6 +129,11 @@ final class LodNoise {
 		return null;
 	}
 	final boolean slideTop;
+	/**
+	 * Levels below this take their surface from the router's final density (caves and all); MetaLODS sets 0: its surface is the
+	 * terrain shape's at every level (the final density costs ~9x a sample with Terralith, and its 3D carve uses the shape anyway).
+	 */
+	int fineLevels = LodConfig.FINE_LEVELS;
 	final BiomeSource biomes;
 	final @Nullable MultiNoiseBiomeSource multi;
 	final int seaLevel, minY, maxY;
@@ -239,7 +244,7 @@ final class LodNoise {
 		int c = t.cell(), x0 = t.minX(), z0 = t.minZ(), size = t.size;
 		// Sample grid: every s blocks (s >= 4, the game's cell width), corners included, so finer levels interpolate.
 		int s = Math.max(c, 4), n = size * c / s, g = n + 1;
-		if (s == c && COARSE) {
+		if (s == c && COARSE && !t.keepVolume) {
 			this.coarseSurface(t, w);
 			this.finish(t, w, t0);
 			return;
@@ -247,14 +252,32 @@ final class LodNoise {
 		int ny = (this.maxY - this.minY) / STEP_Y + 1, y0 = Math.floorDiv(this.minY, STEP_Y) * STEP_Y;
 		DensityVolume volume = new DensityVolume(g, ny, g, x0, y0, z0, s, STEP_Y, s);
 		int vsize = volume.size();
-		if (w.columns.length < vsize) w.columns = new float[vsize];
-		DensityBuffer buffer = DensityBuffer.createUnpooled(vsize);
-		boolean fine = LodConfig.FINE_DENSITY && t.level < LodConfig.FINE_LEVELS;
+		boolean fine = LodConfig.FINE_DENSITY && t.level < this.fineLevels;
 		// with the final density split, the interpolated part at the cell corners (the game interpolates it, then squeezes)
 		boolean exact = fine && w.inner != null && s == 4;
-		(exact ? w.inner : fine ? w.fine : w.terrain).sampleVolume(buffer, volume);
-		float[] d = w.columns;
-		for (int i = 0; i < vsize; i++) d[i] = buffer.get(i);
+		float[] d;
+		if (t.keepVolume && !fine) {
+			d = t.volume = new float[vsize];
+		} else {
+			if (w.columns.length < vsize) w.columns = new float[vsize];
+			d = w.columns;
+		}
+		// the top slide leaves -0.078125 at y 256 and above whatever the terrain's value: those samples aren't taken
+		int nyS = this.slideTop && !fine ? Math.clamp((256 - y0 + STEP_Y - 1) / STEP_Y, 1, ny) : ny;
+		if (nyS < ny) {
+			DensityVolume part = new DensityVolume(g, nyS, g, x0, y0, z0, s, STEP_Y, s);
+			DensityBuffer pb = DensityBuffer.createUnpooled(part.size());
+			w.terrain.sampleVolume(pb, part);
+			for (int col = 0; col < g * g; col++) {
+				int from = col * nyS, to = col * ny;
+				for (int k = 0; k < nyS; k++) d[to + k] = pb.get(from + k);
+				for (int k = nyS; k < ny; k++) d[to + k] = -0.078125F;
+			}
+		} else {
+			DensityBuffer buffer = DensityBuffer.createUnpooled(vsize);
+			(exact ? w.inner : fine ? w.fine : w.terrain).sampleVolume(buffer, volume);
+			for (int i = 0; i < vsize; i++) d[i] = buffer.get(i);
+		}
 		if (this.slideTop && !fine) {
 			// the final density's top slide: toward -0.078125 from y 240 to 256
 			for (int k = 0; k < ny; k++) {

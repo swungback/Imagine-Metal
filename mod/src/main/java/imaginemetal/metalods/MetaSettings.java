@@ -119,7 +119,9 @@ public final class MetaSettings {
 	/** Worker threads to use. */
 	static int workerThreads() {
 		if (threads > 0) return threads;
+		// (Apple silicon: the workers run at the utility QoS class, so they fill the efficiency cores and whatever the performance
+		// cores have left over; the game's own threads, at a higher class, always go first. All cores but two.)
 		int cores = Runtime.getRuntime().availableProcessors();
-		return Math.clamp(cores / 3, 2, 4);
+		return Math.clamp(cores - 2, 2, 8);
 	}
 }
