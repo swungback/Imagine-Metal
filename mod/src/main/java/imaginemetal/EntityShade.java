@@ -37,7 +37,14 @@ public final class EntityShade {
 		if (n.contains("glint")) return glint(name, vs, fs);
 		// (the selection outline: Minecraft's lines, and in 26.x the block outline's own pipelines too)
 		if (n.endsWith("pipeline/lines") || n.endsWith("pipeline/lines_translucent") || n.contains("block_outline")) return outline(name, vs, fs);
-		if (Settings.portals && (n.contains("end_portal") || n.contains("end_gateway"))) return endPortal(name, vs, fs);
+		if (Settings.portals && (n.contains("end_portal") || n.contains("end_gateway"))) {
+			String[] e = endPortal(name, vs, fs);
+			if (e != null) return e;
+		}
+		// (Build C2c: the pipelines skipped below that draw in the level's pass (mobs' glowing eyes, signs' and name tags' text,
+		// beams, leads, the breeze's wind): only the TAA's sub-pixel offset, Minecraft's colour and light kept. Without it the
+		// TAA shifted them by the offset every frame: Jack's dragon eyes "flickering" (2026-11-13 11.01.17))
+		if (!n.contains("gui")) for (String j : JITTER_ONLY) if (n.contains(j)) return jitterOnly(name, vs, fs);
 		for (String skip : SKIP) if (n.contains(skip)) return null;
 		boolean wanted = false;
 		for (String want : WANT) if (n.contains(want)) wanted = true;
@@ -118,6 +125,23 @@ public final class EntityShade {
 			return null;
 		}
 	}
+
+	/** Only the TAA's sub-pixel offset in the vertex stage (the fragment stage as Minecraft's): see patch. */
+	private static String[] jitterOnly(String name, String vs, String fs) {
+		try {
+			Matcher m = VS_MAIN.matcher(vs);
+			if (!m.find() || !vs.contains("out.gl_Position")) return null;
+			String v = vs.substring(0, m.end()) + ", constant float4& imOn [[buffer(25)]]" + vs.substring(m.end());
+			v = beforeLastReturn(v, "    if (imOn.x > 0.5 && imOn.x < 1.5) out.gl_Position.xy += float2(imOn.z, -imOn.w) * out.gl_Position.w;");
+			if (v == null) return null;
+			System.out.println("[Imagine Metal] TAA offset: " + name);
+			return new String[] {v, fs};
+		} catch (Throwable t) {
+			return null;
+		}
+	}
+
+	private static final String[] JITTER_ONLY = {"eyes", "pipeline/text", "beam", "leash", "breeze", "energy_swirl"};
 
 	private static final String[] WANT = {"pipeline/entity", "pipeline/armor", "pipeline/item", "particle", "banner_pattern", "pipeline/solid_block",
 		"pipeline/cutout_block", "pipeline/translucent_block"};
