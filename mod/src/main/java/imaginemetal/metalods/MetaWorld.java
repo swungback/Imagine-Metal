@@ -62,6 +62,8 @@ final class MetaWorld {
 	private int maskX, maskZ, maskSize, maskWords;
 	private boolean arenaFull;
 	/** -Dmetalods.handoffDrawn=false: the LODs step back from every loaded chunk in the render distance (the first build's rule). */
+	/** -Dmetalods.coarseFirst=true: the old order (every level from the coarsest down, huge blocks first). */
+	private static final boolean COARSE_FIRST = Boolean.getBoolean("metalods.coarseFirst");
 	private static final boolean HANDOFF_DRAWN = !"false".equals(System.getProperty("metalods.handoffDrawn"));
 	private boolean saidMask, maskFromOwn;
 	private long statsTiles;
@@ -706,7 +708,10 @@ final class MetaWorld {
 		}
 		if (all || !c.ready()) {
 			for (int k = 0; k < 4; k++) this.visit(cl, 2 * cx + (k & 1), 2 * cz + (k >> 1));
-			if (!all && !c.ready()) this.request(c, prio);
+			// (a coarser level only as a stand-in while its children are made: off by default (Jack 2026-11-13, DH + SeedGen
+			// "doesn't load in huge blocks"): land appears at its own level, nearest first, and no tiles are made only to be
+			// replaced. A column made earlier, at a time it was the right level, still stands in (see below))
+			if (COARSE_FIRST && !all && !c.ready()) this.request(c, prio);
 			return;
 		}
 		// not all children yet: this column stays, the children are asked for
