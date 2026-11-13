@@ -1,8 +1,41 @@
-# Imagine Metal: handoff (2026-11-13, ~17:05)
+# Imagine Metal: handoff (2026-11-13, ~17:40)
 
 Where things stand, for picking the work up in a new conversation.
 
-## START HERE: 2026-11-13 17:05, fix3 DEPLOYED, not seen in game yet
+## START HERE: 2026-11-13 17:40, fix5 DEPLOYED (fix3 + fix4 + fix5), not seen in game yet
+mods = fix5: metalods 9131809, CI run 43463452715, jar sha1 4ce76e04... (copy `instances/Imagine metal/imagine-metal-metalods-fix5.jar`).
+Fallbacks: fix3 (2c39ca2e...), fix2 (eb129083...). Screenshots handled up to 2026-11-13_17.26.23 (+ his DH/Gael refs 16.02-16.04).
+fix4 (618e373):
+- Water surface from below (Jack 17:21, "especially ... looking up from underwater"): cause = C2b painted the surface past the
+  window in exactly the under-water fog colour (imWaterFog), so it melted into the fog. terrain.metal (env.w bit 64,
+  Settings.waterUnderSurface, toggle "Water surface visible from below" in the debug list): that colour x (1.35 + 0.7 ripple),
+  ripple from the water texel's luma and the wave normal. Ask Jack if it reads as a surface now / too bright.
+- Huge grass after rejoin (14.06.06): rows of grass quads floating ~1 block up, stretched along one axis, near the player, real
+  terrain. Fits plant vertices (off-grid: random offsets -> OwnPosTable codes) reading WRONG table entries in the arena's copy.
+  Not proven. fix4 adds: OwnPosTable.verify (arena copy vs VALUES, mends + logs "[Imagine Metal] exactPos check (...): N of M
+  table entries in the arena were wrong") every frame for 600 frames after disposeAll, then every 30; a log line when the old
+  level's dispatcher STORES into the arena after the change ("level guard: a section of the last level stored after the change");
+  the "mcopt-own reset" line now reaches latest.log (println, renewed/kept). Note 14:03 that day: table FULL (4096) before the
+  rejoin. NEXT: Jack leaves + rejoins a world, then read those log lines. If no mismatch is logged and plants still stretch, the
+  cause is elsewhere (stale meshes; check OwnLife / store path).
+fix5 (9131809), after Jack's DH + Gael screenshots (16.02.27, 16.03.00, 16.03.22, 16.04.02, 16.04.19 in the chat) vs ours
+(17.24.36, 17.26.15, 17.26.23, fix3):
+- Distance haze replaces fix3's far fog: air.metal, over near land AND LODs from 24 blocks, 1 - exp(-(d - 24) / 700 x strength x
+  hf), hf = exp2(-(max(y,40) - 64) / 48) clamped 0.35..2.2 (valleys hazier), x (1 - cave), toward imSkyColor at the horizon.
+  Strength = MetaLODS "Far fog" (default 1). Only while MetaLODS is active + air pass.
+- LOD per-block brightness +-7 % (DH's noise texture; 16.04.19 shows DH's per-block speckle), ml_fs, not on water.
+Differences seen in the comparison still NOT addressed (next look work, in this order of how much they show):
+1. Our day sky is a pale flat white-grey even overhead (17.26.15/23, 16.43.12); Gael's is blue overhead with soft volumetric
+   clouds. Check sky colour / haze 0.75 / bloom fog whiteout first.
+2. No shadows on LODs (perf: "shadow maps 0.06-0.10 ms" high up = almost nothing cast; LODs never cast). Gael+DH: far hills and
+   trees have sun/shade sides and cast shadows. Also no AO on LODs (plan: AO byte per quad, PAGE_BYTES 2048 -> 2304).
+3. Our colours: saturated yellow-green flat; Gael's foliage darker/cooler, lower saturation far off. Revisit after 1 and 2.
+4. 17.24.36: the water seam line is STILL there with fix3 (straight dark line, chunk jogs) and LOD water is cyan while the real
+   water next to it is deep blue: LOD water colour = near water (open item) and the seam needs a second look (the 8/9 fix was not
+   enough or not the cause).
+5. Clouds: ours are big flat blocky slabs; Gael's soft. (Jack chose Reimagined blocky clouds earlier; ask before changing.)
+
+## (older) 2026-11-13 17:05, fix3 DEPLOYED, not seen in game yet
 mods = fix3: metalods 96abb9b, CI run 43457899089, jar sha1 2c39ca2e... (copy `instances/Imagine metal/imagine-metal-metalods-fix3.jar`).
 Fallback fix2 (eb129083..., copy kept). From Jack's fix2 session 16:39-16:46 (screenshots 16.42.12 to 16.46.11, all handled):
 - Far fog (Jack 16:43 + chat 16:49: Gael's with DH looks better "cus of fog in distance", hides the "lego bricks"): air.metal, past
