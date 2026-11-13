@@ -11,7 +11,11 @@ Where things stand, for picking the work up in a new conversation.
   are chat lines in the log (`[CHAT] <herningstang> ...`) just before each screenshot.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
 
-## START HERE: 2026-11-13 ~01:00, MetaLODS built overnight on branch `metalods` (NOT deployed, NOT on main)
+## 2026-11-13 10:36: DEPLOYED (Jack: "swap jars"): mods = metalods branch head, CI run 43333737024, jar sha1 f03b83e6...
+- Copy kept as `instances/Imagine metal/imagine-metal-metalods.jar`. Fallback: `imagine-metal-c2b-water.jar` (388bef08...).
+  Not yet seen in game; waiting for Jack's first test (plan in docs/METALODS.md).
+
+## START HERE: 2026-11-13 ~01:00, MetaLODS built overnight on branch `metalods` (was NOT deployed then, NOT on main)
 - Jack's ask (11-13 00:00): a Voxy-style LOD system inside our shader, Metal-native, as fast as possible, its own menu next to
   Imagine Metal's, named MetaLODS; unexplored land from the seed like SeedGen; default 128 chunks. He closed the lid: nothing
   tested in game. Design, limits and his test plan: docs/METALODS.md.
