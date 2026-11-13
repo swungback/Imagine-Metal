@@ -1,6 +1,62 @@
-# Imagine Metal: handoff (2026-11-13, ~21:50)
+# Imagine Metal: handoff (2026-11-13, ~23:05)
 
-## START HERE: 2026-11-13 ~21:50, fix8 DEPLOYED (fix7 + fix8 + fix8b), not seen in game yet
+## START HERE: 2026-11-13 ~23:05, fix9 DEPLOYED (fix9a + fix9b), not seen in game yet
+mods = fix9: metalods cd0eb66, CI run 43514922999, jar sha1 2b152b87..., copy `instances/Imagine metal/imagine-metal-metalods-fix9.jar`.
+Fallbacks in `instances/Imagine metal/`: fix8 (30d21a49...), fix7, fx1, fix5. Local Java compile check: JDK 25 + client.jar +
+the 26.3 libraries + fabric-loader/mixin/asm/renderer-api jars, plain javac (see "Local compile" below); Metal only on CI.
+
+### What Jack's fix8 session showed (latest.log 22:27-22:30, screenshots 22.29.30 to 22.30.47)
+- Leaves (22.29.53, 22.30.47): fix8's culling + filled faces looked "horrible" (some see-through, some solid). He attached Way
+  Better Leaves 2.0.0 (26.2 NeoForge, Luc1fer1o; its mods.toml says MIT) and asked for a one to one.
+- 22.29.30/32 "iron still not lighting up properly": only iron's pale speck texels glowed (imOre returned the texel's red^1.5).
+- 22.30.05 floating island (Terralith) far off: a huge blue block under it and a blue slab over the sea = its waterfalls grown
+  by the LOD mip (water outranked air: one falling column -> 2/4/8/16 wide pillars). 22.30.27 dark flat squares at the falls'
+  feet (likely the same data; check they are gone).
+- 22.30.23 LOD water: a pale grey-lavender sheet (134,161,182) next to the real water (95,136,158) at the hand-over, and bright
+  blue lines (water side faces at level seams).
+- Perf (island): 44-51 fps, gpu 19-23 ms: terrain 6-8.8, translucent 2.2-4.2 (sea filling the view), light grid 0.9-1.6
+  (refills while flying), LOD pages up to 3834. No far-shadows A/B and no rejoin (phantom check still not run: no
+  "section table copy" line). exactPos table full (4096) -> coordinates rounded to the 1/2048 grid: harmless (< 1/4000 block).
+
+### fix9a (065a1f3): Way Better Leaves' plus leaves, ported (mcopt/metal/own/BushyLeaves.java, BushyLeafSource.java)
+- Every leaf block with a visible face (WBL's rule) gets 3 crossed double-sided planes 2 blocks wide through its centre, one of
+  32 rotations by the position seed; bushy sprite per leaf texture in the blocks atlas (holes flood-filled, tiled 2x2, WBL's
+  32x32 mask embedded as text). Added to the atlas by imaginemetal/mixin/SpriteSourceListMixin (load RETURN, minecraft:blocks).
+  Tesselated in OwnMesher right after the block's model through the same path (FRAPI / own / vanilla), flat light, no AO.
+  Plane coordinates snapped to 1/2048 (never the exactPos table). BushyLeaves.atlasReady (TextureAtlasMixin) clears the cache.
+- fix8's own leaf face culling and FILL marking are off (OwnFrapi / OwnBlockRenderer leafCull = false); the FILL shader code is
+  left unused. Settings (Surfaces): "Bushy leaves" (imaginemetal.bushyLeaves), "Leaf culling" = WBL's (no planes on buried leaves).
+- Notice: third_party/waybetterleaves/NOTICE, shipped in META-INF/waybetterleaves. (fix8's note said WBL was All Rights
+  Reserved; the 2.0.0 jar Jack gave declares MIT.) WBL's LabPBR leaf maps NOT ported (PbrAtlas would switch every block to the
+  pack path and lose the generated normals).
+
+### fix9b (cd0eb66)
+- LOD water: MetaPalette.kindOf: flowing water/lava = air; Rle.pick: water only if >= 4 of 8 children are water; real chunks now
+  in metalods/.../real2 (old real/ ignored, rebuilt as he plays). ml_fs: every water face shaded as the top (0x80, normal up).
+  terrain.metal im_defer_fs: LOD water x(0.42, 0.66, 0.72) linear (measured against the real water at the hand-over). ASK Jack.
+- Under water: inside the window the surface is a rippling sheet (alpha 0.38-0.62, brighter than the fog) (terrain.metal, bit 64).
+- Iron ore: all speck texels glow alike (imOre case 1: colour to one brightness, 1.3); albedo not multiplied past 1 for it.
+- Items: "soul" glow needs blue >= green: diamond tools/items no longer glow (lighting.metal imShadeEntity).
+- Mobs: MetalFX reactive 0.8 -> 0.4 (bloom.metal im_bloom_motion_r), for "animals jittering". If they smear, go back up.
+- Caves: imSkyCurve ^1.5 (partial sky light falls off faster), ImagineFrame.CAVE floor x1.5. ASK how 19.11-type ravines read.
+- Far shadows: march stops above the highest land written into the height map (MetaArena.maxTop -> ImHeightP.range.y).
+
+### Tell Jack to test
+1. Forests: the bushy look vs his WBL screenshot; fps in a forest (F3) with "Bushy leaves" on/off.
+2. Iron in a dark cave; a diamond pickaxe in hand (no glow); animals walking (jitter/smear).
+3. LOD sea and the hand-over from high up (colour, no blue lines); the floating island (no blue block, no dark squares).
+4. Under water looking up: the surface visible.
+5. A cave/ravine going down: no sudden bright-to-black.
+6. Still open: phantom check (Save and Quit to title + rejoin in ONE session; End and back), far shadows on/off perf A/B, vines.
+- Known, not fixed: a thin dark line along the real water's outer edge (the real water's side faces at the render distance's
+  edge, likely); translucent cost with the sea filling the view (2-4 ms) not reduced.
+
+### Local compile (fast check before CI)
+`tools/jc.sh` in the chat sandbox: javac --release 25 (Adoptium JDK 25) -cp client.jar (piston-meta 26.3) + the version json's
+libraries + fabric-loader 0.20.1, sponge-mixin 0.16.5, mixinextras 0.5.0, asm/asm-tree 9.8, fabric-renderer-api-v1 17.0.15,
+fabric-api-base 2.0.6. Compiles the whole mod's Java in ~10 s. Metal still only on CI.
+
+## (older) START HERE: 2026-11-13 ~21:50, fix8 DEPLOYED (fix7 + fix8 + fix8b), not seen in game yet
 mods = fix8: metalods 9eb9a42, CI run 43503788682, jar sha1 30d21a49..., copy `instances/Imagine metal/imagine-metal-metalods-fix8.jar`.
 Fallbacks in `instances/Imagine metal/`: fix7 (92a4589c...), fx1, fix5. Jack's fix7 sessions: logs 2026-11-13-7 (18:29-18:55) and
 latest (19:07-19:20); screenshots 18.31.26 to 19.20.10 all looked at.
