@@ -56,7 +56,7 @@ final class OwnFrapi implements OwnApi.Mesher {
 
 	@Override
 	public void block(float x, float y, float z, BlockAndTintGetter level, BlockPos pos, BlockState state, BlockStateModel model, long seed) {
-		this.leafCull = imaginemetal.Settings.leafCulling && state.is(BlockTags.LEAVES);
+		this.leafCull = false;  // (fix9: leaf faces as vanilla draws them again; WBL's culling is on its plus planes, BushyLeaves)
 		if (this.leafCull) {
 			this.level = level;
 			this.at.set(pos);

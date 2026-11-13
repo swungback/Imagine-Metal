@@ -26,6 +26,7 @@ import net.minecraft.client.renderer.chunk.RenderSectionRegion;
 import net.minecraft.client.renderer.chunk.SectionCompiler;
 import net.minecraft.client.renderer.chunk.VisGraph;
 import net.minecraft.core.BlockPos;
+import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 import net.minecraft.core.SectionPos;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -199,6 +200,16 @@ public final class OwnMesher {
 						blockRenderer.tesselateBlock(ModelBlockRenderer.forceOpaque(cutoutLeaves, blockState) ? opaqueQuadOutput : quadOutput,
 							SectionPos.sectionRelative(pos.getX()), SectionPos.sectionRelative(pos.getY()), SectionPos.sectionRelative(pos.getZ()), level, pos,
 							blockState, blockModelSet.get(blockState), blockState.getSeed(pos));
+					}
+					// (fix9) Way Better Leaves' plus planes for leaves that show a face (BushyLeaves), through the same path as the block
+					if (blockState.getRenderShape() == RenderShape.MODEL) {
+						BlockStateModel plus = BushyLeaves.plus(region, pos, blockState, blockModelSet.get(blockState), blockState.getSeed(pos));
+						if (plus != null) {
+							float sx = SectionPos.sectionRelative(pos.getX()), sy = SectionPos.sectionRelative(pos.getY()), sz = SectionPos.sectionRelative(pos.getZ());
+							if (api != null) api.block(sx, sy, sz, region, pos, blockState, plus, blockState.getSeed(pos));
+							else if (ownRenderer != null) ownRenderer.tesselateBlock(quadOutput, sx, sy, sz, own, pos, blockState, plus, blockState.getSeed(pos));
+							else blockRenderer.tesselateBlock(quadOutput, sx, sy, sz, level, pos, blockState, plus, blockState.getSeed(pos));
+						}
 					}
 				} catch (Throwable t) {
 					CrashReport report = CrashReport.forThrowable(t, "Tesselating block in world");

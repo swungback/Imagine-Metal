@@ -2,6 +2,6 @@
 	"required": true,
 	"package": "imaginemetal.mixin",
 	"compatibilityLevel": "JAVA_25",
-	"client": ["LevelRendererMixin", "FlatFaceShadeMixin", "WindowMixin", "WindowAccessor", "VideoSettingsScreenMixin", "RenderTargetAccessor", "FrontendRenderPassMixin", "SkyRendererMixin", "CloudRendererMixin", "PauseScreenMixin", "GameRendererBobMixin", "TextureAtlasMixin", "MetaLodsCameraMixin", "MetaLodsFogMixin", "MetaLodsClientLevelMixin", "MetaLodsHudMixin"],
+	"client": ["LevelRendererMixin", "FlatFaceShadeMixin", "WindowMixin", "WindowAccessor", "VideoSettingsScreenMixin", "RenderTargetAccessor", "FrontendRenderPassMixin", "SkyRendererMixin", "CloudRendererMixin", "PauseScreenMixin", "GameRendererBobMixin", "TextureAtlasMixin", "SpriteSourceListMixin", "MetaLodsCameraMixin", "MetaLodsFogMixin", "MetaLodsClientLevelMixin", "MetaLodsHudMixin"],
 	"injectors": { "defaultRequire": 1 }
 }

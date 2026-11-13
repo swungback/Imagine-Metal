@@ -90,7 +90,7 @@ final class OwnBlockRenderer {
 	void tesselateBlock(BlockQuadOutput output, float x, float y, float z, OwnRegion level, BlockPos pos, BlockState blockState, BlockStateModel model, long seed) {
 		this.random.setSeed(seed);
 		model.collectParts(this.random, this.parts);
-		this.leafCull = imaginemetal.Settings.leafCulling && blockState.is(net.minecraft.tags.BlockTags.LEAVES);
+		this.leafCull = false;  // (fix9: leaf faces as vanilla draws them again; WBL's culling is on its plus planes, BushyLeaves)
 		if (!this.parts.isEmpty()) {
 			try {
 				Vec3 offset = blockState.getOffset(pos);

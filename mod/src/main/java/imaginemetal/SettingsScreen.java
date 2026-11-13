@@ -145,10 +145,14 @@ public final class SettingsScreen extends OptionsSubScreen {
 					Materials.clearCache();
 					rebuildChunks();
 				}, "Grass, flowers, crops and leaves sway in the wind."));
-				this.list.addBig(toggle("Leaf culling", Settings.leafCulling, v -> {
-					Settings.leafCulling = v;
+				this.list.addSmall(toggle("Bushy leaves", Settings.bushyLeaves, v -> {
+					Settings.bushyLeaves = v;
 					rebuildChunks();
-				}, "Faster forests: the leaves' faces inside a tree aren't drawn. The outer leaves are filled in where the inside was left out, so trees don't look hollow."));
+				}, "Way Better Leaves' look: crossed bushy leaf planes stick out of every leaf block, so trees look full and fluffy."),
+					toggle("Leaf culling", Settings.leafCulling, v -> {
+						Settings.leafCulling = v;
+						rebuildChunks();
+					}, "Leaves buried inside a tree (no side showing) get no bushy planes: the same look, faster forests."));
 				this.list.addSmall(cycle("Water", new String[] {"Vanilla", "Reimagined", "Reimagined + waves"}, Settings.waterStyle,
 					v -> Settings.waterStyle = v, "Reimagined's water: its colour, clearer up close, reflections of the sky and the world. Waves add moving ripples."),
 					toggle("Glass reflections", Settings.glassReflections, v -> Settings.glassReflections = v,

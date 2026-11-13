@@ -32,9 +32,11 @@ public final class Settings {
 	public static volatile boolean heldLight = Engine.flag("imaginemetal.heldLight", true);
 	public static volatile boolean waving = Engine.flag("imaginemetal.waving", true);
 	/**
-	 * (fix8) Leaf culling: no faces between two leaf blocks (the inside of a tree), for fps in forests; the outer faces whose inside
-	 * was culled get their holes filled, so a tree doesn't look hollow (Way Better Leaves' look, Jack 2026-11-13). Chunks rebuild.
+	 * (fix9) Bushy leaves: Way Better Leaves' plus leaves (mcopt.metal.own.BushyLeaves), three crossed bushy planes on every leaf
+	 * block that shows a face. Leaf culling: WBL's culling, no planes on leaves with no visible face. Chunks rebuild. (fix8's own
+	 * culling of the faces between leaves and its filled outer faces are gone: Jack 2026-11-13 "looks horrible".)
 	 */
+	public static volatile boolean bushyLeaves = Engine.flag("imaginemetal.bushyLeaves", true);
 	public static volatile boolean leafCulling = Engine.flag("imaginemetal.leafCulling", true);
 	public static volatile int waterStyle = (int) Config.number("imaginemetal.waterStyle", 1, 0, 2);
 	public static volatile int stars = (int) Config.number("imaginemetal.stars", 1, 0, 1);
@@ -232,6 +234,7 @@ public final class Settings {
 		v.put("imaginemetal.heldLight", String.valueOf(heldLight));
 		v.put("imaginemetal.waving", String.valueOf(waving));
 		v.put("imaginemetal.leafCulling", String.valueOf(leafCulling));
+		v.put("imaginemetal.bushyLeaves", String.valueOf(bushyLeaves));
 		v.put("imaginemetal.waterStyle", String.valueOf(waterStyle));
 		v.put("imaginemetal.glassReflections", String.valueOf(glassReflections));
 		v.put("imaginemetal.shafts", String.valueOf(shafts));

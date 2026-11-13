@@ -40,6 +40,11 @@ jar {
 		include 'LICENSE', 'NOTICE'
 		into 'META-INF/mcopt'
 	}
+	// (fix9) the bushy leaves are Way Better Leaves' (MIT): its notice goes along
+	from(rootProject.file('third_party/waybetterleaves')) {
+		include 'NOTICE'
+		into 'META-INF/waybetterleaves'
+	}
 }
 
 tasks.withType(JavaCompile).configureEach {
