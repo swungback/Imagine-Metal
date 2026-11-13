@@ -16,10 +16,10 @@ import org.jspecify.annotations.Nullable;
  * Our cull draws a section iff it has a compile result in our section table and passes vanilla's distance rule (own_cull in
  * own/terrain.metal: the horizontal chunk distance from the camera's section, then |dy| <= the view distance) and the frustum.
  * The frustum doesn't matter here (what is out of view is out of view for both), so a chunk is masked iff the distance rule
- * passes and every section of it that can show holds a compile result: the sections from its lowest surface block (the
- * WORLD_SURFACE heightmap's minimum over the chunk) to its highest, all-air ones excepted (they draw nothing either way).
- * Sections wholly below the surface are left out because vanilla never compiles a sealed one (its occlusion graph never
- * reaches it); sections the graph hasn't reached yet (out of view) keep the chunk on the far terrain until they compile.
+ * passes and every section that holds one of its 256 surface blocks (the WORLD_SURFACE heightmap's top block per column)
+ * holds a compile result. Other sections are left out because vanilla never compiles a sealed one (its occlusion graph never
+ * reaches it), and a ravine or cave mouth puts sealed sections between the lowest and highest surface; sections the graph
+ * hasn't reached yet (out of view) keep the chunk on the far terrain until they compile.
  * The table is the one this frame's cull read (events are applied at the top of drawOpaque, the far terrain runs at the end of
  * the same opaque phase), so there is no frame of lag and no hand-off delay to wait out.
  *
@@ -50,6 +50,8 @@ public final class OwnSeam {
 	/** Per grid column (z * g + x, as the view area's storage): the chunk it was computed for and whether our terrain draws it whole. */
 	private static int[] colCx = new int[0], colCz = new int[0];
 	private static boolean[] colReady = new boolean[0], colSeen = new boolean[0];
+	/** (column(): which sections hold a surface block, reused) */
+	private static boolean[] need = new boolean[0];
 	private static long statNanos, statCalls, statCols, statMasks, statLast;
 	private static int statInRange, statMasked;
 
@@ -181,18 +183,33 @@ public final class OwnSeam {
 		boolean ready = false;
 		LevelChunk chunk = level.getChunkSource().getChunk(cx, cz, false);
 		if (chunk != null) {
-			int lo = Integer.MAX_VALUE, hi = Integer.MIN_VALUE;
+			// The sections that hold the chunk's surface: the one with each column's top block (WORLD_SURFACE gives the y above
+			// it). Not every section between the lowest and highest top: in a chunk with a ravine or a cave mouth those include
+			// sealed sections vanilla never compiles, so the chunk never counted as drawn and its LOD stayed for good, poking out of
+			// the real terrain (LOD water over a real river, stone in ravines). A surface section the cull's distance rule leaves
+			// out (|dy| > the view distance) isn't drawn, so the chunk stays on the far terrain.
+			if (need.length < h) need = new boolean[h];
+			Arrays.fill(need, 0, h, false);
+			int nlo = Integer.MAX_VALUE, nhi = Integer.MIN_VALUE, minY = minSy << 4;
 			for (int bz = 0; bz < 16; bz++) {
 				for (int bx = 0; bx < 16; bx++) {
-					int top = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, bx, bz);
-					lo = Math.min(lo, top);
-					hi = Math.max(hi, top);
+					int top = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, bx, bz) - 1;
+					if (top < minY) continue;
+					int index = (top >> 4) - minSy;
+					if (index < 0 || index >= h) continue;
+					need[index] = true;
+					nlo = Math.min(nlo, index);
+					nhi = Math.max(nhi, index);
 				}
 			}
-			ready = true;
-			int ylo = Math.max(Math.max(minSy, sy - vd), lo >> 4), yhi = Math.min(Math.min(maxSy, sy + vd), hi >> 4);
-			for (int y = ylo; y <= yhi && ready; y++) {
-				int index = y - minSy;
+			ready = nlo <= nhi;
+			for (int index = nlo; index <= nhi && ready; index++) {
+				if (!need[index]) continue;
+				int y = index + minSy;
+				if (y < sy - vd || y > sy + vd || y > maxSy) {
+					ready = false;
+					break;
+				}
 				if (chunk.getSection(index).hasOnlyAir()) continue;
 				ready = own.compiledAt((zg * h + index) * g + xg, cx << 4, y << 4, cz << 4);
 			}

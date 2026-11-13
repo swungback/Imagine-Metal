@@ -210,6 +210,18 @@ public final class MetaLods {
 	// ---- fog ----
 
 	/** The fog when the LODs draw: as the game would set it for a render distance reaching their edge (mcopt's LOD does the same). */
+	/**
+	 * (the air pass, Reflections) MetaLODS' far fog this frame into out[0..1]: where it starts (blocks from the camera: the real
+	 * terrain's edge) and its density (0: none).
+	 */
+	public static void farFog(float[] out) {
+		out[0] = 0f;
+		out[1] = 0f;
+		if (!active() || MetaSettings.farFog <= 0f || reach() <= 0) return;
+		out[0] = renderDistance * 16f;
+		out[1] = 1.9f * MetaSettings.farFog;
+	}
+
 	public static void adjustFog(FogData fog, FogType type) {
 		float reach = reach();
 		if (reach <= 0 || type != FogType.ATMOSPHERIC) return;

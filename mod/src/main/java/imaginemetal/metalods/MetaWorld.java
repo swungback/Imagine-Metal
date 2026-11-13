@@ -65,6 +65,7 @@ final class MetaWorld {
 	/** -Dmetalods.coarseFirst=true: the old order (every level from the coarsest down, huge blocks first). */
 	private static final boolean COARSE_FIRST = Boolean.getBoolean("metalods.coarseFirst");
 	private static final boolean HANDOFF_DRAWN = !"false".equals(System.getProperty("metalods.handoffDrawn"));
+	private static final boolean MASK_LOADED = Boolean.getBoolean("metalods.maskLoaded");
 	private boolean saidMask, maskFromOwn;
 	private long statsTiles;
 
@@ -517,11 +518,14 @@ final class MetaWorld {
 				this.maskSize = w.size;
 				this.maskWords = w.words;
 				this.maskFromOwn = true;
-				// (and every loaded chunk 2 or more inside the render distance: a chunk with a section the real terrain never
+				// (fix2: and every loaded chunk 2 or more inside the render distance: a chunk with a section the real terrain never
 				// compiles (deep air, a cave) never counts as drawn whole, so its LOD stayed in it for good and showed through:
 				// the LOD's filled-in stone in ravines and caves, LOD trees inside the near land (Jack's 13.57.16, 13.58.58,
 				// 14.00.42, 14.06.06). The strip at the edge stays on the drawn-whole rule)
-				this.addLoaded(camX, camZ, Math.max(0, rd - 2));
+				// (no longer by default: loaded isn't compiled, and while flying a loaded chunk inside that ring not drawn yet was
+				// a strip of sky between the near land and the LODs (Jack's 16.44.17). The drawn rule now looks only at the
+				// sections holding the surface, which covers the ravine and cave cases. -Dmetalods.maskLoaded=true: as fix2)
+				if (MASK_LOADED) this.addLoaded(camX, camZ, Math.max(0, rd - 2));
 				return;
 			}
 		}
@@ -607,7 +611,8 @@ final class MetaWorld {
 	private long areaAll, areaReady;
 	private final long[] progT = new long[8], progA = new long[8];
 	private int progN;
-	private long progDoneSince, progNext;
+	private long progDoneSince, progNext, progBigSince;
+	private boolean progDone;
 	private double progRate;
 	private double camX, camY, camZ;
 	private float reach;
@@ -769,8 +774,8 @@ final class MetaWorld {
 	}
 
 	/**
-	 * The on-screen progress line while the view isn't made yet, else null (also for 2 s after it is done, then gone until
-	 * something is missing again). The speed: chunks' worth of area made ready per second over the last ~3 s.
+	 * The on-screen progress line while the view isn't made yet, else null (also for 2 s after it is done, then gone until a
+	 * tenth of the view or more is missing again). The speed: chunks' worth of area made ready per second over the last ~3 s.
 	 */
 	@Nullable String progressLine() {
 		long now = System.currentTimeMillis();
@@ -784,9 +789,26 @@ final class MetaWorld {
 			if (dt > 0) this.progRate = Math.max(0.0, (this.areaReady - this.progA[oldest]) * 1000.0 / dt);
 		}
 		long left = Math.max(0, this.areaAll - this.areaReady);
+		if (this.progDone) {
+			// (once the view was made: back only for a real backlog, a tenth of the view or more missing for over a second, as
+			// after a teleport or joining; not for the bits that come in at the edge while walking or flying (Jack's 16.43.33
+			// "keep getting metal making chunks notification")
+			if (left * 10 < this.areaAll) {
+				this.progBigSince = 0;
+				return null;
+			}
+			if (this.progBigSince == 0) this.progBigSince = now;
+			if (now - this.progBigSince < 1000) return null;
+			this.progDone = false;
+			this.progDoneSince = 0;
+		}
 		if (left == 0) {
 			if (this.progDoneSince == 0) this.progDoneSince = now;
-			if (now - this.progDoneSince > 2000) return null;
+			if (now - this.progDoneSince > 2000) {
+				this.progDone = true;
+				this.progBigSince = 0;
+				return null;
+			}
 		} else this.progDoneSince = 0;
 		return String.format(java.util.Locale.ROOT, "MetaLODS: %,d chunks ready, %,d left, %,.0f chunks/s", this.areaReady, left, this.progRate);
 	}

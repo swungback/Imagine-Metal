@@ -13,7 +13,7 @@
 // added. A pixel the air doesn't touch comes out as it went in.
 struct ImAirParams {
 	float4x4 clipInv;  // clip (Minecraft's, y up; depth 0..1 reversed) -> camera-relative world, this frame's terrain transform
-	float4 size;       // xy the target's size in pixels
+	float4 size;       // xy the target's size in pixels; z MetaLODS' far fog start (blocks), w its density (0: none)
 };
 
 struct ImAirOut {
@@ -45,7 +45,15 @@ fragment float4 im_air_fs(ImAirOut in [[stage_in]], float4 dst [[color(0)]], dep
 	bf *= bf;
 	bf *= bf;
 	float border = 1.0 - exp(-3.0 * bf);
-	if (dist < 6.0 && border <= 0.001) return dst;
+	// MetaLODS' far fog (as Distant Horizons' far fog): past the real terrain's edge the land fades into the horizon's colour,
+	// growing with the square of the distance into the LODs' reach, so the far LODs read as distance, not as blocks (Jack: Gael's
+	// with DH "looks better cus of fog in distance", it "hides the ugly lods")
+	float farFog = 0.0;
+	if (a.size.w > 0.0 && dist > a.size.z) {
+		float x = saturate((dist - a.size.z) / max(f.fogParams.x - a.size.z, 16.0)) * a.size.w;
+		farFog = 1.0 - exp(-x * x);
+	}
+	if (dist < 6.0 && border <= 0.001 && farFog <= 0.001) return dst;
 	float3 T = float3(1.0);
 	float3 S = imAirFog(p, 1.0, f, T);
 	float3 o = max(dst.rgb, 0.0);
@@ -65,6 +73,11 @@ fragment float4 im_air_fs(ImAirOut in [[stage_in]], float4 dst [[color(0)]], dep
 			yn = y * T + max(imGrade(imTonemap(S * f.minLight.w, t), f), 0.0);
 		}
 		o = pow(max(yn, 0.0), 1.0 / 2.2);
+	}
+	if (farFog > 0.001) {
+		// (the horizon's colour in this direction: the land seen from above fades to the sky low down, not to the sky under it)
+		float3 hd = normalize(float3(p.x, max(p.y, 0.02 * dist), p.z));
+		o = mix(o, pow(imPresent(imSkyColor(hd, f, false), f), 1.0 / 2.2), farFog);
 	}
 	if (border > 0.001) o = mix(o, pow(imPresent(imSkyColor(p / max(dist, 1e-3), f, false), f), 1.0 / 2.2), border);
 	return float4(o, dst.a);

@@ -47,7 +47,8 @@ struct MLOut {
 };
 
 vertex MLOut ml_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant MLFrame &f [[buffer(0)]],
-	device const uint *visible [[buffer(1)]], device const PageInfo *pages [[buffer(2)]], device const uint2 *quads [[buffer(3)]]) {
+	device const uint *visible [[buffer(1)]], device const PageInfo *pages [[buffer(2)]], device const uint2 *quads [[buffer(3)]],
+	device const Model *models [[buffer(4)]]) {
 	MLOut o;
 	uint page = visible[iid];
 	PageInfo pi = pages[page];
@@ -79,6 +80,9 @@ vertex MLOut ml_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant ML
 		default: p = float3(x + u * w, y + v * h, z); break;
 	}
 	float s = float(1u << level);
+	// (water's top at 8/9 of a block, as the real water's surface: a full block stood 1/9 higher, and where the near terrain hands
+	// over to the LODs the gap under that edge showed the LOD seabed as a dark line across lakes (Jack's 16.43.12, 16.43.45))
+	if (face != 3u && (v > 0.5 || face == 2u) && ((models[qd.y & 0xFFFFu].flags >> 17) & 1u) != 0u) p.y -= (1.0 / 9.0) / s;
 	int3 org = int3(pi.ox, pi.oy, pi.oz);
 	float3 rel = float3(org - f.camBlock.xyz) + p * s - f.camFrac.xyz;
 	o.pos = f.clip * float4(rel, 1.0);

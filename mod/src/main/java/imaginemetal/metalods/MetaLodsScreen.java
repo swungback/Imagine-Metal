@@ -36,8 +36,11 @@ public final class MetaLodsScreen extends OptionsSubScreen {
 			"The game's own trees on the nearest generated LODs, where they will really grow (slower to make). Off: the biome's estimate. Applies to new LODs."),
 			toggle("Overhangs", MetaSettings.overhangs, v -> MetaSettings.overhangs = v,
 				"Generated LODs in 3D: overhangs, arches and floating ground from the terrain's shape. Off: a heightfield (a little faster). Applies when the world is next loaded."));
+		this.list.addSmall(slider("Far fog", 0f, 2f, 0.05f, MetaSettings.farFog, v -> MetaSettings.farFog = v,
+			v -> v <= 0f ? "Off" : String.format(java.util.Locale.ROOT, "%.2f", v),
+			"The land past your render distance fades into the horizon's colour with distance, as Distant Horizons' far fog: the far LODs read as distance, not as blocks. 0 off, 1 the default, 2 thick."));
 		this.list.addSmall(toggle("Progress on screen", MetaSettings.progress, v -> MetaSettings.progress = v,
-			"While LODs are being made: chunks ready, chunks still to make and chunks per second, top left. Gone once everything in view is made."),
+			"While LODs are being made: chunks ready, chunks still to make and chunks per second, top left. Gone once everything in view is made; back only when a lot is missing (a teleport, joining)."),
 			Button.builder(Component.literal("Status: " + MetaLods.status()), b -> b.setMessage(Component.literal("Status: " + MetaLods.status())))
 				.bounds(0, 0, 150, 20).build());
 		this.list.addHeader(Component.literal("Debug"));

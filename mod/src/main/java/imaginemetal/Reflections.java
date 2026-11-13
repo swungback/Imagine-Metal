@@ -85,8 +85,12 @@ public final class Reflections {
 				long airM = 0, lib = 0;
 				var own = mcopt.metal.own.OwnTerrain.get();
 				if (air && nowSet && own != null && Math.abs(clipNow.determinant()) > 1e-12f) {
-					airM = stack.ncalloc(4, 16, 4);
+					airM = stack.ncalloc(4, 18, 4);
 					new Matrix4f(clipNow).invert().get(MemoryUtil.memFloatBuffer(airM, 16));
+					// (and MetaLODS' far fog: where it starts and its density, imssr.m hands them on as the params' zw)
+					imaginemetal.metalods.MetaLods.farFog(FAR_FOG);
+					MemoryUtil.memPutFloat(airM + 64, FAR_FOG[0]);
+					MemoryUtil.memPutFloat(airM + 68, FAR_FOG[1]);
 					lib = ImNative.terrainLibrary(own.ownHandle());
 				}
 				// (Build C1: the clouds, after the air and before the colour copy: the sky pass left them for here)
@@ -126,6 +130,7 @@ public final class Reflections {
 		}
 	}
 
+	private static final float[] FAR_FOG = new float[2];
 	static volatile boolean underReady, underDepthReady;
 	private static boolean airPromised, airOff, airLogged;
 	private static int airMisses;

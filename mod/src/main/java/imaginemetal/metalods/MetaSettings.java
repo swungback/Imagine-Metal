@@ -39,6 +39,11 @@ public final class MetaSettings {
 	public static volatile boolean stats = true;
 	/** While LODs are being made: how many chunks' worth are ready, how many are left and the speed, top left (gone when done). */
 	public static volatile boolean progress = true;
+	/**
+	 * Far fog: the land past the real terrain fades into the horizon's colour with distance (as Distant Horizons' far fog), so the
+	 * far LODs read as distance, not as blocks. 0 off, 1 the default, 2 thick.
+	 */
+	public static volatile float farFog = 1f;
 
 	private static boolean loaded;
 
@@ -73,6 +78,7 @@ public final class MetaSettings {
 		threads = Math.clamp(integer(p, "threads", threads), 0, 16);
 		stats = bool(p, "stats", stats);
 		progress = bool(p, "progress", progress);
+		farFog = Math.clamp(number(p, "farFog", farFog), 0f, 2f);
 	}
 
 	public static synchronized void save() {
@@ -95,7 +101,9 @@ public final class MetaSettings {
 			+ "# A stats line in the log every 10 seconds.\n"
 			+ "stats=" + stats + "\n"
 			+ "# While LODs are being made: chunks ready, chunks left and the speed on screen (gone when done).\n"
-			+ "progress=" + progress + "\n";
+			+ "progress=" + progress + "\n"
+			+ "# Far fog (0 off, 1 the default, 2 thick): the far land fades into the horizon's colour with distance.\n"
+			+ "farFog=" + String.format(java.util.Locale.ROOT, "%.2f", farFog) + "\n";
 		try {
 			Files.createDirectories(f.getParent());
 			try (Writer w = Files.newBufferedWriter(f, StandardCharsets.UTF_8)) {
@@ -116,6 +124,16 @@ public final class MetaSettings {
 		if (v == null) return def;
 		try {
 			return Integer.parseInt(v.trim());
+		} catch (NumberFormatException e) {
+			return def;
+		}
+	}
+
+	private static float number(Properties p, String k, float def) {
+		String v = System.getProperty("metalods." + k, p.getProperty(k));
+		if (v == null) return def;
+		try {
+			return Float.parseFloat(v.trim());
 		} catch (NumberFormatException e) {
 			return def;
 		}

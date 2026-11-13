@@ -159,6 +159,7 @@ int mml_draw(MetaLods *m, Enc *enc, const void *frame, int frameLength, id<MTLBu
 	[r setVertexBuffer:visible offset:visOffset atIndex:1];
 	[r setVertexBuffer:pages offset:0 atIndex:2];
 	[r setVertexBuffer:quads offset:0 atIndex:3];
+	[r setVertexBuffer:models offset:0 atIndex:4];  // (the vertex stage: water's lower top)
 	[r setFragmentBytes:f length:(NSUInteger) frameLength atIndex:0];
 	[r setFragmentBuffer:models offset:0 atIndex:4];
 	[r setFragmentBuffer:biomes offset:0 atIndex:5];
