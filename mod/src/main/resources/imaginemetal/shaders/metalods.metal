@@ -147,6 +147,11 @@ fragment MLGOut ml_fs(MLOut in [[stage_in]], constant MLFrame &f [[buffer(0)]], 
 			bool wtr = ((models[in.id].flags >> 17) & 1u) != 0u;
 			if (wtr) front = in.face == 0u ? float2(0.5, 0.0) : in.face == 1u ? float2(-0.5, 0.0) : in.face == 4u ? float2(0.0, 0.5) : float2(0.0, -0.5);
 		}
+		// (fix8: inside the real terrain's distance only the finest levels: a coarse column made while Jack was far away stood in for
+		// its children there until they were made, and its 4-16 block voxels stuck out of the real land as big boxes with grass on
+		// top (18.53.17, "back at spawn after being far away"); at the default detail levels 2 and up are never the right level
+		// that close, so what is left out here is only such a stand-in)
+		if (in.level >= 2u && length(in.rel.xz) < float(f.mask.z) * 8.0 - 48.0) discard_fragment();
 		int2 wb = f.camBlock.xz + int2(floor(in.rel.xz + f.camFrac.xz + front));
 		int2 ch = (wb - (wb & int2(15))) / 16 - f.mask.xy;  // (floor division by 16, negatives too)
 		if (ch.x >= 0 && ch.y >= 0 && ch.x < f.mask.z && ch.y < f.mask.z) {
