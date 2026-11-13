@@ -1,8 +1,76 @@
-# Imagine Metal: handoff (2026-11-13, ~17:40)
+# Imagine Metal: handoff (2026-11-13, ~18:25)
 
 Where things stand, for picking the work up in a new conversation.
 
-## Jack 17:39 (after fix5): read this before anything else
+## START HERE: 2026-11-13 18:20, fix7 DEPLOYED (fix6 + MetalFX + fix7a-d), NOT seen in game yet
+mods = fix7: metalods 6721afc, CI run 43471074869, jar sha1 92a4589c... (copy `instances/Imagine metal/imagine-metal-metalods-fix7.jar`).
+Fallbacks in `instances/Imagine metal/`: fx1 (2df4bad5..., fix6 + MetalFX only), fix5 (4ce76e04..., before this chat).
+Jack had NOT launched the game during this chat (latest.log still the 17:22-17:26 fix3 session). First thing: read his new log.
+
+### 1. Phantom blocks: REAL CAUSE FOUND AND FIXED (fix6, 0e1d777)
+- OwnTerrain keeps FRAMES (3) GPU copies of the section table; each frame copies only the slots changed in the last FRAMES frames
+  (dirty[f]). setSlot calls made BETWEEN frames (disposeAll: leaving a world, a dimension change, a resource reload, dispatcher
+  dispose) went into dirty[frame % FRAMES], whose table copy had already been made that frame, and that list is reset at the start
+  of its next frame BEFORE the copy: so one of the 3 copies kept the whole old level's table (origins + record ranges that new
+  meshes reuse) and every 3rd frame drew old/garbage geometry at old positions, half-transparent with the TAA: the stretched grass
+  after rejoining (14.06.06), the End slabs near 0,0 after respawning (2026-11-12 13.43.38), the "phantom builds". The C2 level
+  guard never fired in ANY log since Nov 12 (grep "level guard"): it was never the cause. Records also bake the slot (rec +4) and
+  the shader reads the origin through it (terrain.metal ~1730), which is why the garbage lands at old origins.
+- Fix: setSlot with the table closed (tableOpen false) goes into `late[]`, merged into the next frame's dirty list in beginFrame0
+  after its reset. Check: after a reset, each copy is compared with the master right after its update and logged:
+  `[Imagine Metal] section table copy K after a level reset: matches` (3 lines per reset; "N stale slots ... (mended)" = still wrong).
+- 13.54.46 "visual glitch in lod on house": at full size it is the REAL roof (stairs stretched into the next roof), same family; ask.
+- Repro for Jack: join, look around, Save and Quit, rejoin the same world, look at nearby grass; then
+  `/execute in minecraft:the_end run tp @s 0 70 0` and back with `/execute in minecraft:overworld run tp @s ~ ~ ~`, look near 0,0.
+  In the log: the "section table copy" lines, "mcopt-own reset", no "exactPos check ... wrong".
+
+### 2. MetalFX: ON metalods (cee9079), deployed, default on
+- Cherry-picked 4f9e852 (conflicts in Bloom.java / SettingsScreen.java resolved keeping both). Toggle "MetalFX upscaler" in
+  Advanced > Debug (not saved); the 4 flip toggles stay as debug only: signs checked against Apple's WWDC25 sample
+  (jitterOffsetX = pixelJitter.x, jitterOffsetY = -pixelJitter.y for a y-up projection jitter = the content's shift in y-down
+  pixels; ours: the frame holds the scene shifted by +taa in texture uv, so +taa*size = the +1 defaults). Motion = current -> previous
+  in pixels, as Apple's.
+- Whales / cape: no per-entity motion vectors (Minecraft's pipelines). Instead EntityShade marks mob pixels in the frame's alpha
+  (0.96, non-translucent entity pipelines, level pass only; terrain 1, waving plants 0.98) and the motion pass writes MetalFX's
+  reactive mask from it (0.8 on mobs; macOS 14+: `MetalFX temporal scaler on (...), mobs reactive`). Ask Jack if whales/capes
+  still smear. If yes: real motion vectors need the previous frame's entity vertex positions (big).
+
+### 3. Far land vs DH + Gael (fix7a-c)
+- Pale sky: measured (17.26.15) flat colourless (192,193,198) from top of frame to horizon; our sky model gives (122,150,195) at
+  that elevation and no rain (weather.dat raining 0). Cause: he was flying at cloud height; every upward ray met the cloud cell
+  right above the camera within a few blocks. Fix: clouds fade out within 6-40 blocks of the eye (sky.metal imClouds). NOT a sky
+  colour change. (imaginemetal.haze=0.75 in his config is a dead key; bloom fog is 0 by clear day.)
+- LOD water: material 0x80 (class 0 + bit 7, unused) on LOD water tops (ml_fs: the real water's surface colour from the biome's
+  water colour), im_defer_fs shades it with kind 1 (waves, glint, sky reflection by angle) and lays it over the absorbed deep seabed
+  (x a^(1/2.2), a = max(0.72, fresnel)). Was cyan ground next to deep-blue real water.
+- Water seam: a coarser level's water voxel had its top on its own boundary (64 for the sea at level >= 1, real surface 62.89): a
+  1-block step at L0/L1 borders whose side drew the dark line. ml_vs: a water top whose voxel holds the sea level goes to sea - 1/9
+  (MLFrame.params.w = level.getSeaLevel()). Lakes above sea level keep the old rule.
+- AO on LODs: MetaMesher computes 4 corner values per face voxel (vanilla's smooth-light rule from the 3 voxels in front), greedy
+  merges only equal ones, a byte per quad after each page's quads (PAGE_BYTES 2304, AO_AT 2048), ml_fs interpolates per voxel
+  (0.5 / 0.72 / 0.88 / 1). Water and skirts unshaded.
+- Far shadows: MetaArena height map 1024x1024 uints (16-block texels, wrapping, tag in bits 12-31, top+1 in 0-11, finest level
+  wins) written by workers after meshing (MetaArena.heights); MetaLods.drawInG hands it (and ImHeightP at arena.frame+160) to
+  mcown.m (mco_im_heightmap, cleared by mco_im_defer each frame); im_defer_fs imFarSun marches 18 steps from 20 blocks x1.3 toward
+  the light from 0.7 x shadowRange out; ImPre.farSun scales the term the shadow maps don't cover (sun = mix(open*farSun, sm.x, sm.y)).
+  Setting MetaLODS "Far shadows" (farShadows=true). Cost unmeasured: check the perf line (terrain) vs fix5's ~5.2 ms.
+- Colour: LOD albedo eased to 20 % less saturation and 6 % darker over the 384 blocks past the real terrain's edge (no step at the
+  hand-over). Ask Jack if it's enough / too much (he wants to be asked about grading).
+- Clouds blocky vs soft: NOT changed (Jack chose blocky; ask).
+
+### 4. Older items done in fix7d
+- LOD grass side overlay (13.55.21): LodColors.Look gets overUv/overTint (a second tinted quad on the side), palette model 64 bytes
+  (overUv at +48, overlay tint kind in flags bits 18-20), ml_fs lays it on tinted.
+- Ore glow (15.46.12): IM_MAT_ORE by sat / hi (0.1..0.22) instead of sat (0.08..0.2): iron's darker speck texels glow too.
+
+### Still to ask Jack (the handoff's "ask" items; nothing built for them)
+- Jungle fps dip (C2 ideas: leaves solid past ~32 blocks, leaf pre-pass off by default)? Vines on OwnQuads (wave 3 -> 0101)?
+  01.03.44 pale streak? "water reflection" 16.22.13? Blocky vs soft clouds? Water surface from below readable now (fix4)? Haze right?
+- Shadow pop-in case 2 (2026-11-12 23.48.17/22): needs Jack at that spot with Debug view "Shadow maps" and the two toggles.
+- Cold start: read the new log's first `[MetaLODS] generation:` lines before changing anything.
+
+
+## (older) Jack 17:39 (after fix5)
 - The huge grass is the SAME family as the phantom blocks: the End ghost slabs (C2 level guard) and "phantom builds" he has seen
   for a long time. Treat it as one long-standing bug in the section/mesh lifecycle across level changes (old level's compiles,
   stores, table entries, slot reuse), not as a one-off. Find the real cause and fix it for good; fix4's checks are diagnostics.
@@ -10,7 +78,7 @@ Where things stand, for picking the work up in a new conversation.
   far as built), build, deploy, keep the non-MetalFX jar as fallback.
 - He wants the next chat to FIX the open items, not list them as open.
 
-## START HERE: 2026-11-13 17:40, fix5 DEPLOYED (fix3 + fix4 + fix5), not seen in game yet
+## (older) 2026-11-13 17:40, fix5 DEPLOYED (fix3 + fix4 + fix5), not seen in game yet
 mods = fix5: metalods 9131809, CI run 43463452715, jar sha1 4ce76e04... (copy `instances/Imagine metal/imagine-metal-metalods-fix5.jar`).
 Fallbacks: fix3 (2c39ca2e...), fix2 (eb129083...). Screenshots handled up to 2026-11-13_17.26.23 (+ his DH/Gael refs 16.02-16.04).
 fix4 (618e373):
