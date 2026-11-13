@@ -1,8 +1,35 @@
-# Imagine Metal: handoff (2026-11-13, ~15:45)
+# Imagine Metal: handoff (2026-11-13, ~17:05)
 
 Where things stand, for picking the work up in a new conversation.
 
-## START HERE: 2026-11-13 16:25, fix2 DEPLOYED, bug list from the fast1 session (read this first)
+## START HERE: 2026-11-13 17:05, fix3 DEPLOYED, not seen in game yet
+mods = fix3: metalods 96abb9b, CI run 43457899089, jar sha1 2c39ca2e... (copy `instances/Imagine metal/imagine-metal-metalods-fix3.jar`).
+Fallback fix2 (eb129083..., copy kept). From Jack's fix2 session 16:39-16:46 (screenshots 16.42.12 to 16.46.11, all handled):
+- Far fog (Jack 16:43 + chat 16:49: Gael's with DH looks better "cus of fog in distance", hides the "lego bricks"): air.metal, past
+  the real terrain's edge the land mixes toward imSkyColor at the horizon (direction's y raised to >= 0.02), 1 - exp(-x^2) with
+  x = (dist - rd*16) / (fog end - rd*16) * 1.9 * setting. Setting MetaLODS "Far fog" 0-2 (default 1, metalods.properties farFog).
+  Plumbing: Reflections puts start/density after the 16 floats of airM, imssr.m hands them on as ImAirParams.size.zw. Only with
+  the air pass (default on). Look at it first: too thick/thin, colour at night, the sun's glow in it.
+- Dark line across lakes along chunk edges (16.43.12, 16.43.45): near/LOD water seam. LOD water top was a full block, real water
+  8/9: under the LOD sheet's edge the LOD seabed showed. ml_vs lowers water tops (top faces, sides' top edges) by 1/9 block
+  (models buffer now bound to the vertex stage too, metalods.m).
+- LOD water sheet over the real river (16.43.34/16.43.44, cyan + dark blue sheet with a side face, ~6-8 chunks out) and a
+  sky-coloured strip between near land and LODs (16.44.09/16.44.17, flying): both the hand-off mask. OwnSeam.column: a chunk is
+  "drawn" when every section holding one of its 256 WORLD_SURFACE top blocks is compiled (was: every section from the lowest to the
+  highest surface, which never held with sealed sections in ravines / cave mouths); a surface section outside |dy| <= vd counts as
+  not drawn. fix2's "every loaded chunk 2+ inside rd" (addLoaded) is off (it masked loaded-not-compiled chunks: the strip);
+  -Dmetalods.maskLoaded=true brings it back. Check: caves/ravines (13.57.16, 13.58.58 cases) must stay clean.
+- Progress line "keep getting metal making chunks notification" (16:43): once done it comes back only when >= 1/10 of the view is
+  missing for over 1 s (teleport, join), not for the edge trickle while moving (MetaWorld.progressLine, progDone).
+- Lava "doesnt look that hot anymore, no bloom?" / "not hot enough" (16.45.22, 16.46.11): imaginemetal.bloom was false in his config
+  since 10:50 (saved a minute after his jungle "dipped to 28-29 fps" note: most likely switched off while chasing fps). Set back to
+  true in config/imaginemetal.properties (game closed). If lava still isn't hot enough WITH bloom: then the look (ask what he means).
+- fix2 numbers (latest.log 16:39): 240k chunks' worth in view at distance 256 (he has 256 set), 301,744 chunks' worth generated in
+  69 s, 5,548 chunks/s peak at 29 s; real chunks ingested 5,531. GPU ~16.5-17 ms (60 fps vsync).
+- Still open from before: AO on LODs, LOD grass side overlay, LOD water colour = near water, cold start, huge grass after rejoin,
+  under-water top, mob motion vectors, ore glow per sprite.
+
+## (older) 2026-11-13 16:25, fix2 DEPLOYED, bug list from the fast1 session (read this first)
 mods = fix2: metalods 529fecf, CI run 43451128240, jar sha1 eb129083... (copy `instances/Imagine metal/imagine-metal-metalods-fix2.jar`).
 Before it fast1 (57c2807b..., copy kept). Not seen in game yet. Contains, in order:
 - 7e38f81 TAA offset for the pipelines EntityShade skipped (eyes, text, beams, leads): dragon eyes flicker.
