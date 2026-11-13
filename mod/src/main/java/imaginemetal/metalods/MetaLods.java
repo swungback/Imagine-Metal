@@ -95,6 +95,7 @@ public final class MetaLods {
 			pumpLoads(w);
 			MetaArena a = arena;
 			int pages = w.prepare(clip, camX, camY, camZ, renderDistance);
+			MetaNative.heightmap(a.heightBuf, a.frame + 160);  // (fix7: far shadows, this frame's lighting draw)
 			if (pages > 0 && atlas != 0) {
 				int slot = w.slot();
 				int cut = Math.min(w.maskedPages, pages), drawn = 0;

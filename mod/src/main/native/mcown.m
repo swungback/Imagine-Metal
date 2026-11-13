@@ -924,6 +924,20 @@ static int imGEnter(Own *w, Enc *enc) {
 // im_defer_fs lighting every pixel the G-buffer's draws left visible. Everything it reads was bound by those draws (the shading's
 // textures, ImFrame at 30, the fog block at 24); only its own parameters are added. Nothing to do when none drew.
 static Own *imGOwn;
+
+// (fix7, MetaLODS far shadows) the far land's height map (MetaArena: 1024 x 1024 uints, 16 blocks a texel, wrapping around the
+// world) and its parameters (ImHeightP in terrain.metal, 48 bytes), for im_defer_fs at buffers 28 and 27. Set by MetaLODS each
+// frame it draws (mco_im_heightmap, after mco_im_defer has cleared it): used by that frame's lighting draws only.
+static id<MTLBuffer> imHeightBuf;
+static uint8_t imHeightParams[48];
+static int imHeightOn;
+
+void mco_im_heightmap(void *buffer, const void *params) {
+	imHeightBuf = (id<MTLBuffer>) buffer;
+	if (params) memcpy(imHeightParams, params, sizeof imHeightParams);
+	imHeightOn = buffer != NULL && params != NULL;
+}
+
 static void imGFlush(Enc *enc) {
 	id<MTLRenderCommandEncoder> r = enc->render;
 	if (!r || !imGDrawn || !imGOwn || enc->colorCount != 5 || !enc->colors[0]) return;
@@ -940,6 +954,14 @@ static void imGFlush(Enc *enc) {
 	[r setDepthBias:0 slopeScale:0 clamp:0];
 	[r setFragmentBytes:imFrame length:sizeof imFrame atIndex:30];
 	[r setFragmentBytes:imDeferParams length:sizeof imDeferParams atIndex:29];
+	if (imHeightOn && imHeightBuf) {
+		[r setFragmentBuffer:imHeightBuf offset:0 atIndex:28];
+		[r setFragmentBytes:imHeightParams length:sizeof imHeightParams atIndex:27];
+	} else {
+		static const uint8_t none[48] = {0};  // (ImHeightP.cam.w 0: off; buffer 28 bound to something, never read)
+		[r setFragmentBytes:none length:sizeof none atIndex:28];
+		[r setFragmentBytes:none length:sizeof none atIndex:27];
+	}
 	[r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 	[r popDebugGroup];
 	imGOwn->lastPso = nil;
@@ -951,6 +973,7 @@ static void imGFlush(Enc *enc) {
 int mco_im_defer(Own *w, int on, const float *clipInv) {
 	imGOwn = w;
 	mc_im_g_flush = imGFlush;
+	imHeightOn = 0;  // (MetaLODS sets it again when it draws this frame, after this)
 	imDeferOn = on && clipInv && w;
 	if (clipInv) memcpy(imDeferParams, clipInv, 64);
 	return imDeferFailed;

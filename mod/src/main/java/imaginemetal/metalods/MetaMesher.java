@@ -51,6 +51,11 @@ final class MetaMesher {
 		}
 	}
 
+	/** After mesh(): each cell's (x + z N) topmost voxel that isn't air (-1: none). */
+	int[] tops() {
+		return this.tops;
+	}
+
 	private int at(int x, int z, int y) {
 		return ((z + 1) * B + (x + 1)) * this.h + y;
 	}

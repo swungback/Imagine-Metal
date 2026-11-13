@@ -1062,6 +1062,7 @@ struct ImPre {
 	float3 N;      // with the generated normal
 	float3 Lt;     // toward the torch light (the face's normal leaned up the block light's slope)
 	float2 texel;  // the atlas texel (the coated textures' and the sculk's per-texel numbers)
+	float farSun;  // (fix7) past the shadow maps, how much of the sun reaches it by MetaLODS' height map (1: all; the deferred pass)
 };
 
 static inline ImPre imNoPre() {
@@ -1072,6 +1073,7 @@ static inline ImPre imNoPre() {
 	m.N = float3(0.0, 1.0, 0.0);
 	m.Lt = float3(0.0, 1.0, 0.0);
 	m.texel = float2(0.0);
+	m.farSun = 1.0;
 	return m;
 }
 
@@ -1079,6 +1081,7 @@ static ImPre imMaterial(float3 p, float2 light, uint mat, float3 tex, float2 uv,
 	constant ImFrame &f) {
 	ImPre m;
 	m.on = true;
+	m.farSun = 1.0;
 	bool slanted;
 	float3 n = imFaceNormal(p, slanted);
 	// the texture's tangent frame from the screen derivatives (Schüler 2013), taken before any branch
@@ -1301,7 +1304,8 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	oa *= 1.0 - f.env.x;
 	if (oa > 0.0) skyF = max(skyF, 0.8 * oa);
 	float open = max(smoothstep(0.45, 0.9, sky), oa);
-	float sun = mix(open, sm.x, sm.y);
+	// (fix7: past the maps, where they fade out, MetaLODS' far shadows, m.farSun)
+	float sun = mix(open * m.farSun, sm.x, sm.y);
 	// (under water the light is scattered: shadows there are soft and shallow, not the hard dark shapes cast on dry land)
 	if (f.water.z > 0.5 && f.flags.x == 0) sun = (0.45 + 0.55 * sun) * (0.3 + 0.7 * smoothstep(0.0, 0.6, sky));
 	else sun *= max(smoothstep(0.0, 0.07, sky), oa);

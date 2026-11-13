@@ -22,7 +22,18 @@ final class MetaNative {
 	private static final MethodHandle DRAW = fn("mml_draw", JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_LONG,
 		JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_INT);  // (..., atlas, masked, err, cap)
 
+	private static final MethodHandle HEIGHTMAP = fn("mco_im_heightmap", null, JAVA_LONG, JAVA_LONG);
+
 	private MetaNative() {
+	}
+
+	/** (fix7) This frame's far-shadow height map for the deferred lighting (mcown.m): buffer and 48 bytes of ImHeightP; 0, 0 off. */
+	static void heightmap(long buffer, long params) {
+		try {
+			HEIGHTMAP.invokeExact(buffer, params);
+		} catch (Throwable t) {
+			throw rethrow(t);
+		}
 	}
 
 	private static MethodHandle fn(String name, MemoryLayout result, MemoryLayout... args) {

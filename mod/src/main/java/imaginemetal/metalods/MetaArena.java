@@ -16,6 +16,15 @@ final class MetaArena {
 	final int pages;
 	final long quadBuf, infoBuf, modelBuf, biomeBuf;
 	final long quads, infos;
+	/**
+	 * (fix7, far shadows) The land's height around the world, for the deferred lighting's march toward the sun past the shadow
+	 * maps (terrain.metal im_defer_fs): HM x HM uints, a texel 16 x 16 blocks, wrapping (texel tx at tx mod HM). A texel: its
+	 * region (floor(tx / HM) & 1023 | (floor(tz / HM) & 1023) << 10) at bits 12-31, the top's height above the world's bottom
+	 * + 1 at bits 0-11 (0: nothing known). heightLevel: the level that wrote it (a finer one wins), CPU side only.
+	 */
+	static final int HM = 1024, HM_SHIFT = 4;
+	final long heightBuf, heights;
+	private final byte[] heightLevel = new byte[HM * HM];
 	final long[] visBuf = new long[RING], vis = new long[RING];
 	final long frame = MemoryUtil.nmemCalloc(1, 256), mask = MemoryUtil.nmemCalloc(1, MASK_BYTES);
 	private final int[] free;
@@ -28,6 +37,10 @@ final class MetaArena {
 		this.infoBuf = MetaNative.buffer(enc, (long) pages * INFO_BYTES);
 		this.modelBuf = MetaNative.buffer(enc, (long) MetaPalette.MAX_BLOCKS * MetaPalette.MODEL_BYTES);
 		this.biomeBuf = MetaNative.buffer(enc, (long) MetaPalette.MAX_BIOMES * MetaPalette.BIOME_BYTES);
+		this.heightBuf = MetaNative.buffer(enc, (long) HM * HM * 4);
+		this.heights = MetaNative.contents(this.heightBuf);
+		MemoryUtil.memSet(this.heights, 0, (long) HM * HM * 4);
+		java.util.Arrays.fill(this.heightLevel, (byte) 127);
 		this.quads = MetaNative.contents(this.quadBuf);
 		this.infos = MetaNative.contents(this.infoBuf);
 		MemoryUtil.memSet(this.infos, 0, (long) pages * INFO_BYTES);
@@ -91,7 +104,40 @@ final class MetaArena {
 		MemoryUtil.memPutInt(h + 12, (level & 15) | (face & 7) << 4 | (count & 511) << 8);
 	}
 
+	/**
+	 * A meshed column's tops into the height map (any thread: a texel's int is written whole; a race between two columns over
+	 * one texel only picks either's height). ox, oz: its low corner in blocks; tops: MetaMesher.tops(); minY: the world's bottom.
+	 */
+	void heights(int ox, int oz, int level, int[] tops, int minY) {
+		int s = 1 << level, n = MetaMesher.N;
+		for (int z = 0; z < n; z++) {
+			for (int x = 0; x < n; x++) {
+				int t = tops[x + z * n];
+				int top = t < 0 ? 0 : Math.min(4094, (t + 1) << level);
+				int wx = ox + (x << level), wz = oz + (z << level);
+				int tx0 = wx >> HM_SHIFT, tz0 = wz >> HM_SHIFT, tx1 = (wx + s - 1) >> HM_SHIFT, tz1 = (wz + s - 1) >> HM_SHIFT;
+				for (int tz = tz0; tz <= tz1; tz++) for (int tx = tx0; tx <= tx1; tx++) this.height(tx, tz, top, level);
+			}
+		}
+	}
+
+	private void height(int tx, int tz, int top, int level) {
+		int i = Math.floorMod(tz, HM) * HM + Math.floorMod(tx, HM);
+		int tag = (Math.floorDiv(tx, HM) & 1023) | (Math.floorDiv(tz, HM) & 1023) << 10;
+		long a = this.heights + 4L * i;
+		int old = MemoryUtil.memGetInt(a);
+		int value = tag << 12 | (top + 1);
+		if (old == 0 || old >>> 12 != tag || level < this.heightLevel[i]) {
+			MemoryUtil.memPutInt(a, value);
+			this.heightLevel[i] = (byte) level;
+		} else if (level == this.heightLevel[i] && (top + 1) > (old & 4095)) {
+			MemoryUtil.memPutInt(a, value);  // (the same level: the highest of what falls in the texel)
+		}
+	}
+
 	void free() {
+		MetaNative.heightmap(0, 0);
+		MetaNative.release(this.heightBuf);
 		MetaNative.release(this.quadBuf);
 		MetaNative.release(this.infoBuf);
 		for (long b : this.visBuf) MetaNative.release(b);

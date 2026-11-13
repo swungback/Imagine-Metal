@@ -39,6 +39,8 @@ public final class MetaLodsScreen extends OptionsSubScreen {
 		this.list.addSmall(java.util.List.of(slider("Far fog", 0f, 2f, 0.05f, MetaSettings.farFog, v -> MetaSettings.farFog = v,
 			v -> v <= 0f ? "Off" : String.format(java.util.Locale.ROOT, "%.2f", v),
 			"Distance haze, as with Distant Horizons and Gael's: land fades into the horizon's colour with distance, more in valleys and low land, less on high ground, so far ridges read as distance, not as blocks. 0 off, 1 the default, 2 thick.")));
+		this.list.addBig(toggle("Far shadows", MetaSettings.farShadows, v -> MetaSettings.farShadows = v,
+			"Past the shadow maps (your shadow distance), hills, mountains and forests shade the land behind them from the sun, as on Distant Horizons with Gael's. Off: the far land is lit everywhere."));
 		this.list.addSmall(toggle("Progress on screen", MetaSettings.progress, v -> MetaSettings.progress = v,
 			"While LODs are being made: chunks ready, chunks still to make and chunks per second, top left. Gone once everything in view is made; back only when a lot is missing (a teleport, joining)."),
 			Button.builder(Component.literal("Status: " + MetaLods.status()), b -> b.setMessage(Component.literal("Status: " + MetaLods.status())))

@@ -2667,7 +2667,41 @@ vertex ImDeferOut im_defer_vs(uint vid [[vertex_id]]) {
 	return o;
 }
 
+// (fix7) MetaLODS' far shadows: the land's height map (MetaArena.heights, 1024 x 1024 texels of 16 x 16 blocks, wrapping) and
+// where the camera is in whole blocks (mcown.m binds both, at 27 and 28, when MetaLODS draws; cam.w 0: off)
+struct ImHeightP {
+	int4 cam;        // xyz the camera's block, w 1 = on
+	float4 frac;     // xyz the camera's position within it, w the world's bottom (y)
+	float4 range;    // x from how far away (blocks) the march is made, yzw unused
+};
+
+// How much of the sun reaches world point p (camera-relative) by the height map: a march toward the light from 20 blocks out, steps
+// growing by 1.3 to about 2 km; a texel higher than the ray shades it, softly by how much (the map's 16-block texels make a tree's
+// top the whole texel's height, so nothing within the first texel or so is counted against it)
+static float imFarSun(float3 p, float3 n, float3 L, constant ImHeightP &hp, device const uint *hm) {
+	if (hp.cam.w == 0 || L.y < 0.01) return 1.0;
+	float dist = length(p);
+	if (dist < hp.range.x) return 1.0;
+	float3 o = p + hp.frac.xyz + n * 0.5;  // (relative to the camera's block: exact in floats out here)
+	float shade = 0.0, t = 20.0;
+	for (int i = 0; i < 18; i++, t *= 1.3) {
+		float3 q = o + L * t;
+		int2 b = hp.cam.xz + int2(floor(q.xz));
+		int2 tx = b >> 4;
+		uint v = hm[(uint(tx.y) & 1023u) * 1024u + (uint(tx.x) & 1023u)];
+		uint tag = (uint(tx.x >> 10) & 1023u) | (uint(tx.y >> 10) & 1023u) << 10;
+		if (v == 0u || (v >> 12) != tag) continue;
+		float top = float(v & 4095u) - 1.0 + hp.frac.w;
+		float y = float(hp.cam.y) + q.y;
+		shade = max(shade, saturate((top - y - 1.0) / (2.0 + 0.04 * t)));
+		if (shade >= 1.0) break;
+	}
+	// (eased in from the march's start, so where the shadow maps fade out the change is gradual)
+	return 1.0 - shade * smoothstep(hp.range.x, hp.range.x + 48.0, dist);
+}
+
 fragment float4 im_defer_fs(ImDeferOut in [[stage_in]], float4 g1 [[color(1)]], float4 g2 [[color(2)]], float4 g3 [[color(3)]], float4 g4 [[color(4)]],
+	constant ImHeightP &hp [[buffer(27)]], device const uint *hm [[buffer(28)]],
 	constant Fog &fog [[buffer(24)]], constant ImDeferParams &dp [[buffer(29)]], constant ImFrame &imf [[buffer(30)]],
 	depth2d_array<float> imShadowMap [[texture(20)]], sampler imShadowCmp [[sampler(13)]],
 	texture3d<float> imLightVol [[texture(21)]], sampler imLightSampler [[sampler(12)]], texture3d<float> imSeeds [[texture(24)]],
@@ -2699,6 +2733,7 @@ fragment float4 im_defer_fs(ImDeferOut in [[stage_in]], float4 g1 [[color(1)]], 
 	// the texture's own texel on a full block's face; the material mixed in so two materials' patterns differ)
 	float3 wq = fract(p + imf.world.xyz - m.n * 0.01) * 16.0;
 	m.texel = floor(axis < 2u ? wq.yz : axis < 4u ? wq.xz : wq.xy) + float2(mat * 16u, mat * 48u);
+	m.farSun = imFarSun(p, m.n, imf.lightDir.xyz, hp, hm);
 	// (MetaLODS water's top, material 0x80 (metalods.metal ml_fs): shaded as the real water's surface (kind 1: its waves, sun glint,
 	// the sky's reflection by the angle), then laid over deep water's seabed, which the water has absorbed to nearly black, by the
 	// share the real water takes there (own_fs_tr: at least 0.72 deep, opaque at a grazing angle). It was lit as cyan ground)

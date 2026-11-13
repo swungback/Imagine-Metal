@@ -44,6 +44,8 @@ public final class MetaSettings {
 	 * far LODs read as distance, not as blocks. 0 off, 1 the default, 2 thick.
 	 */
 	public static volatile float farFog = 1f;
+	/** (fix7) Far shadows: past the shadow maps, hills and forests shade the land behind them from the sun (a height map march). */
+	public static volatile boolean farShadows = true;
 
 	private static boolean loaded;
 
@@ -79,6 +81,7 @@ public final class MetaSettings {
 		stats = bool(p, "stats", stats);
 		progress = bool(p, "progress", progress);
 		farFog = Math.clamp(number(p, "farFog", farFog), 0f, 2f);
+		farShadows = bool(p, "farShadows", farShadows);
 	}
 
 	public static synchronized void save() {
@@ -103,7 +106,9 @@ public final class MetaSettings {
 			+ "# While LODs are being made: chunks ready, chunks left and the speed on screen (gone when done).\n"
 			+ "progress=" + progress + "\n"
 			+ "# Far fog (0 off, 1 the default, 2 thick): distance haze, land fades into the horizon's colour with distance, more low down.\n"
-			+ "farFog=" + String.format(java.util.Locale.ROOT, "%.2f", farFog) + "\n";
+			+ "farFog=" + String.format(java.util.Locale.ROOT, "%.2f", farFog) + "\n"
+			+ "# Far shadows: past the shadow maps, hills and forests shade the land behind them from the sun.\n"
+			+ "farShadows=" + farShadows + "\n";
 		try {
 			Files.createDirectories(f.getParent());
 			try (Writer w = Files.newBufferedWriter(f, StandardCharsets.UTF_8)) {

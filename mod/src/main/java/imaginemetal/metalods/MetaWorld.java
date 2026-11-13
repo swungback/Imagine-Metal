@@ -206,6 +206,7 @@ final class MetaWorld {
 		}
 		long t1 = System.nanoTime();
 		MetaMesher.Mesh m = mesher.mesh(center, edges);
+		this.arena.heights(c.cx * (32 << c.level), c.cz * (32 << c.level), c.level, mesher.tops(), this.minY);  // (fix7: far shadows)
 		this.meshNanos.addAndGet(System.nanoTime() - t1);
 		this.meshed.incrementAndGet();
 		long[] gk = generated.isEmpty() ? null : generated.stream().mapToLong(Long::longValue).toArray();
@@ -705,6 +706,21 @@ final class MetaWorld {
 		MemoryUtil.memPutFloat(fr + 132, this.reach);
 		MemoryUtil.memPutFloat(fr + 136, MetaSettings.showLevels ? 1f : 0f);
 		MemoryUtil.memPutFloat(fr + 140, seaLevel());  // (ml_vs: water tops in a voxel holding the sea's surface go to it)
+		// (fix7: the far shadows' ImHeightP at frame + 160: the camera's block and on, its fraction and the world's bottom, the
+		// distance they start at; handed to the deferred lighting by MetaLods.drawInG)
+		long hp = fr + 160;
+		MemoryUtil.memPutInt(hp, bx);
+		MemoryUtil.memPutInt(hp + 4, by);
+		MemoryUtil.memPutInt(hp + 8, bz);
+		MemoryUtil.memPutInt(hp + 12, MetaSettings.farShadows ? 1 : 0);
+		MemoryUtil.memPutFloat(hp + 16, (float) (camX - bx));
+		MemoryUtil.memPutFloat(hp + 20, (float) (camY - by));
+		MemoryUtil.memPutFloat(hp + 24, (float) (camZ - bz));
+		MemoryUtil.memPutFloat(hp + 28, (float) this.minY);
+		MemoryUtil.memPutFloat(hp + 32, Math.max(96f, imaginemetal.Settings.shadowRange * 0.7f));  // (inside that the shadow maps cover it)
+		MemoryUtil.memPutFloat(hp + 36, 0f);
+		MemoryUtil.memPutFloat(hp + 40, 0f);
+		MemoryUtil.memPutFloat(hp + 44, 0f);
 		for (int i = 0; i < this.maskSize * this.maskWords; i++) MemoryUtil.memPutInt(this.arena.mask + 4L * i, this.maskBits[i]);
 		this.housekeeping();
 		return n;
