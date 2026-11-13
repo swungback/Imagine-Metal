@@ -517,6 +517,11 @@ final class MetaWorld {
 				this.maskSize = w.size;
 				this.maskWords = w.words;
 				this.maskFromOwn = true;
+				// (and every loaded chunk 2 or more inside the render distance: a chunk with a section the real terrain never
+				// compiles (deep air, a cave) never counts as drawn whole, so its LOD stayed in it for good and showed through:
+				// the LOD's filled-in stone in ravines and caves, LOD trees inside the near land (Jack's 13.57.16, 13.58.58,
+				// 14.00.42, 14.06.06). The strip at the edge stays on the drawn-whole rule)
+				this.addLoaded(camX, camZ, Math.max(0, rd - 2));
 				return;
 			}
 		}
@@ -540,6 +545,32 @@ final class MetaWorld {
 				if (dx * dx + dz * dz >= max2) continue;
 				if (source.getChunk(this.maskX + mx, this.maskZ + mz, false) == null) continue;
 				int bit = mz * this.maskWords * 32 + mx;
+				this.maskBits[bit >> 5] |= 1 << (bit & 31);
+			}
+		}
+	}
+
+	/** Sets the mask's bit for every loaded chunk within `r` chunks (circle) of the camera, inside the mask's window. */
+	private void addLoaded(double camX, double camZ, int r) {
+		if (r <= 0) return;
+		int ccx = (int) Math.floor(camX) >> 4, ccz = (int) Math.floor(camZ) >> 4;
+		double max = r * 16.0, max2 = max * max;
+		var source = this.level.getChunkSource();
+		for (int cz = ccz - r; cz <= ccz + r; cz++) {
+			int mz = cz - this.maskZ;
+			if (mz < 0 || mz >= this.maskSize) continue;
+			int oz = cz * 16;
+			double dz = Math.max(0, Math.max(oz - camZ, camZ - (oz + 16)));
+			if (dz >= max) continue;
+			for (int cx = ccx - r; cx <= ccx + r; cx++) {
+				int mx = cx - this.maskX;
+				if (mx < 0 || mx >= this.maskSize) continue;
+				int ox = cx * 16;
+				double dx = Math.max(0, Math.max(ox - camX, camX - (ox + 16)));
+				if (dx * dx + dz * dz >= max2) continue;
+				int bit = mz * this.maskWords * 32 + mx;
+				if ((this.maskBits[bit >> 5] >>> (bit & 31) & 1) != 0) continue;
+				if (source.getChunk(cx, cz, false) == null) continue;
 				this.maskBits[bit >> 5] |= 1 << (bit & 31);
 			}
 		}

@@ -49,18 +49,26 @@ final class MetaArena {
 		return this.freeCount == 0 ? -1 : this.free[--this.freeCount];
 	}
 
-	/** Pages to give back once frame `frame` can't be in flight any more. */
+	/** The arena's own frame count (reclaim): a world's frame count starts over at 0 when another world opens. */
+	private long tick;
+
+	/**
+	 * Pages to give back once the current frame can't be in flight any more. (By the arena's own count: with the world's, a
+	 * world closed at frame 90,000 held its pages until the next world reached frame 90,000, so opening another world kept
+	 * nearly all of the old one's pages: Jack's log 2026-11-13 14:05, 50,000 -> 11,000 pages free in a minute.)
+	 */
 	void release(int[] pages, long frame) {
 		if (pages == null || pages.length == 0) return;
 		long[] e = new long[pages.length + 1];
-		e[0] = frame;
+		e[0] = this.tick;
 		for (int i = 0; i < pages.length; i++) e[i + 1] = pages[i];
 		this.held.add(e);
 	}
 
 	/** Pages held long enough go back to the free list (at the top of each frame). */
 	void reclaim(long frame) {
-		while (!this.held.isEmpty() && frame - this.held.peekFirst()[0] >= RING + 1) {
+		long now = ++this.tick;
+		while (!this.held.isEmpty() && now - this.held.peekFirst()[0] >= RING + 1) {
 			long[] e = this.held.pollFirst();
 			for (int i = 1; i < e.length; i++) {
 				int p = (int) e[i];

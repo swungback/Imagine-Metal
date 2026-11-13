@@ -161,6 +161,10 @@ fragment MLGOut ml_fs(MLOut in [[stage_in]], constant MLFrame &f [[buffer(0)]], 
 	uint axis = in.face;  // (the G-buffer's axis numbering is ours: +x -x +y -y +z -z)
 	float3 n = float3(axis == 0u ? 1.0 : axis == 1u ? -1.0 : 0.0, axis == 2u ? 1.0 : axis == 3u ? -1.0 : 0.0, axis == 4u ? 1.0 : axis == 5u ? -1.0 : 0.0);
 	float2 lq = float2(float((in.light >> 4) & 15u), float(in.light & 15u)) / 15.0;
+	// (a floor on the sky light: real chunks' air under a thick canopy has sky light 0, and the coarser levels' merged leaves
+	// turn faces toward it, which the lighting drew pitch black (Jack's 15.42.23 "whats the black"). Caves are filled in, so
+	// what is left under 10 is canopy and overhang shade, which from afar reads as shade, not as a cave)
+	lq.y = max(lq.y, 10.0 / 15.0);
 	MLGOut o;
 	o.g1 = float4(saturate(color), float(axis << 1) / 255.0);
 	o.g2 = float4(saturate(tex.rgb), float(mat) / 255.0);
