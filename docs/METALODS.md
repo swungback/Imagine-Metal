@@ -42,7 +42,8 @@ supplies the seed generator (mcopt.metal.lod.LodNoise / LodForest / LodTrees / L
 - No LODs in dimensions with a ceiling (the Nether). Generation only in singleplayer (a server's seed isn't known).
 - Generated 3D is from the terrain shape before caves (sloped_cheese): no caves, and islands get stone inside, the surface
   block on top. Whether Terralith's skylands are in that density is unverified.
-- LODs cast no shadows. Small cracks can show where two levels meet. Grass, flowers, torches are left out (no collision).
+- LODs cast no shadows. Where two levels meet, the edge cells' top 2 voxels get skirt faces so no slit opens; small steps
+  can still show. Grass, flowers, torches are left out (no collision).
 - Water is an opaque surface with a sheen (material POLISHED), not see-through.
 - Nothing was run: CI compiles the shader, the native code and the jar; the data path (runs, mips, meshing, file round trip)
   was tested offline against the 26.3 jar (`/home/claude/test`, not in the repo).
