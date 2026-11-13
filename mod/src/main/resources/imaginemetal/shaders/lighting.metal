@@ -448,7 +448,10 @@ static float imEmission(uint cls, float3 tex) {
 		// ores: every pixel with clear colour against the grey stone around it (the whole speck, its coloured edge too; iron's pale
 		// specks count; a speck's near-grey highlights and coal's black specks don't), at a faint glow that keeps the texture's own
 		// light and dark
-		case IM_MAT_ORE: return 1.1 * smoothstep(0.08, 0.2, sat) * (0.5 + 0.5 * hi);
+		// (fix7: by colour against the texel's own brightness, not by the plain spread of its channels: iron's darker brown
+		// texels (about 100, 80, 70: a spread of 0.12) fell under the old 0.08-0.2 ramp, and only the light half of each speck
+		// glowed, Jack's 15.46.12 "only some of the iron is bright". The stone stays grey, coal's black specks still don't glow)
+		case IM_MAT_ORE: return 1.1 * smoothstep(0.1, 0.22, sat / max(hi, 0.05)) * (0.5 + 0.5 * hi);
 		// nether ores sit in red netherrack: their specks are told apart by brightness instead
 		case IM_MAT_NETHER_ORE: return 1.2 * smoothstep(0.5, 0.75, l);
 		// faint lights (sculk sensors and catalysts, magma, glow lichen): only their bright, coloured parts glow, as a flame's

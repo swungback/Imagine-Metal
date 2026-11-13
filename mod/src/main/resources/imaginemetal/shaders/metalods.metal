@@ -31,8 +31,9 @@ struct Model {
 	float4 sideUv;
 	uint topAvg, sideAvg;  // their average colours (0xRRGGBB, as stored)
 	uint flags;        // bits 0-2 the top's tint, 3-5 the side's (1 grass, 2 foliage, 3 water, 4 dry foliage, 5 constant), 8-15
-	                   // Imagine Metal's material byte, 16 leaves, 17 water
+	                   // Imagine Metal's material byte, 16 leaves, 17 water, 18-20 the side overlay's tint
 	uint fixedTint;    // a constant tint (0xRRGGBB)
+	float4 overUv;     // (fix7) the side's tinted overlay (the grass block's fringe; all 0: none)
 };
 
 struct MLOut {
@@ -170,6 +171,19 @@ fragment MLGOut ml_fs(MLOut in [[stage_in]], constant MLFrame &f [[buffer(0)]], 
 	uint4 bt = biomes[in.biome];
 	uint tc = kind == 1u ? bt.x : kind == 2u ? bt.y : kind == 3u ? bt.z : kind == 4u ? bt.w : kind == 5u ? m.fixedTint : 0xFFFFFFu;
 	float3 color = tex.rgb * mlRgb(tc);
+	if (!flat && m.overUv.z > m.overUv.x) {
+		// (fix7: the grass block's side, its tinted overlay laid on as the game does: the strip along its top took the side
+		// texture's own pale default green, Jack's 13.55.21 "grass color on sides doesnt match")
+		uint ok = (m.flags >> 18) & 7u;
+		uint otc = ok == 1u ? bt.x : ok == 2u ? bt.y : ok == 3u ? bt.z : ok == 4u ? bt.w : 0xFFFFFFu;
+		float2 t = fract(in.uv);
+		t.y = 1.0 - t.y;
+		float2 ot = (m.overUv.zw - m.overUv.xy) * float2(atlas.get_width(), atlas.get_height());
+		float2 dx = dfdx(in.uv) * ot, dy = dfdy(in.uv) * ot;
+		float olod = 0.5 * log2(max(max(dot(dx, dx), dot(dy, dy)), 1e-8));
+		float4 ov = atlas.sample(smp, mix(m.overUv.xy, m.overUv.zw, t), level(clamp(olod, 0.0, 4.0)));
+		color = mix(color, ov.rgb * mlRgb(otc), ov.a);
+	}
 	// (fix7: ambient occlusion, Jack's "corner darkening" on the far land as DH + Gael have it: each voxel of the quad shaded
 	// between its four corners' values, vanilla's smooth-light steps)
 	if (in.ao != 0xFFu) {

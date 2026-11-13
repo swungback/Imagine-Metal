@@ -330,9 +330,11 @@ public final class MetaGen {
 		ints[2] = l.topTint();
 		ints[3] = l.sideTint();
 		ints[4] = l.constant();
-		float[] f = new float[8];
+		if (ints.length > 5) ints[5] = l.overTint();
+		float[] f = new float[12];
 		System.arraycopy(l.topUv(), 0, f, 0, 4);
 		System.arraycopy(l.sideUv(), 0, f, 4, 4);
+		System.arraycopy(l.overUv(), 0, f, 8, 4);  // (fix7: the side's tinted overlay, MetaLODS)
 		return f;
 	}
 

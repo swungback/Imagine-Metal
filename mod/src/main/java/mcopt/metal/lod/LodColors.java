@@ -44,12 +44,14 @@ final class LodColors {
 	 * model is a plant's crossed quads (grass, ferns, flowers; side is their sprite); profile: per sixteenth of the side
 	 * sprite's width, how high (sixteenths) its opaque texels reach, a byte each, four to an int.
 	 */
-	record Look(int top, int side, int topTint, int sideTint, int constant, float[] topUv, float[] sideUv, boolean cross, int[] profile) {
+	/** overUv / overTint: a side drawn twice, the second a tinted overlay (the grass block's green fringe); all 0 / TINT_NONE: none. */
+	record Look(int top, int side, int topTint, int sideTint, int constant, float[] topUv, float[] sideUv, boolean cross, int[] profile, float[] overUv,
+		int overTint) {
 	}
 
 	private static final ConcurrentHashMap<BlockState, Look> LOOKS = new ConcurrentHashMap<>();
 	private static final ConcurrentHashMap<Identifier, Integer> TEXTURES = new ConcurrentHashMap<>();
-	private static final Look FALLBACK = new Look(0x7F7F7F, 0x6F6F6F, TINT_NONE, TINT_NONE, 0, new float[4], new float[4], false, new int[4]);
+	private static final Look FALLBACK = new Look(0x7F7F7F, 0x6F6F6F, TINT_NONE, TINT_NONE, 0, new float[4], new float[4], false, new int[4], new float[4], TINT_NONE);
 	private static final ConcurrentHashMap<Identifier, int[]> PROFILES = new ConcurrentHashMap<>();
 
 	private LodColors() {
@@ -130,8 +132,30 @@ final class LodColors {
 		}
 		// The grass block's side is dirt under a tinted overlay: from afar mostly dirt, so it stays untinted.
 		int[] profile = diagonal != null ? profile(sideSprite) : new int[4];
+		// (fix7) a side with a second, tinted quad over it (the grass block's overlay): MetaLODS lays it on, tinted, as the game does
+		float[] overUv = new float[4];
+		int overTint = TINT_NONE;
+		if (diagonal == null && side != null && sideTint[0] == TINT_NONE) {
+			BakedQuad over = overlay(parts, side.direction(), side);
+			if (over != null) {
+				int[] ot = tintOf(state, over);
+				if (ot[0] != TINT_NONE && ot[0] != TINT_CONSTANT) {
+					overUv = uv(over.materialInfo().sprite());
+					overTint = ot[0];
+				}
+			}
+		}
 		return new Look(topRgb, sideRgb, topTint[0], sideTint[0], topTint[0] == TINT_CONSTANT ? topTint[1] : sideTint[1], uv(topSprite), uv(sideSprite),
-			diagonal != null, profile);
+			diagonal != null, profile, overUv, overTint);
+	}
+
+	/** Another quad facing d besides first, tinted (an overlay drawn over the side). */
+	private static @Nullable BakedQuad overlay(List<BlockStateModelPart> parts, Direction d, BakedQuad first) {
+		for (BlockStateModelPart p : parts) {
+			for (BakedQuad q : p.getQuads(d)) if (q != first && q.materialInfo().tintIndex() >= 0) return q;
+			for (BakedQuad q : p.getQuads(null)) if (q != first && q.direction() == d && q.materialInfo().tintIndex() >= 0) return q;
+		}
+		return null;
 	}
 
 	private static @Nullable BakedQuad diagonal(List<BlockStateModelPart> parts) {

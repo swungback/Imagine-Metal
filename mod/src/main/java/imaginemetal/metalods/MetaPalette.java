@@ -30,7 +30,7 @@ import org.lwjgl.system.MemoryUtil;
  */
 public final class MetaPalette {
 	public static final int MAX_BLOCKS = 65536, MAX_BIOMES = 256;
-	public static final int MODEL_BYTES = 48, BIOME_BYTES = 16;
+	public static final int MODEL_BYTES = 64, BIOME_BYTES = 16;
 
 	private static final ConcurrentHashMap<BlockState, Integer> IDS = new ConcurrentHashMap<>();
 	private static final List<BlockState> STATES = new ArrayList<>();
@@ -173,13 +173,13 @@ public final class MetaPalette {
 
 	private static void writeModel(int id, BlockState s) {
 		long at = models + (long) id * MODEL_BYTES;
-		int[] ints = new int[5];
+		int[] ints = new int[6];
 		float[] uv;
 		try {
 			uv = MetaGen.look(s, ints);
 		} catch (Throwable t) {
-			uv = new float[8];
-			ints = new int[] {0x7F7F7F, 0x6F6F6F, 0, 0, 0};
+			uv = new float[12];
+			ints = new int[] {0x7F7F7F, 0x6F6F6F, 0, 0, 0, 0};
 		}
 		int kind = KINDS[id];
 		int mat;
@@ -190,8 +190,9 @@ public final class MetaPalette {
 		}
 		if (kind == Voxel.KIND_WATER) mat = 9;  // (POLISHED: the far sea gets a sheen)
 		int flags = (ints[2] & 7) | (ints[3] & 7) << 3 | (mat & 0xFF) << 8 | (kind == Voxel.KIND_LEAVES ? 1 << 16 : 0)
-			| (kind == Voxel.KIND_WATER ? 1 << 17 : 0);
+			| (kind == Voxel.KIND_WATER ? 1 << 17 : 0) | (ints[5] & 7) << 18;
 		for (int i = 0; i < 8; i++) MemoryUtil.memPutFloat(at + i * 4L, uv[i]);
+		for (int i = 0; i < 4; i++) MemoryUtil.memPutFloat(at + 48 + i * 4L, uv.length >= 12 ? uv[8 + i] : 0f);  // (fix7: the side's overlay)
 		MemoryUtil.memPutInt(at + 32, ints[0]);
 		MemoryUtil.memPutInt(at + 36, ints[1]);
 		MemoryUtil.memPutInt(at + 40, flags);
