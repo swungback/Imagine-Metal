@@ -1,6 +1,53 @@
-# Imagine Metal: handoff (2026-11-13, ~11:55)
+# Imagine Metal: handoff (2026-11-13, ~15:45)
 
 Where things stand, for picking the work up in a new conversation.
+
+## START HERE: 2026-11-13 15:40, Jack's questions and THE PLAN
+Jack at 15:34: "does the handoff include the fps and eye flickering? what about the shading on lods? why dont u do the lods like
+voxy + seedgen? that looks way better and runs well. there are also some visual bugs in the latest screenshots."
+
+### Not done yet in that chat (the link to his Mac was down at 15:34)
+- His newest screenshots (taken after 11.30.23, in the session with the "fast1" jar) and that session's log were NOT read.
+  First thing in the new chat: `ls -t screenshots/*.png | head` and read only the ones newer than 2026-11-13_11.30.23, plus
+  `logs/latest.log` (and the newest `logs/2026-11-13-*.log.gz` if he restarted): `[MetaLODS] generation: ...` (chunks/s vs his
+  5,000), `stats`, `stopped:`, his `[CHAT] <herningstang>` notes. List every visual bug he shows, with its cause, before fixing.
+
+### Answers given (keep them consistent)
+- fps dip and dragon eyes: yes, both are in this file (section "Jack's other notes in that log" below) and the project doc.
+- Shading on the LODs today: they are drawn into the deferred G-buffer, so they get the sun/sky lighting, haze, fog and TAA
+  like the real terrain, with block textures (fading to the sprite's average colour far away) and biome tints. Missing:
+  they cast no shadows; past the shadow range (256 blocks) nothing shadows them either; no ambient occlusion (flat faces, no
+  corner darkening); no generated normals; water is opaque.
+- Why not Voxy + SeedGen themselves: upstream Voxy needs OpenGL 4.6 and macOS stops at 4.1, and his game renders through
+  mcopt's Metal backend, so Voxy can't run in his instance. (Third-party Mac ports exist: a Metal fork for 1.21.11 and a
+  Zink/KosmicKrisp route, neither for 26.3 on our backend.) Both are All Rights Reserved: methods only, nothing copied.
+  MetaLODS already IS the Voxy method (voxels in runs, mips, greedy faces, block textures) and the SeedGen method (terrain from
+  the seed without chunks). The difference he sees is in what our generator and shader leave out, see the plan.
+
+### THE PLAN (in this order; ask Jack where marked)
+1. Read the fast1 session (above). Fix the visual bugs he shows first (bugs before features). Report the measured chunks/s.
+2. Ask Jack for one or two Voxy + SeedGen reference screenshots (or a video frame) of what "looks way better" means to him,
+   saved in `screenshots/reference/`. Don't guess the look (lesson from the grass "ghost copies").
+3. The LODs' look, closer to Voxy + SeedGen (each item: what it costs, Jack picks):
+   a. Ambient occlusion on LOD faces: per-corner darkening from the 8 neighbours when meshing (stored in the quad, nearly free
+      on the GPU). Probably the biggest single gain: without it far land reads flat.
+   b. LODs cast shadows: the LOD pages drawn into the far shadow cascade within its range, and past it a cheap sun
+      "horizon" test against a coarse LOD heightmap. Costs GPU time: measure.
+   c. Generator detail: surface rules as the game's (Terralith's bands, stone on steep slopes, snow lines), real trees on levels
+      0-1 (impostors only past that), cave mouths and aquifer lakes from the final density only where it shows (level 0
+      near the surface band). Trades some of the speed gained today: measure against the 5,000 chunks/s target.
+   d. Translucent far water with the shader's water colour (today opaque with a sheen).
+   e. The hand-over: real sections fading in from the fog colour over the LODs (OwnSeam.fadeMs only acts for mcopt's own far
+      terrain): make them appear instantly while MetaLODS draws.
+4. Speed, if step 1 shows < 5,000 chunks/s: skip intermediate levels where a finer one is the target (~22 % fewer tiles),
+   band-limit the 3D noise, a QoS setting for the workers.
+5. fps dip in the jungle (10.49.42, 28-29 fps under a canopy): leaves' G-buffer cost. The "C2 performance" ideas (leaves solid
+   past ~32 blocks, leaf pre-pass off by default) were never agreed: ask Jack before building.
+6. Dragon eyes flickering (11.01.17): the eyes render layer gets no TAA sub-pixel offset (EntityShade skips that pipeline). The
+   open B3 item: jitter for the skipped pipelines (eyes, text, beams). Small, can go with step 1's build.
+7. Then the older open items below (shadow pop-in case 2, MetalFX on its branch, etc.).
+- MetaLODS stays on branch `metalods` until Jack is happy with it; then merge to main.
+
 
 ## START HERE: 2026-11-13 11:50, MetaLODS "fast1" DEPLOYED (branch `metalods` 917ca15, CI run 43411728436, NOT on main)
 - mods = jar sha1 57c2807b... (copy: `instances/Imagine metal/imagine-metal-metalods-fast1.jar`). Before it: `imagine-metal-metalods-fix1.jar`
