@@ -17,6 +17,19 @@ Before it fast1 (57c2807b..., copy kept). Not seen in game yet. Contains, in ord
   13.58.58, 14.00.42 white quad in a cave, 14.06.06 "this after rejoining"); (c) sky light floor 10/15 in ml_fs (lq.y): real
   chunks' air under thick canopies is sky 0 and the mips turn leaf faces toward it: pitch black (15.41.48, 15.42.11, 15.42.23).
 
+### Jack's answers 16:38 (after fix2 was deployed)
+- "color change": the LOD part's colouring/shading differs visibly from the near land (13.56.49). Causes: LODs have no ambient
+  occlusion, no texture normals, textures fade to the average colour past mip 2.5-4.5, no shadows. Next work: AO + keep textures
+  further + match the near land's shading. Ask for his eye on it after.
+- Mist (13.56.08/13): a mod's. Done.
+- Under water: he can't tell where the water's TOP is from below (the surface isn't visible as a surface). Not the fog strength.
+- "huge grass" (14.06.06, after rejoining another world): REAL terrain, not LODs: plant quads stretched over several blocks. Same
+  look as the known stale-section problem after a level change (exactPos indices read against a renewed table; C2's level guard
+  didn't catch this one). NOT fixed. Next: reproduce by leaving and joining a world; check "level guard" lines and the own table.
+- "water way under where the water actually is" (13.58.58 pale water plane down in a ravine, 14.05.33 sheet over land after
+  joining New World (8)): LOD water at sea level drawn inside the near land (chunks not counted as drawn whole). fix2's mask (rd - 2
+  loaded chunks) should hide it; unverified.
+
 ### Speed, measured (fast1, logs 2026-11-13-4 and latest)
 - First ~25 s cold: the first tiles took 1-7 s each (surface stage; JIT + the server generating spawn at the same time). Then the
   whole 128-chunk view (~51,000 chunks of area) was done ~40-65 s after join; ~700 tiles of which L4/L5 were stand-ins only.
