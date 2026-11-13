@@ -2504,6 +2504,14 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 				// night, that the fog only half turned teal)
 				float3 tirC = (uint(imf.env.w + 0.5) & 16u) != 0u ? imWaterFog(fog.FogColor.rgb, length(in.imPos), imf).rgb
 					: pow(imPresent(wfc0, imf), 1.0 / 2.2);
+				// (fix4, env.w bit 64: the surface reads as a surface from below: lit by the day through it, so brighter than the water's
+				// fog it would otherwise melt into (Jack: "cant really tell im underwater / when the water turns to air", 14.01.45: the
+				// surface was exactly the fog's colour), and rippling with the waves and the water texture)
+				if ((uint(imf.env.w + 0.5) & 64u) != 0u) {
+					float rl = dot(texel.rgb, float3(0.299, 0.587, 0.114));
+					float rip = saturate(0.5 + (rl - 0.55) * 1.6 + length(fnT.xz) * 4.0);
+					tirC *= 1.35 + 0.7 * rip;
+				}
 				color.rgb = mix(color.rgb, tirC, tir);
 				color.a = mix(color.a, 1.0, tir);
 			}

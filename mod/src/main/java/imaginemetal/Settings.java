@@ -163,6 +163,11 @@ public final class Settings {
 	 * too small: "can't see out except a circle right above me"). -Dimaginemetal.waterWideWindow=false.
 	 */
 	public static volatile boolean waterWideWindow = Engine.flag("imaginemetal.waterWideWindow", true);
+	/**
+	 * (fix4) Under water, the surface seen from below brighter than the water's fog and rippling, so it reads as the surface (it
+	 * was the fog's own colour and vanished into it). -Dimaginemetal.waterUnderSurface=false.
+	 */
+	public static volatile boolean waterUnderSurface = Engine.flag("imaginemetal.waterUnderSurface", true);
 	/** (benchmark only) Water and glass reflections traced through the screen; false: the sky alone. */
 	public static volatile boolean waterTrace = true;
 	public static volatile boolean ssao = Engine.flag("imaginemetal.ssao", true);

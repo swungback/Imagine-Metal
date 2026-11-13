@@ -72,6 +72,34 @@ final class OwnPosTable {
 		return n;
 	}
 
+	private static long checkLogAt;
+	private static int checkLogs;
+
+	/**
+	 * (fix4) The arena's copy of entries [0, n) against the table: a wrong one is written again and counted in the log. A wrong
+	 * entry moves every vertex that uses it (off-grid coordinates: plants' random offsets), which is what plants stretched over
+	 * several blocks after rejoining a world looked like (Jack's 14.06.06). Returns how many were wrong.
+	 */
+	static int verify(long a, int n, String when) {
+		int bad = 0, first = -1;
+		for (int i = 0; i < n; i++) {
+			float v = MemoryUtil.memGetFloat(a + 4L * i);
+			if (Float.floatToRawIntBits(v) != Float.floatToRawIntBits(VALUES[i])) {
+				if (first < 0) first = i;
+				bad++;
+				MemoryUtil.memPutFloat(a + 4L * i, VALUES[i]);
+			}
+		}
+		long now = System.nanoTime();
+		if (bad > 0 && checkLogs < 40 && now > checkLogAt) {
+			checkLogAt = now + 2_000_000_000L;
+			checkLogs++;
+			System.out.println("[Imagine Metal] exactPos check (" + when + "): " + bad + " of " + n + " table entries in the arena were wrong (first "
+				+ first + "), written again");
+		}
+		return bad;
+	}
+
 	static int size() {
 		return count;
 	}

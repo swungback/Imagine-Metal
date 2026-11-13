@@ -419,6 +419,8 @@ public final class OwnTerrain {
 	static final int RUN_INTS = 6;
 	/** exactPos: table entries already in the arena at posTableArena. */
 	private int posTableSynced;
+	/** (fix4) The frame of the last level reset (disposeAll): the exactPos copy is checked every frame for a while after it. */
+	private long posCheckFrom = Long.MIN_VALUE / 2;
 	private long posTableArena;
 	// (qpos=true|all: every coordinate; =small: only coordinates within 0.001 of a 1/16 step (snow's 0.002 insets, lichen);
 	// =large: only the others (random block offsets, fluid heights))
@@ -1060,6 +1062,7 @@ public final class OwnTerrain {
 		if (this.listCap > 1 << 15) this.growLists(1 << 15);
 		this.runDeferredNow();
 		boolean renewed = this.renewArena();
+		this.posCheckFrom = this.frame;
 		long used, cap, recUsed, recCap;
 		synchronized (this.quadAlloc) {
 			used = this.quadAlloc.used();
@@ -1067,10 +1070,10 @@ public final class OwnTerrain {
 		}
 		recUsed = this.recAlloc.used();
 		recCap = this.recAlloc.capacity();
-		System.out.printf("mcopt-own reset: %d meshes released; arena %.1f -> %.1f of %.0f MB used (was %.0f)" + (renewed ? ", pages renewed" : ", kept") + ", records %d of %d, lists %d, sorted copies %.1f MB, orphans swept so far %d; own Metal buffers %d, %.1f MB%n",
+		System.out.println(String.format(java.util.Locale.ROOT, "mcopt-own reset: %d meshes released; arena %.1f -> %.1f of %.0f MB used (was %.0f)" + (renewed ? ", pages renewed" : ", kept") + ", records %d of %d, lists %d, sorted copies %.1f MB, orphans swept so far %d; own Metal buffers %d, %.1f MB",
 			meshesBefore, usedBefore * (double) ARENA_QUAD / 1048576, used * (double) ARENA_QUAD / 1048576, cap * (double) ARENA_QUAD / 1048576,
 			capBefore * (double) ARENA_QUAD / 1048576, recUsed, recCap, this.listCap, TS_SORTED_BYTES.get() / 1048576.0, this.orphansSwept,
-			OwnNative.liveBuffers(), OwnNative.liveBufferBytes() / 1048576.0);
+			OwnNative.liveBuffers(), OwnNative.liveBufferBytes() / 1048576.0));
 	}
 
 	/**
@@ -1178,6 +1181,10 @@ public final class OwnTerrain {
 				if (this.posTableArena != this.arenaAddress) this.posTableSynced = 0;
 				this.posTableSynced = OwnPosTable.sync(this.arenaAddress, this.posTableSynced);
 				this.posTableArena = this.arenaAddress;
+				// (fix4: every 30 frames, and every frame for the first 600 after a level reset, the arena's copy checked against the
+				// table and mended: the stretched plants after a rejoin; the log says whether it was this)
+				if (this.frame % 30 == 0 || this.frame - this.posCheckFrom < 600)
+					OwnPosTable.verify(this.arenaAddress, this.posTableSynced, this.frame - this.posCheckFrom < 600 ? "after a level reset" : "routine");
 			} finally {
 				this.arenaLock.readLock().unlock();
 			}
