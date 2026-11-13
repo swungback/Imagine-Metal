@@ -22,6 +22,7 @@ struct ImShadowFrame {
 struct ImShadowOut {
 	float4 pos [[position]];
 	float2 uv;
+	uint fill [[flat]];  // (fix8) a culled tree's outer leaf face with its holes filled (terrain.metal): it casts whole
 };
 
 static Vtx imShadowFetch(uint vi, device const void *arenaRaw) {
@@ -44,6 +45,7 @@ vertex ImShadowOut im_shadow_vs(uint vid [[vertex_id]], uint iid [[instance_id]]
 	device const void *arenaRaw [[buffer(16)]], device const Section *sections [[buffer(17)]], device const Rec *recs [[buffer(18)]],
 	device const uint *lists [[buffer(19)]]) {
 	ImShadowOut o;
+	o.fill = 0u;
 	uint quadStart, meta;
 	int3 origin;
 	uint matOff = 0xffffffffu;
@@ -75,7 +77,8 @@ vertex ImShadowOut im_shadow_vs(uint vid [[vertex_id]], uint iid [[instance_id]]
 	if (matOff != 0xffffffffu) {
 		uint m = ((device const uchar *) arenaRaw)[matOff + quad];
 		uint wc = (m >> 4) & 15u, cls = m & 15u;
-		plant = cls != 4u && cls != 6u && wc != 0u && wc != 15u && wc != 5u;
+		plant = cls != 4u && cls != 6u && wc != 0u && wc != 15u && wc != 13u && wc != 5u;
+		o.fill = cls != 4u && cls != 6u && wc == 13u ? 1u : 0u;
 		bool skip = mode == 0u ? plant && wc != 10u : mode == 1u ? plant : !plant;
 		if (skip) {
 			o.pos = float4(0, 0, 2, 1);
@@ -110,5 +113,5 @@ vertex ImShadowOut im_shadow_vs(uint vid [[vertex_id]], uint iid [[instance_id]]
 
 // cutout casters (leaves, plants, glass panes' frames...): holes where the texture is see-through
 fragment void im_shadow_cutout_fs(ImShadowOut in [[stage_in]], texture2d<float> atlas [[texture(0)]], sampler s [[sampler(0)]]) {
-	if (atlas.sample(s, in.uv, level(0.0)).a < 0.5) discard_fragment();
+	if (in.fill == 0u && atlas.sample(s, in.uv, level(0.0)).a < 0.5) discard_fragment();
 }

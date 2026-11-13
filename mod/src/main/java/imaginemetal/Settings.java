@@ -31,6 +31,11 @@ public final class Settings {
 	public static volatile float auroraInfluence = Config.number("imaginemetal.auroraInfluence", 1f, 0f, 3f);
 	public static volatile boolean heldLight = Engine.flag("imaginemetal.heldLight", true);
 	public static volatile boolean waving = Engine.flag("imaginemetal.waving", true);
+	/**
+	 * (fix8) Leaf culling: no faces between two leaf blocks (the inside of a tree), for fps in forests; the outer faces whose inside
+	 * was culled get their holes filled, so a tree doesn't look hollow (Way Better Leaves' look, Jack 2026-11-13). Chunks rebuild.
+	 */
+	public static volatile boolean leafCulling = Engine.flag("imaginemetal.leafCulling", true);
 	public static volatile int waterStyle = (int) Config.number("imaginemetal.waterStyle", 1, 0, 2);
 	public static volatile int stars = (int) Config.number("imaginemetal.stars", 1, 0, 1);
 	/** the End's sky: 0 Reimagined's violet with its beams, 1 a black hole (after Iteration's) */
@@ -226,6 +231,7 @@ public final class Settings {
 		v.put("imaginemetal.auroraInfluence", String.format(java.util.Locale.ROOT, "%.2f", auroraInfluence));
 		v.put("imaginemetal.heldLight", String.valueOf(heldLight));
 		v.put("imaginemetal.waving", String.valueOf(waving));
+		v.put("imaginemetal.leafCulling", String.valueOf(leafCulling));
 		v.put("imaginemetal.waterStyle", String.valueOf(waterStyle));
 		v.put("imaginemetal.glassReflections", String.valueOf(glassReflections));
 		v.put("imaginemetal.shafts", String.valueOf(shafts));

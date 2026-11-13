@@ -140,7 +140,14 @@ fragment MLGOut ml_fs(MLOut in [[stage_in]], constant MLFrame &f [[buffer(0)]], 
 	sampler smp [[sampler(14)]]) {
 	// where the real terrain is drawn, it shows instead (the LODs there are only the estimate of what it holds)
 	if (ML_MASK && f.params.x > 0.5 && f.mask.z > 0) {
-		int2 wb = f.camBlock.xz + int2(floor(in.rel.xz + f.camFrac.xz));
+		// (fix8: water's sides by the block in front of them: a LOD water voxel's side on the real terrain's edge faces into a chunk
+		// the real water fills, and showed through that water as a bright textured strip along the edge (Jack's 18.31.26-18.35.11))
+		float2 front = float2(0.0);
+		if (in.face < 2u || in.face > 3u) {
+			bool wtr = ((models[in.id].flags >> 17) & 1u) != 0u;
+			if (wtr) front = in.face == 0u ? float2(0.5, 0.0) : in.face == 1u ? float2(-0.5, 0.0) : in.face == 4u ? float2(0.0, 0.5) : float2(0.0, -0.5);
+		}
+		int2 wb = f.camBlock.xz + int2(floor(in.rel.xz + f.camFrac.xz + front));
 		int2 ch = (wb - (wb & int2(15))) / 16 - f.mask.xy;  // (floor division by 16, negatives too)
 		if (ch.x >= 0 && ch.y >= 0 && ch.x < f.mask.z && ch.y < f.mask.z) {
 			uint bit = uint(ch.y) * uint(f.mask.w) * 32u + uint(ch.x);
@@ -240,6 +247,9 @@ fragment MLGOut ml_fs(MLOut in [[stage_in]], constant MLFrame &f [[buffer(0)]], 
 	// turn faces toward it, which the lighting drew pitch black (Jack's 15.42.23 "whats the black"). Caves are filled in, so
 	// what is left under 10 is canopy and overhang shade, which from afar reads as shade, not as a cave)
 	lq.y = max(lq.y, 10.0 / 15.0);
+	// (fix8: water's top under the open sky: columns made from real chunks before their light was worked out stored sky 0 there,
+	// and those chunks' water came out a dark teal square beside the pale sky-lit water around it (Jack's 18.31.55))
+	if (water && in.face == 2u) lq.y = 1.0;
 	MLGOut o;
 	o.g1 = float4(saturate(color), float(axis << 1) / 255.0);
 	o.g2 = float4(saturate(tex.rgb), float(mat) / 255.0);

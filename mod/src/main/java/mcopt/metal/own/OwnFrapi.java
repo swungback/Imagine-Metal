@@ -12,6 +12,8 @@ import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.block.state.BlockState;
 import org.jspecify.annotations.Nullable;
 
@@ -47,13 +49,45 @@ final class OwnFrapi implements OwnApi.Mesher {
 		return f;
 	}
 
+	// (fix8, leaf culling: Way Better Leaves' idea in our own words, nothing of its code) the block being tesselated, while it is leaves
+	private boolean leafCull;
+	private @Nullable BlockAndTintGetter level;
+	private final BlockPos.MutableBlockPos at = new BlockPos.MutableBlockPos(), probe = new BlockPos.MutableBlockPos();
+
 	@Override
 	public void block(float x, float y, float z, BlockAndTintGetter level, BlockPos pos, BlockState state, BlockStateModel model, long seed) {
-		this.blocks.tesselateBlock(this.emitter, x, y, z, level, pos, state, model, seed);
+		this.leafCull = imaginemetal.Settings.leafCulling && state.is(BlockTags.LEAVES);
+		if (this.leafCull) {
+			this.level = level;
+			this.at.set(pos);
+		}
+		try {
+			this.blocks.tesselateBlock(this.emitter, x, y, z, level, pos, state, model, seed);
+		} finally {
+			this.leafCull = false;
+			this.level = null;
+		}
+	}
+
+	/** Whether the block one step along d (sign s) from the leaves being tesselated is leaves too. */
+	private boolean leavesAt(Direction d, int s) {
+		this.probe.set(this.at.getX() + s * d.getStepX(), this.at.getY() + s * d.getStepY(), this.at.getZ() + s * d.getStepZ());
+		return this.level.getBlockState(this.probe).is(BlockTags.LEAVES);
 	}
 
 	private void emitted(MutableQuadView quad) {
 		ChunkSectionLayer layer = quad.chunkLayer();
+		boolean fill = false;
+		if (this.leafCull) {
+			// (leaf culling: no face between two leaf blocks, the inside of a tree is never seen. A face left on the outside whose
+			// opposite face was culled gets its holes filled (terrain.metal, corner pattern 1101), so through it one doesn't look
+			// into a hollow tree: the "hollow" look of plain leaf culling, which Jack didn't like)
+			Direction cf = quad.cullFace();
+			if (cf != null) {
+				if (this.leavesAt(cf, 1)) return;
+				fill = this.leavesAt(cf, -1);
+			}
+		}
 		if (layer == ChunkSectionLayer.SOLID || layer == ChunkSectionLayer.CUTOUT) {
 			// what quad.buffer + BufferBuilder (BLOCK format: position, ABGR colour, uv, packed light) would store, read straight
 			// from the quad: no face normal (the BLOCK format has none), no per-vertex calls
@@ -69,7 +103,10 @@ final class OwnFrapi implements OwnApi.Mesher {
 				abgr[v] = c & 0xFF00FF00 | (c & 0xFF0000) >> 16 | (c & 0xFF) << 16;
 				light[v] = quad.lightmap(v);
 			}
-			this.quads.layers[layer == ChunkSectionLayer.SOLID ? 0 : 1].quad(p, abgr, uv, light);
+			OwnQuads.Layer l = this.quads.layers[layer == ChunkSectionLayer.SOLID ? 0 : 1];
+			l.fillNext = fill;
+			l.quad(p, abgr, uv, light);
+			l.fillNext = false;
 			return;
 		}
 		VertexConsumer sink = this.translucentSink;

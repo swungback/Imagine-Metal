@@ -150,7 +150,10 @@ public final class OwnMesher {
 		OwnRegion own = REGION ? OwnRegion.of(region, minPos) : null;
 		BlockAndTintGetter level = own != null ? own : region;
 		OwnBlockRenderer ownRenderer = own != null && OwnBlockRenderer.ON ? OwnBlockRenderer.get(ambientOcclusion, blockColors) : null;
-		if (ownRenderer != null) ownRenderer.qrecSink = OwnQrec.ON ? quads : null;
+		if (ownRenderer != null) {
+			ownRenderer.qrecSink = OwnQrec.ON ? quads : null;
+			ownRenderer.fillSink = quads;
+		}
 		VertexConsumer[] translucent = new VertexConsumer[1];
 		BlockQuadOutput quadOutput = (x, y, z, quad, instance) -> {
 			ChunkSectionLayer layer = quad.materialInfo().layer();

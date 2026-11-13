@@ -90,6 +90,7 @@ final class OwnBlockRenderer {
 	void tesselateBlock(BlockQuadOutput output, float x, float y, float z, OwnRegion level, BlockPos pos, BlockState blockState, BlockStateModel model, long seed) {
 		this.random.setSeed(seed);
 		model.collectParts(this.random, this.parts);
+		this.leafCull = imaginemetal.Settings.leafCulling && blockState.is(net.minecraft.tags.BlockTags.LEAVES);
 		if (!this.parts.isEmpty()) {
 			try {
 				Vec3 offset = blockState.getOffset(pos);
@@ -115,7 +116,28 @@ final class OwnBlockRenderer {
 	}
 
 	private boolean shouldRenderFace(OwnRegion level, BlockState state, Direction direction, int px, int py, int pz) {
-		return Block.shouldRenderFace(state, level.stateAt(px + direction.getStepX(), py + direction.getStepY(), pz + direction.getStepZ()), direction);
+		BlockState n = level.stateAt(px + direction.getStepX(), py + direction.getStepY(), pz + direction.getStepZ());
+		// (fix8, leaf culling as OwnFrapi's: no face between two leaf blocks)
+		if (this.leafCull && n.is(net.minecraft.tags.BlockTags.LEAVES)) return false;
+		return Block.shouldRenderFace(state, n, direction);
+	}
+
+	/** (fix8) leaf culling for the block being tesselated (leaves, setting on), and the quads' sink to mark filled faces in. */
+	private boolean leafCull;
+	@Nullable OwnQuads fillSink;
+
+	/** Marks the next quads as a culled tree's outer face (its opposite face culled): their holes are filled (terrain.metal). */
+	private void fill(OwnRegion level, Direction d, int px, int py, int pz) {
+		if (!this.leafCull || this.fillSink == null) return;
+		boolean f = level.stateAt(px - d.getStepX(), py - d.getStepY(), pz - d.getStepZ()).is(net.minecraft.tags.BlockTags.LEAVES);
+		this.fillSink.layers[0].fillNext = f;
+		this.fillSink.layers[1].fillNext = f;
+	}
+
+	private void unfill() {
+		if (this.fillSink == null) return;
+		this.fillSink.layers[0].fillNext = false;
+		this.fillSink.layers[1].fillNext = false;
 	}
 
 	private void tesselateAmbientOcclusion(BlockQuadOutput output, float x, float y, float z, OwnRegion level, BlockState state, BlockPos pos) {
@@ -137,11 +159,13 @@ final class OwnBlockRenderer {
 							if (shouldRenderFace) shouldRenderFaceCache |= cacheMask;
 						}
 						if (shouldRenderFace) {
+							this.fill(level, direction, px, py, pz);
 							for (int q = 0, nq = culledQuads.size(); q < nq; q++) {
 								BakedQuad quad = culledQuads.get(q);
 								this.prepareQuadAmbientOcclusion(level, state, pos, px, py, pz, quad);
 								this.putQuadWithTint(output, x, y, z, level, state, pos, quad);
 							}
+							if (this.leafCull) this.unfill();
 						}
 					}
 				}
@@ -176,11 +200,13 @@ final class OwnBlockRenderer {
 						if (shouldRenderFace) {
 							// the block's own state with the neighbour's light, as BlockModelLighter.getLightCoords(state, level, relativePos)
 							int lightCoords = level.lightAt(state, px + direction.getStepX(), py + direction.getStepY(), pz + direction.getStepZ());
+							this.fill(level, direction, px, py, pz);
 							for (int q = 0, nq = culledQuads.size(); q < nq; q++) {
 								BakedQuad quad = culledQuads.get(q);
 								this.prepareQuadFlat(level, state, pos, px, py, pz, lightCoords, quad);
 								this.putQuadWithTint(output, x, y, z, level, state, pos, quad);
 							}
+							if (this.leafCull) this.unfill();
 						}
 					}
 				}

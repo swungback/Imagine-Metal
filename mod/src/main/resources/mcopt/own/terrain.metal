@@ -1835,7 +1835,7 @@ vertex VOut own_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant Dr
 		if ((ov.imMat & 15u) == 4u || (ov.imMat & 15u) == 6u) wc = 0u;  // (an ore's upper bits say which ore it is)
 		bool vine = wc == 5u;
 		// (10: a tall plant's upper half, Build C2: waves whole like leaves, marked apart from them for the shadow casters)
-		if (wc != 0u && (wc == 15u || wc == 10u || vine || ((wc >> corner) & 1u) != 0u)) {
+		if (wc != 0u && (wc == 15u || wc == 13u || wc == 10u || vine || ((wc >> corner) & 1u) != 0u)) {
 			float3 wp = float3(origin & 1023) + rel;
 			float tw = g.GameTime * 1200.0;
 			const float amp = 0.065;  // (one for every waving block: a tall plant's halves share their corners and must move alike)
@@ -1843,8 +1843,16 @@ vertex VOut own_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant Dr
 			float3 d = float3(sin(tw * 1.6 + ph) * 0.7 + sin(tw * 2.9 + wp.z * 1.3) * 0.3,
 				sin(tw * 2.1 + wp.x * 0.9 + wp.z * 0.7) * 0.15,
 				cos(tw * 1.3 + ph * 0.8) * 0.6 + sin(tw * 3.3 + wp.x * 1.1) * 0.3) * amp;
-			// (vines: a third across, more up and down, slower down the strand: they hang off a wall 0.05 out)
-			if (vine) d *= float3(0.33, 1.6, 0.33);
+			// (vines: they hang off a wall 0.05 out, so they sway only along the wall, never toward it or away (fix8: a third across
+			// before, which still pushed them into the wall's blocks): the axis on which the corner sits off the block grid is the
+			// wall's normal (a wall vine's corners lie on the grid in the other two; one under a ceiling sits off it in y))
+			if (vine) {
+				d *= float3(0.8, 1.6, 0.8);
+				float3 og = abs(fract(wp + 0.5) - 0.5);
+				if (og.x >= og.y && og.x >= og.z) d.x = 0.0;
+				else if (og.z >= og.y) d.z = 0.0;
+				else d.y = 0.0;
+			}
 			float4x4 m = CPU_CLIP ? df.clip : proj.ProjMat * t.ModelViewMat;
 			float4 dc = m * float4(d, 0.0);
 			dc.y = -dc.y;
@@ -2314,6 +2322,25 @@ static float4 sampleRGSS(texture2d<float> source, sampler s, float2 uv, float2 p
 	return mix(nearestColor, rgssColor, blendFactor);
 }
 
+#ifdef IM_SHADE
+// (fix8, leaf culling) a culled tree's outer leaf face (material corner pattern 1101: its opposite face was culled) has its holes
+// filled, so one doesn't look into a hollow tree through it: the texel half a sprite over (else a quarter), darker, as the inside
+// of a canopy; failing both, the hole's own colour (vanilla's fast leaves keep a dark green there)
+static inline bool imLeafFilled(uint imMat) {
+	return ((imMat >> 4) & 15u) == 13u;
+}
+
+// (du, dv: the uv's derivatives, taken by the caller outside its branch, where every pixel of the quad still runs)
+static float4 imLeafFill(float4 texel, float2 uv, float4 rect, texture2d<float> atlas, sampler s, float2 pixelSize, float2 du, float2 dv, float lod) {
+	float2 sz = max(rect.zw - rect.xy, float2(1e-6));
+	float2 f = (uv - rect.xy) / sz;
+	float2 ts = sqrt(du * du + dv * dv);
+	float4 t2 = sampleNearestG(atlas, s, rect.xy + fract(f + float2(0.5, 0.25)) * sz, pixelSize, du * lod, dv * lod, ts);
+	if (t2.a < 0.5) t2 = sampleNearestG(atlas, s, rect.xy + fract(f + float2(0.25, 0.5)) * sz, pixelSize, du * lod, dv * lod, ts);
+	return float4((t2.a >= 0.5 ? t2.rgb : texel.rgb) * 0.62, 1.0);
+}
+#endif
+
 static float linear_fog_value(float vertexDistance, float fogStart, float fogEnd) {
 	if (vertexDistance <= fogStart) return 0.0;
 	else if (vertexDistance >= fogEnd) return 1.0;
@@ -2425,6 +2452,11 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 	// the vertex alpha and the fade's alpha mix let translucent block quads (stained glass, the nether portal) and some cutout ones
 	// (the copper torch) come out with almost none: glass showed only its tint, the portal and the torch not at all)
 	color.a = texel.a;
+	float2 imDu = dfdx(in.texCoord0), imDv = dfdy(in.texCoord0);
+	if (CUTOUT && CUTOUT_LIMIT > 0.2 && color.a < CUTOUT_LIMIT && imLeafFilled(in.imMat)) {
+		texel = imLeafFill(texel, in.texCoord0, in.imRect, atlas, atlasSampler, pixelSize, imDu, imDv, imLod);
+		color = float4(texel.rgb * getColor(in).rgb, 1.0);
+	}
 #else
 	if (F_RICH) color = mix(fog.FogColor * float4(1, 1, 1, color.a), color, in.chunkVisibility);
 #endif
@@ -2621,10 +2653,14 @@ fragment ImGOut own_fs_g(VOut in [[stage_in]], constant Globals &g [[buffer(22)]
 	float2 pixelSize = 1.0f / float2(t.TextureSize);
 	float imLod = imf.taa.w > 0.01 ? imf.taa.w : 1.0;
 	float4 texel = g.UseRgss == 1 ? sampleRGSS(atlas, atlasSampler, in.texCoord0, pixelSize, imLod) : sampleNearest(atlas, atlasSampler, in.texCoord0, pixelSize, imLod);
+	float2 imDu = dfdx(in.texCoord0), imDv = dfdy(in.texCoord0);
+	if (CUTOUT && texel.a < CUTOUT_LIMIT) {
+		if (imLeafFilled(in.imMat)) texel = imLeafFill(texel, in.texCoord0, in.imRect, atlas, atlasSampler, pixelSize, imDu, imDv, imLod);
+		else discard_fragment();
+	}
 	float4 color = texel * getColor(in);
 	float imFade = 0.0;
 	if (F_RICH) imFade = 1.0 - in.chunkVisibility;
-	if (CUTOUT && texel.a < CUTOUT_LIMIT) discard_fragment();
 	float2 imLightQ = in.imLight;
 	if (in.imQuv.x > -0.5) {
 		float2 st = saturate(in.imQuv);
@@ -2682,10 +2718,15 @@ static float imFarSun(float3 p, float3 n, float3 L, constant ImHeightP &hp, devi
 	if (hp.cam.w == 0 || L.y < 0.01) return 1.0;
 	float dist = length(p);
 	if (dist < hp.range.x) return 1.0;
+	// (fix8, cost: a face turned away from the sun gets none of it anyway, so no march for it; 12 steps growing by 1.45 reach as
+	// far (1,200 blocks) as the 18 by 1.3 did with a third fewer reads of the 4 MB height map, whose reads land all over it; and
+	// the march stops once the ray is above any land there can be)
+	if (dot(n, L) <= 0.0) return 1.0;
 	float3 o = p + hp.frac.xyz + n * 0.5;  // (relative to the camera's block: exact in floats out here)
 	float shade = 0.0, t = 20.0;
-	for (int i = 0; i < 18; i++, t *= 1.3) {
+	for (int i = 0; i < 12; i++, t *= 1.45) {
 		float3 q = o + L * t;
+		if (float(hp.cam.y) + q.y > 336.0) break;
 		int2 b = hp.cam.xz + int2(floor(q.xz));
 		int2 tx = b >> 4;
 		uint v = hm[(uint(tx.y) & 1023u) * 1024u + (uint(tx.x) & 1023u)];
@@ -2930,6 +2971,7 @@ fragment void own_fs_alpha(VOut in [[stage_in]], constant Globals &g [[buffer(22
 #ifdef IM_SHADE
 	// (the same decision as ownFsBody's with Imagine Metal: the texture's alpha alone. A pre-pass that kept a fragment the colour
 	// pass then dropped left the block's depth with the colour behind it: the block see-through)
+	if (imLeafFilled(in.imMat)) a = 1.0;  // (fix8: a culled tree's filled outer face, as own_fs_g keeps it)
 #else
 	a *= getColor(in).a;
 	if (F_RICH) a = mix(fog.FogColor.a * a, a, in.chunkVisibility);

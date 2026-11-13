@@ -660,7 +660,9 @@ final class MetaWorld {
 		for (Col c : this.draw) {
 			int w = 32 << c.level;
 			int bx = c.cx * w, bz = c.cz * w;
-			boolean cut = MetaSettings.hideUnderReal && this.anyMasked(bx, bz, w);
+			// (fix8: a block wider, so the columns along the real terrain's edge are drawn with the mask too: their water's sides that
+			// face into the real terrain's chunks are hidden there (ml_fs), Jack's 18.31.26-18.35.11 blue strips seen through the water)
+			boolean cut = MetaSettings.hideUnderReal && this.anyMasked(bx - 1, bz - 1, w + 2);
 			if (cut != (pass == 0)) continue;
 			float rx = (float) (bx - camX), rz = (float) (bz - camZ);
 			if (!this.frustum.testAab(rx, (float) (c.minYb - camY), rz, rx + w, (float) (c.maxYb - camY), rz + w)) continue;
