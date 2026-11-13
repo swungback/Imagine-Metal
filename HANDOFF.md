@@ -2,6 +2,14 @@
 
 Where things stand, for picking the work up in a new conversation.
 
+## Jack 17:39 (after fix5): read this before anything else
+- The huge grass is the SAME family as the phantom blocks: the End ghost slabs (C2 level guard) and "phantom builds" he has seen
+  for a long time. Treat it as one long-standing bug in the section/mesh lifecycle across level changes (old level's compiles,
+  stores, table entries, slot reuse), not as a one-off. Find the real cause and fix it for good; fix4's checks are diagnostics.
+- MetalFX: APPROVED ("metalfx is good lets go"). Bring branch `metalfx` onto `metalods` (B3 motion vectors / jitter included as
+  far as built), build, deploy, keep the non-MetalFX jar as fallback.
+- He wants the next chat to FIX the open items, not list them as open.
+
 ## START HERE: 2026-11-13 17:40, fix5 DEPLOYED (fix3 + fix4 + fix5), not seen in game yet
 mods = fix5: metalods 9131809, CI run 43463452715, jar sha1 4ce76e04... (copy `instances/Imagine metal/imagine-metal-metalods-fix5.jar`).
 Fallbacks: fix3 (2c39ca2e...), fix2 (eb129083...). Screenshots handled up to 2026-11-13_17.26.23 (+ his DH/Gael refs 16.02-16.04).
