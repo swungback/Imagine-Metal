@@ -21,7 +21,7 @@ supplies the seed generator (mcopt.metal.lod.LodNoise / LodForest / LodTrees / L
 - **Real chunks** (`MetaChunks`): captured 2 s after the client loads them (light in) and again at unload (player edits).
   Air with sky light 0 under a column's top block is filled (caves, house insides: invisible from afar, else thousands of
   hidden faces). Skipped where the column's light isn't known yet.
-- **Storage** (`MetaStore`): `saves/<world>/metalods/<dim>/gen5/L<l>/<cx>.<cz>.bin` (generated) and `real/r.<rx>.<rz>.bin`
+- **Storage** (`MetaStore`): `saves/<world>/metalods/<dim>/gen7/L<l>/<cx>.<cz>.bin` (generated) and `real/r.<rx>.<rz>.bin`
   (32x32 chunks), deflate, palette by block/biome names per file. Multiplayer: `.minecraft/metalods/servers/<ip>/<dim>`.
 - **Meshing** (`MetaMesher`): a face wherever non-air touches air, greedy rectangles up to 32 x 32 per face direction. Quad =
   2 uints (x5 z5 y9 face3 w5 h5 | block16 biome8 sky4 block4).
@@ -37,10 +37,19 @@ supplies the seed generator (mcopt.metal.lod.LodNoise / LodForest / LodTrees / L
 - Settings: `config/metalods.properties`, screen `MetaLodsScreen` (Video Settings: button beside "Imagine Metal settings...";
   pause menu: "MetaLODS" button beside "Imagine Metal"). Stats line in latest.log every 10 s: `[MetaLODS] stats: ...`.
 
+## Changed 2026-11-13 (after the first test)
+- The draw never ran in the first build (a missing argument in `MetaNative.DRAW`): fixed.
+- Generation: the surface comes from the terrain shape (sloped_cheese) at every level, no longer from the final density at
+  levels 0-1; with overhangs the surface is found in the same density samples the carve uses; nothing sampled at y >= 256.
+  Stored under `gen7`. Workers: cores - 2. Log: `[MetaLODS] generation: ...` with tiles/s, chunks/s and ms per stage per level.
+- Hand-over: the LODs step back only from chunks the real terrain draws whole (mcopt's OwnSeam mask), not from every loaded
+  chunk; their depth is 0.05 % farther. `-Dmetalods.handoffDrawn=false` for the old rule.
+- Workers take real chunks and columns in turn.
+
 ## Limits of this first build (known)
 - Needs Imagine Metal's deferred lighting (off with a PBR pack, a debug view, F8): then nothing is drawn (logged once).
 - No LODs in dimensions with a ceiling (the Nether). Generation only in singleplayer (a server's seed isn't known).
-- Generated 3D is from the terrain shape before caves (sloped_cheese): no caves, and islands get stone inside, the surface
+- Generated terrain (surface and 3D) is from the terrain shape before caves (sloped_cheese): no caves or cave mouths, water by sea level only (no aquifer lakes), and islands get stone inside, the surface
   block on top. Whether Terralith's skylands are in that density is unverified.
 - LODs cast no shadows. Where two levels meet, the edge cells' top 2 voxels get skirt faces so no slit opens; small steps
   can still show. Grass, flowers, torches are left out (no collision).

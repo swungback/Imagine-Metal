@@ -1,6 +1,69 @@
-# Imagine Metal: handoff (2026-11-12, ~23:40)
+# Imagine Metal: handoff (2026-11-13, ~11:55)
 
 Where things stand, for picking the work up in a new conversation.
+
+## START HERE: 2026-11-13 11:50, MetaLODS "fast1" DEPLOYED (branch `metalods` 917ca15, CI run 43411728436, NOT on main)
+- mods = jar sha1 57c2807b... (copy: `instances/Imagine metal/imagine-metal-metalods-fast1.jar`). Before it: `imagine-metal-metalods-fix1.jar`
+  (883ba593..., only the draw fix, the build Jack's 11:28 test ran). Fallback without MetaLODS: `imagine-metal-c2b-water.jar` (388bef08...).
+- NOT seen in game yet: fast1 (speed, the gap fix). Seen in game: fix1 draws LODs (Jack's 11.30.18 / 11.30.23).
+
+### What was wrong at 10:42-11:09 (Jack: "doesn't seem to be working")
+- Not his setup. `MetaNative.DRAW`'s FunctionDescriptor lacked the `masked` int (16 arguments for a 17-argument `mml_draw`), so the
+  first draw threw WrongMethodTypeException and MetaLODS stopped itself; nothing was ever drawn. Fixed in 15c685b.
+- The one-off "no G-buffer pass this frame" line at world load is harmless (deferred lighting comes on a few seconds later).
+
+### The strip of sky between the real terrain and the LODs (Jack 11:31, screenshots 11.30.18 / 11.30.23)
+- Cause: the mask ("the real terrain draws here": LOD fragments discarded, columns skipped) was every LOADED chunk within
+  rd x 16 blocks. The client holds chunks it doesn't draw (the outer ring, chunks not compiled yet): masked but empty.
+- Fix (917ca15): `MetaWorld.updateMask` takes mcopt's `OwnSeam.mask` (a chunk counts once every section of it that can show
+  holds a compile result in OwnTerrain's table, inside the game's distance rule); `-Dmetalods.handoffDrawn=false` = old rule.
+  metalods.metal pushes the LODs' depth 0.05 % farther so the real faces win in chunks drawn only in part.
+- Not done: the real sections still fade in from the fog colour when they take over (mcopt's `OwnSeam.fadeMs` only acts for
+  mcopt's own far terrain). If Jack sees a pale flash at the hand-over, that is the place.
+
+### Speed (Jack's target: Distant Horizons + SeedGen, ~300,000 chunks in under a minute, ~5,000 chunks/s)
+- Measured on his Mac before (session 10:42, distance 256, 2 workers): the whole view = 630 tiles (L0 138, L1 136, L2 136, L3 136,
+  L4 64, L5 20) in ~104 s: ~263,000 chunks of view in 104 s = ~2,500 chunks/s by area (7,450/s if every level's tiles x chunks are
+  summed, but the levels overlap). A tile is 64 x 64 cells whatever the level, so the work is ~650 tiles at distance 256.
+- Offline bench (sandbox, 26.3 + Fabric + Terralith + Lithostitched headless, x86, Java noise backend, 1 thread), ms a tile:
+  before L0 213 / L1 200 / L2-5 130; after L0 66 / L1 37 / L2-5 ~90. For the 650 tiles: 106 s -> 48 s of CPU.
+- Where the time went: levels 0-1 (and every tree chunk's ground) sampled the router's FINAL density (caves; ~9x a sample with
+  Terralith, whose final density also can't be split, log "final density not split"); levels 2+ sampled two volumes (the surface
+  every 32 blocks + the 3D carve's every 8). Meshing is cheap once warm (0.2-0.7 ms a column; the 4-17 ms in his log is JIT warm-up).
+- Changes (c4df8df): surface from the terrain shape at all levels (`LodNoise.fineLevels = 0`, set by MetaGen), one volume for surface
+  and carve (`LodTile.keepVolume / volume`), no samples at y >= 256 (the top slide's constant), the carve's density per column
+  first; workers `cores - 2` (6 on the M1, was 2), still utility QoS; stored columns now `gen7` (gen6 is stale, 11 MB, can be deleted).
+- 917ca15: workers take real chunks and columns in turn. Real chunks alone went first: joining a world queued ~1000 of them and
+  no tile was generated for 25 s (11:28:07-11:28:32); in flight they kept the workers from the columns.
+- Also seen in his log: while he flew (11:30:17-11:30:57) tiles took ~1.9 s each instead of ~0.3: the utility-class workers get
+  little CPU while the game (c2me, chunk meshing) is busy. By design; more workers help; a QoS setting would be the next lever.
+- NOT measured on the Mac yet. Read the new line (every 10 s while tiles are made):
+  `[MetaLODS] generation: N tiles in T s with W workers = X tiles/s, Y chunks/s (..., levels summed); L0 n tiles: surface a + trees b + 3D c + columns d ms; ...`
+  For the by-area figure: view chunks (pi x distance^2, ~206,000 at 256; the square the columns cover ~263,000) / seconds until
+  "0 asked, 0 jobs queued".
+- SeedGen's methods (public descriptions only, nothing copied): terrain from the seed without chunks, faked trees, and each area
+  written only at the detail it is drawn at, finer on approach. We do the same but ALSO generate every coarser level over the fine
+  areas (parents shown until the children are ready).
+- Next levers, not done: (1) skip the intermediate levels where a finer one is the target (~22 % fewer tiles; needs the column
+  choice in `MetaWorld.visit` reworked); (2) sample the blended 3D noise only in the y band where the rest of the density
+  doesn't already decide the sign (it is ~58 % of a coarse tile); (3) y step 16/32 at levels 4/5; (4) a worker QoS setting.
+
+### The offline bench (not in the repo; rebuild in a new sandbox if needed, ~15 min)
+- JDK 25 (Adoptium), client.jar + libraries from the 26.3 version json, fabric-loader 0.20.1 + asm + sponge-mixin from
+  maven.fabricmc.net; Terralith, Lithostitched, Fabric API jars staged from Jack's mods folder.
+- javac over the mod tree minus OwnFrapi (stubbed), OwnIntLifeTaskMixin, OwnIntLifeSectionMixin, FlatFaceShadeMixin, plus a
+  ModInitializer `mcopt.metal.lod.MetaBench` (ServerLifecycleEvents.SERVER_STARTED -> MetaGen.of(server.overworld()) -> generate
+  tiles per level, hash the Rle output, mesh it); its own fabric.mod.json with only `LodMaterialContextAccess` as mixin.
+- Run: `java -Dfabric.gameJarPath=client.jar -Dmcopt.lod.nativeNoise=java -cp <fabric + libs> net.fabricmc.loader.impl.launch.knot.KnotServer nogui`
+  (the client jar runs the dedicated server's Main; eula=true, online-mode=false). JFR works (exit with System.exit, not halt).
+- Output hashes equal before/after = an exact-output check for changes that should not alter the terrain.
+
+### Jack's other notes in that log (not asked about yet)
+- 10:49:40 "dipped to 28-29 fps here that vrazy" (screenshot 10.49.42, jungle canopy at 87 88 67 facing north, 32 fps). MetaLODS
+  was not drawing then (stopped): terrain cost on leaves (C2 performance item, see below).
+- 11:01:16 "eyes of this dragon flickering.. (taa maybe?)" (11.01.17, Ice and Fire dragon): the eyes layer is one of the
+  pipelines EntityShade skips (no TAA offset): the open B3 item.
+
 
 ## Setup
 - Repo: swungback/Imagine-Metal. Push to main → CI (.github/workflows/build.yml) compiles every Metal shader, builds the jar,
