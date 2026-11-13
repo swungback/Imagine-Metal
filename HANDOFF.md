@@ -6,6 +6,24 @@ Where things stand, for picking the work up in a new conversation.
 Jack at 15:34: "does the handoff include the fps and eye flickering? what about the shading on lods? why dont u do the lods like
 voxy + seedgen? that looks way better and runs well. there are also some visual bugs in the latest screenshots."
 
+### 2026-11-13 ~16:00: progress on screen BUILT (Jack asked 15:52), not deployed (link still failing)
+- metalods 68c285c, CI run 43447346699, jar sha1 630ef71d... (includes 7e38f81's eyes fix). Sent to Jack as a file to install
+  himself (imagine-metal-metalods-progress1.jar); keep a copy as instances/Imagine metal/imagine-metal-metalods-progress1.jar.
+- Jack 15:52: "dh + seedgen only properly generates at full speed with shaders off. if ours does that too then maybe something that
+  switches em off till chunks are loaded, and a text on screen showing how many chunks are loaded and how many its loading like
+  in distant horizons ... when done generating no text". Built: the text (MetaLodsHudMixin on Hud.extractRenderState TAIL ->
+  MetaLods.hud -> MetaWorld.progressLine): "MetaLODS: N chunks ready, M left, R chunks/s", area in chunks of the columns the view
+  wants (MetaWorld.count in visit), rate over ~3 s; gone 2 s after nothing is left; top centre with F3 up; not with F1. Setting
+  "Progress on screen" (progress=true in metalods.properties).
+- NOT built: the "shaders off until loaded" switch: he made it conditional ("if ours does that too"). Ours generates on worker
+  threads; per frame only prepare() (requests + 3 ms of uploads) runs, and only inside the G-buffer pass, so with the deferred
+  lighting off MetaLODS does nothing at all. Compare the counter's chunks/s first; if the shader's load slows it, the switch
+  would be Imagine Metal's heavy passes (shadows, shafts, SSR) off while left > 0, not the deferred lighting itself.
+- Started (not committed): LOD ambient occlusion design: quad bits full (x5 z5 y9 face3 w5 h5 | block16 biome8 sky4 block4),
+  face bits unused by the shader (the page header has the face); plan: an AO byte per quad after the 256 quads in each page
+  (PAGE_BYTES 2048 -> 2304, no native change), 4 corners x 2 bits from the front voxel's neighbours, greedy merges only equal
+  AO, bilinear per voxel in ml_fs (fract of the quad's voxel coords), multiplied into the colour.
+
 ### 2026-11-13 ~15:50 (new chat): step 6 BUILT, not deployed (Mac link down the whole turn)
 - metalods 7e38f81, CI run 43445278355, jar sha1 48e2b2db...: EntityShade.jitterOnly gives the pipelines it skipped (names with
   "eyes", "pipeline/text", "beam", "leash", "breeze", "energy_swirl", not "gui") the TAA's sub-pixel offset in the vertex stage
