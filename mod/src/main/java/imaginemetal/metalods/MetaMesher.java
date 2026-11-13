@@ -28,8 +28,12 @@ final class MetaMesher {
 		}
 	}
 
+	/** Skirts: at the column's sides, a cell's top voxels always get their outward faces (a neighbour drawn at another level
+	 * doesn't line up with this one: without them its lower ground left slits to see through). Hidden where it does line up. */
+	static final int SKIRT = 2;
 	private int[] grid = new int[0];
 	private int[] mask = new int[0];
+	private final int[] tops = new int[N * N];
 	private final int[][] out = new int[6][];
 	private final int[] outN = new int[6];
 	private int h;
@@ -74,6 +78,18 @@ final class MetaMesher {
 					}
 				}
 				if (!Voxel.isAir(g[a + h - 1])) hi = h - 1;
+			}
+		}
+		for (int z = 0; z < N; z++) {
+			for (int x = 0; x < N; x++) {
+				int a = this.at(x, z, 0), t = -1;
+				for (int y = h - 1; y >= 0; y--) {
+					if (!Voxel.isAir(g[a + y])) {
+						t = y;
+						break;
+					}
+				}
+				this.tops[x + z * N] = t;
 			}
 		}
 		Arrays.fill(this.outN, 0);
@@ -154,13 +170,14 @@ final class MetaMesher {
 		int[] m = this.mask;
 		int dx = f == 0 ? 1 : -1;
 		for (int x = 0; x < N; x++) {
-			boolean any = false;
+			boolean any = false, side = f == 0 ? x == N - 1 : x == 0;
 			for (int y = y0; y <= y1; y++) {
 				for (int z = 0; z < N; z++) {
 					int v = g[this.at(x, z, y)], value = 0;
 					if (!Voxel.isAir(v)) {
 						int front = g[this.at(x + dx, z, y)];
 						if (Voxel.isAir(front)) value = Voxel.face(v, front);
+						else if (side && y > this.tops[x + z * N] - SKIRT) value = Voxel.face(v, Voxel.SKY_AIR);
 					}
 					m[z + (y - y0) * N] = value;
 					any |= value != 0;
@@ -179,13 +196,14 @@ final class MetaMesher {
 		int[] m = this.mask;
 		int dz = f == 4 ? 1 : -1;
 		for (int z = 0; z < N; z++) {
-			boolean any = false;
+			boolean any = false, side = f == 4 ? z == N - 1 : z == 0;
 			for (int y = y0; y <= y1; y++) {
 				for (int x = 0; x < N; x++) {
 					int v = g[this.at(x, z, y)], value = 0;
 					if (!Voxel.isAir(v)) {
 						int front = g[this.at(x, z + dz, y)];
 						if (Voxel.isAir(front)) value = Voxel.face(v, front);
+						else if (side && y > this.tops[x + z * N] - SKIRT) value = Voxel.face(v, Voxel.SKY_AIR);
 					}
 					m[x + (y - y0) * N] = value;
 					any |= value != 0;
