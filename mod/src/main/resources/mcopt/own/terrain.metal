@@ -2699,8 +2699,19 @@ fragment float4 im_defer_fs(ImDeferOut in [[stage_in]], float4 g1 [[color(1)]], 
 	// the texture's own texel on a full block's face; the material mixed in so two materials' patterns differ)
 	float3 wq = fract(p + imf.world.xyz - m.n * 0.01) * 16.0;
 	m.texel = floor(axis < 2u ? wq.yz : axis < 4u ? wq.xz : wq.xy) + float2(mat * 16u, mat * 48u);
-	float3 lit = imShade(g1.rgb, g2.rgb, p, light, mat | 0x10000u, in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imLightFilt, imLightOpen,
+	// (MetaLODS water's top, material 0x80 (metalods.metal ml_fs): shaded as the real water's surface (kind 1: its waves, sun glint,
+	// the sky's reflection by the angle), then laid over deep water's seabed, which the water has absorbed to nearly black, by the
+	// share the real water takes there (own_fs_tr: at least 0.72 deep, opaque at a grazing angle). It was lit as cyan ground)
+	bool lodWater = mat == 0x80u;
+	float3 lit = imShade(g1.rgb, g2.rgb, p, light, (lodWater ? 0x100u : mat) | 0x10000u, in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imLightFilt, imLightOpen,
 		imSeeds, imHistColor, imHistColor, float2(0.0), float4(0.0), imHistColor, imHistColor, imHistDepth, imHistSampler, imUnderDepth, m);
+	if (lodWater) {
+		float fr = 1.0 - saturate(dot(m.n, -normalize(p)));
+		fr *= fr;
+		float a = max(mix(0.08, 1.0, fr * fr * 0.9), 0.72);
+		lit *= pow(a, 1.0 / 2.2);  // (display-encoded: a times the linear light)
+		mat = 0u;
+	}
 	// Minecraft's own fog amount (terrain.fsh), from the place instead of the vertex distances
 	float fogValue = max(linear_fog_value(length(p), fog.FogEnvironmentalStart, fog.FogEnvironmentalEnd),
 		linear_fog_value(max(length(p.xz), abs(p.y)), fog.FogRenderDistanceStart, fog.FogRenderDistanceEnd));

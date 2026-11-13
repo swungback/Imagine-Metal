@@ -18,7 +18,7 @@ struct MLFrame {
 	float4 camFrac;    // the camera's position minus camBlock; w unused
 	float4 jitter;     // ImFrame.taa: xy the TAA's sub-pixel offset (clip units), z 1 = on, w the render scale
 	int4 mask;         // where the real terrain is drawn: x, z the first chunk, size (chunks per side), words per row
-	float4 params;     // x 1 = hide the LODs under the real terrain, y the reach (blocks), z 1 = debug: tint by level, w unused
+	float4 params;     // x 1 = hide the LODs under the real terrain, y the reach (blocks), z 1 = debug: tint by level, w the sea level (0: none)
 };
 
 struct PageInfo {
@@ -82,8 +82,15 @@ vertex MLOut ml_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant ML
 	float s = float(1u << level);
 	// (water's top at 8/9 of a block, as the real water's surface: a full block stood 1/9 higher, and where the near terrain hands
 	// over to the LODs the gap under that edge showed the LOD seabed as a dark line across lakes (Jack's 16.43.12, 16.43.45))
-	if (face != 3u && (v > 0.5 || face == 2u) && ((models[qd.y & 0xFFFFu].flags >> 17) & 1u) != 0u) p.y -= (1.0 / 9.0) / s;
 	int3 org = int3(pi.ox, pi.oy, pi.oz);
+	if (face != 3u && (v > 0.5 || face == 2u) && ((models[qd.y & 0xFFFFu].flags >> 17) & 1u) != 0u) {
+		// (seam fix: a coarser level's water voxel s blocks tall had its top on its own boundary, at 64 for the sea at every level
+		// from 1 up, a block above the real surface (62 + 8/9) and level 0's; where two levels met, the step's side drew a dark
+		// line straight across lakes and the sea (Jack's 17.24.36). A water top whose voxel holds the sea's surface goes to it)
+		float top = float(org.y) + p.y * s, sea = f.params.w;
+		if (sea > 0.0 && top >= sea && top - s < sea) p.y = (sea - 1.0 / 9.0 - float(org.y)) / s;
+		else p.y -= (1.0 / 9.0) / s;
+	}
 	float3 rel = float3(org - f.camBlock.xyz) + p * s - f.camFrac.xyz;
 	o.pos = f.clip * float4(rel, 1.0);
 	o.pos.y = -o.pos.y;  // the backend's row order (as terrain.metal's own_vs)
@@ -173,6 +180,19 @@ fragment MLGOut ml_fs(MLOut in [[stage_in]], constant MLFrame &f [[buffer(0)]], 
 		color = mix(color, lc[min(in.level, 5u)], 0.6);
 	}
 	uint mat = (m.flags >> 8) & 255u;
+	if (water && in.face == 2u) {
+		// (LOD water's top: shaded as the real water is by the deferred lighting (terrain.metal im_defer_fs, material 0x80: a
+		// class-0 byte with bit 7, which no block has). Its colour as the real water's surface (the biome's colour toward one
+		// turquoise, terrain.metal's water branch), not the texture tinted and lit as ground: that read cyan beside the real
+		// water's deep blue (Jack's 17.24.36, 17.26.15))
+		float3 wc = mlRgb(bt.z);
+		wc.g = max(wc.g, 0.39);
+		float3 wn = wc / max(max(wc.r, max(wc.g, wc.b)), 1e-3);
+		wn = mix(wn, float3(0.3, 0.9, 0.85), 0.5);
+		float tl = mix(0.62, dot(tex.rgb, float3(0.299, 0.587, 0.114)), 0.35);
+		color = wn * (0.34 + 0.3 * tl);
+		mat = 0x80u;
+	}
 	uint axis = in.face;  // (the G-buffer's axis numbering is ours: +x -x +y -y +z -z)
 	float3 n = float3(axis == 0u ? 1.0 : axis == 1u ? -1.0 : 0.0, axis == 2u ? 1.0 : axis == 3u ? -1.0 : 0.0, axis == 4u ? 1.0 : axis == 5u ? -1.0 : 0.0);
 	float2 lq = float2(float((in.light >> 4) & 15u), float(in.light & 15u)) / 15.0;

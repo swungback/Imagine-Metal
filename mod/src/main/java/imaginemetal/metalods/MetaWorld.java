@@ -616,6 +616,12 @@ final class MetaWorld {
 	private double progRate;
 	private double camX, camY, camZ;
 	private float reach;
+
+	/** The current level's sea level (the y above its topmost sea water block), 0 if there's no level. */
+	private static float seaLevel() {
+		ClientLevel l = Minecraft.getInstance().level;
+		return l == null ? 0f : (float) l.getSeaLevel();
+	}
 	private int detail;
 	private @Nullable FrustumIntersection frustum;
 
@@ -698,7 +704,7 @@ final class MetaWorld {
 		MemoryUtil.memPutFloat(fr + 128, MetaSettings.hideUnderReal ? 1f : 0f);
 		MemoryUtil.memPutFloat(fr + 132, this.reach);
 		MemoryUtil.memPutFloat(fr + 136, MetaSettings.showLevels ? 1f : 0f);
-		MemoryUtil.memPutFloat(fr + 140, 0f);
+		MemoryUtil.memPutFloat(fr + 140, seaLevel());  // (ml_vs: water tops in a voxel holding the sea's surface go to it)
 		for (int i = 0; i < this.maskSize * this.maskWords; i++) MemoryUtil.memPutInt(this.arena.mask + 4L * i, this.maskBits[i]);
 		this.housekeeping();
 		return n;
