@@ -156,6 +156,17 @@ fragment MLGOut ml_fs(MLOut in [[stage_in]], constant MLFrame &f [[buffer(0)]], 
 	uint tc = kind == 1u ? bt.x : kind == 2u ? bt.y : kind == 3u ? bt.z : kind == 4u ? bt.w : kind == 5u ? m.fixedTint : 0xFFFFFFu;
 	float3 color = tex.rgb * mlRgb(tc);
 	if (water) color *= 0.85;
+	// (fix5: each LOD block a little lighter or darker than its neighbours, as Distant Horizons' noise texture (Jack's 16.04.19):
+	// one flat colour per face read as plastic. +-7 % per block of its level, not on water)
+	if (!water) {
+		float3 fn = float3(in.face == 0u ? 1.0 : in.face == 1u ? -1.0 : 0.0, in.face == 2u ? 1.0 : in.face == 3u ? -1.0 : 0.0,
+			in.face == 4u ? 1.0 : in.face == 5u ? -1.0 : 0.0);
+		int3 wbk = f.camBlock.xyz + int3(floor(in.rel + f.camFrac.xyz - fn * 0.02));
+		int3 vq = wbk >> int3(in.level);
+		uint hsh = uint(vq.x) * 73856093u ^ uint(vq.y) * 19349663u ^ uint(vq.z) * 83492791u;
+		hsh = (hsh ^ (hsh >> 13)) * 1274126177u;
+		color *= 0.93 + 0.14 * float(hsh >> 24) / 255.0;
+	}
 	if (f.params.z > 0.5) {
 		// (debug: each level its own colour: 0 red, 1 orange, 2 yellow, 3 green, 4 cyan, 5 blue)
 		const float3 lc[6] = {float3(1.0, 0.3, 0.3), float3(1.0, 0.6, 0.2), float3(1.0, 1.0, 0.3), float3(0.3, 1.0, 0.3), float3(0.3, 1.0, 1.0), float3(0.4, 0.4, 1.0)};

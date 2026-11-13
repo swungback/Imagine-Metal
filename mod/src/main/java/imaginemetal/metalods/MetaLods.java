@@ -219,7 +219,7 @@ public final class MetaLods {
 		out[1] = 0f;
 		if (!active() || MetaSettings.farFog <= 0f || reach() <= 0) return;
 		out[0] = renderDistance * 16f;
-		out[1] = 1.9f * MetaSettings.farFog;
+		out[1] = MetaSettings.farFog;  // (fix5: the haze's strength; air.metal starts it at 24 blocks, over near land too)
 	}
 
 	public static void adjustFog(FogData fog, FogType type) {

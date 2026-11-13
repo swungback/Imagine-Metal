@@ -102,7 +102,7 @@ public final class MetaSettings {
 			+ "stats=" + stats + "\n"
 			+ "# While LODs are being made: chunks ready, chunks left and the speed on screen (gone when done).\n"
 			+ "progress=" + progress + "\n"
-			+ "# Far fog (0 off, 1 the default, 2 thick): the far land fades into the horizon's colour with distance.\n"
+			+ "# Far fog (0 off, 1 the default, 2 thick): distance haze, land fades into the horizon's colour with distance, more low down.\n"
 			+ "farFog=" + String.format(java.util.Locale.ROOT, "%.2f", farFog) + "\n";
 		try {
 			Files.createDirectories(f.getParent());

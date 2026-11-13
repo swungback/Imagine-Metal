@@ -48,10 +48,15 @@ fragment float4 im_air_fs(ImAirOut in [[stage_in]], float4 dst [[color(0)]], dep
 	// MetaLODS' far fog (as Distant Horizons' far fog): past the real terrain's edge the land fades into the horizon's colour,
 	// growing with the square of the distance into the LODs' reach, so the far LODs read as distance, not as blocks (Jack: Gael's
 	// with DH "looks better cus of fog in distance", it "hides the ugly lods")
+	// (fix5, after Jack's DH + Gael screenshots 16.02-16.04: there the haze is already there ~100 blocks out and builds ridge
+	// after ridge, thicker low down (valleys and rivers full of it, hilltops clearer). So: aerial perspective over near land and
+	// LODs alike (no step at the hand-over), from 24 blocks, exponential with distance (700 blocks per e-fold at strength 1),
+	// denser below ~64 and thinner up high, by the height of the point seen; none in caves (fogParams.z = 1 - cave))
 	float farFog = 0.0;
-	if (a.size.w > 0.0 && dist > a.size.z) {
-		float x = saturate((dist - a.size.z) / max(f.fogParams.x - a.size.z, 16.0)) * a.size.w;
-		farFog = 1.0 - exp(-x * x);
+	if (a.size.w > 0.0 && dist > 24.0) {
+		float yw = f.fogParams.y + p.y;
+		float hf = clamp(exp2(-(max(yw, 40.0) - 64.0) / 48.0), 0.35, 2.2);
+		farFog = (1.0 - exp(-(dist - 24.0) / 700.0 * a.size.w * hf)) * saturate(f.fogParams.z);
 	}
 	if (dist < 6.0 && border <= 0.001 && farFog <= 0.001) return dst;
 	float3 T = float3(1.0);
