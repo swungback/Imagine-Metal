@@ -10,7 +10,8 @@ import org.lwjgl.system.MemoryUtil;
  * reused RING frames later, when no frame in flight can still be reading it.
  */
 final class MetaArena {
-	static final int QUADS_PER_PAGE = 256, PAGE_BYTES = QUADS_PER_PAGE * 8, INFO_BYTES = 16, RING = 4;
+	/** A page: 256 quads (8 bytes each), then their corner shading (a byte each, MetaMesher's ao; metalods.metal reads it). */
+	static final int QUADS_PER_PAGE = 256, PAGE_BYTES = QUADS_PER_PAGE * 9, AO_AT = QUADS_PER_PAGE * 8, INFO_BYTES = 16, RING = 4;
 	static final int FRAME_BYTES = 144, MASK_MAX = 128, MASK_BYTES = MASK_MAX * MASK_MAX / 8;
 	final int pages;
 	final long quadBuf, infoBuf, modelBuf, biomeBuf;
@@ -79,9 +80,10 @@ final class MetaArena {
 	}
 
 	/** Writes `count` quads (pairs of ints from src[from]) into page p and its header. */
-	void fill(int p, int[] src, int from, int count, int ox, int oy, int oz, int level, int face) {
+	void fill(int p, int[] src, byte[] ao, int from, int count, int ox, int oy, int oz, int level, int face) {
 		long at = this.quads + (long) p * PAGE_BYTES;
 		MemoryUtil.memIntBuffer(at, 2 * count).put(src, 2 * from, 2 * count);
+		MemoryUtil.memByteBuffer(at + AO_AT, count).put(ao, from, count);
 		long h = this.infos + (long) p * INFO_BYTES;
 		MemoryUtil.memPutInt(h, ox);
 		MemoryUtil.memPutInt(h + 4, oy);

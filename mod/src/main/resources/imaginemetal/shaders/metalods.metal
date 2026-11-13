@@ -44,10 +44,12 @@ struct MLOut {
 	uint light [[flat]];       // sky | block << 4
 	uint biome [[flat]];
 	uint level [[flat]];
+	uint ao [[flat]];          // the quad's corner shading (MetaMesher: corner u + 2 v at bits 2 (u + 2 v), 3 = open)
+	float2 qv;                 // where on the quad, in its voxels (u along its width, v along its height)
 };
 
 vertex MLOut ml_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant MLFrame &f [[buffer(0)]],
-	device const uint *visible [[buffer(1)]], device const PageInfo *pages [[buffer(2)]], device const uint2 *quads [[buffer(3)]],
+	device const uint *visible [[buffer(1)]], device const PageInfo *pages [[buffer(2)]], device const uchar *quads [[buffer(3)]],
 	device const Model *models [[buffer(4)]]) {
 	MLOut o;
 	uint page = visible[iid];
@@ -59,6 +61,8 @@ vertex MLOut ml_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant ML
 	o.light = 0u;
 	o.biome = 0u;
 	o.level = 0u;
+	o.ao = 0xFFu;
+	o.qv = float2(0.0);
 	o.uv = float2(0.0);
 	o.rel = float3(0.0);
 	if (q >= count) {
@@ -66,7 +70,9 @@ vertex MLOut ml_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant ML
 		return o;
 	}
 	uint level = pi.packed & 15u, face = (pi.packed >> 4) & 7u;
-	uint2 qd = quads[page * 256u + q];
+	// (a page: 256 quads of 8 bytes, then a byte of corner shading each: MetaArena.PAGE_BYTES)
+	device const uchar *pg = quads + page * 2304u;
+	uint2 qd = ((device const uint2 *) pg)[q];
 	float x = float(qd.x & 31u), z = float((qd.x >> 5) & 31u), y = float((qd.x >> 10) & 511u);
 	float w = float(((qd.x >> 22) & 31u) + 1u), h = float(((qd.x >> 27) & 31u) + 1u);
 	float u = float(c & 1u), v = float(c >> 1);
@@ -106,6 +112,8 @@ vertex MLOut ml_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant ML
 	o.light = qd.y >> 24;
 	o.face = face;
 	o.level = level;
+	o.ao = pg[2048u + q];
+	o.qv = float2(u * w, v * h);
 	return o;
 }
 
@@ -162,6 +170,15 @@ fragment MLGOut ml_fs(MLOut in [[stage_in]], constant MLFrame &f [[buffer(0)]], 
 	uint4 bt = biomes[in.biome];
 	uint tc = kind == 1u ? bt.x : kind == 2u ? bt.y : kind == 3u ? bt.z : kind == 4u ? bt.w : kind == 5u ? m.fixedTint : 0xFFFFFFu;
 	float3 color = tex.rgb * mlRgb(tc);
+	// (fix7: ambient occlusion, Jack's "corner darkening" on the far land as DH + Gael have it: each voxel of the quad shaded
+	// between its four corners' values, vanilla's smooth-light steps)
+	if (in.ao != 0xFFu) {
+		float2 t = fract(in.qv);
+		float4 k = float4(float(in.ao & 3u), float((in.ao >> 2) & 3u), float((in.ao >> 4) & 3u), float((in.ao >> 6) & 3u));
+		k = 0.5 + k * (0.5 / 3.0) + (k * (3.0 - k)) * (0.05 / 2.0);  // (0 0.5, 1 0.72, 2 0.88, 3 1)
+		float a = mix(mix(k.x, k.y, t.x), mix(k.z, k.w, t.x), t.y);
+		color *= a;
+	}
 	if (water) color *= 0.85;
 	// (fix5: each LOD block a little lighter or darker than its neighbours, as Distant Horizons' noise texture (Jack's 16.04.19):
 	// one flat colour per face read as plastic. +-7 % per block of its level, not on water)
@@ -173,6 +190,15 @@ fragment MLGOut ml_fs(MLOut in [[stage_in]], constant MLFrame &f [[buffer(0)]], 
 		uint hsh = uint(vq.x) * 73856093u ^ uint(vq.y) * 19349663u ^ uint(vq.z) * 83492791u;
 		hsh = (hsh ^ (hsh >> 13)) * 1274126177u;
 		color *= 0.93 + 0.14 * float(hsh >> 24) / 255.0;
+	}
+	if (!water) {
+		// (fix7: the far land less saturated and a little darker, as DH + Gael's (Jack's 16.02-16.04): ours read a flat
+		// yellow-green. Eased in over the 384 blocks past the real terrain's edge, so the hand-over itself shows no change of
+		// colour; 20 % less saturation and 6 % darker at most)
+		float edge = float(f.mask.z) * 8.0;
+		float k = smoothstep(edge, edge + 384.0, length(in.rel.xz));
+		float l = dot(color, float3(0.2126, 0.7152, 0.0722));
+		color = mix(color, float3(l), 0.2 * k) * (1.0 - 0.06 * k);
 	}
 	if (f.params.z > 0.5) {
 		// (debug: each level its own colour: 0 red, 1 orange, 2 yellow, 3 green, 4 cyan, 5 blue)

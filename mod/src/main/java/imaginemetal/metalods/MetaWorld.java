@@ -484,7 +484,7 @@ final class MetaWorld {
 			c.faceFirst[f] = n;
 			for (int q = 0; q < m.counts[f]; q += MetaArena.QUADS_PER_PAGE) {
 				int p = this.arena.alloc();
-				this.arena.fill(p, m.quads[f], q, Math.min(MetaArena.QUADS_PER_PAGE, m.counts[f] - q), ox, this.minY, oz, c.level, f);
+				this.arena.fill(p, m.quads[f], m.ao[f], q, Math.min(MetaArena.QUADS_PER_PAGE, m.counts[f] - q), ox, this.minY, oz, c.level, f);
 				pages[n++] = p;
 			}
 		}
