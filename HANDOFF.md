@@ -1,8 +1,64 @@
-# Imagine Metal: handoff (2026-11-13, ~18:25)
+# Imagine Metal: handoff (2026-11-13, ~21:50)
+
+## START HERE: 2026-11-13 ~21:50, fix8 DEPLOYED (fix7 + fix8 + fix8b), not seen in game yet
+mods = fix8: metalods 9eb9a42, CI run 43503788682, jar sha1 30d21a49..., copy `instances/Imagine metal/imagine-metal-metalods-fix8.jar`.
+Fallbacks in `instances/Imagine metal/`: fix7 (92a4589c...), fx1, fix5. Jack's fix7 sessions: logs 2026-11-13-7 (18:29-18:55) and
+latest (19:07-19:20); screenshots 18.31.26 to 19.20.10 all looked at.
+
+### What the fix7 sessions showed
+- Phantom blocks: NO "section table copy" line in either log: no level reset happened inside a running game (he quit to desktop
+  between sessions; the only "mcopt-own reset" lines are at quit). The fix6 check has still never run. No section-table phantom in
+  the screenshots. 18.53.17 ("back at spawn after being far away"): a grass-topped 8-block LOD box and a floating LOD slab in the
+  near land = a coarse MetaLODS column made while he was far away, standing in for its children (MetaWorld.visit keeps old columns
+  as stand-ins) in chunks the seam mask didn't count as drawn yet. fix8b: ml_fs drops levels >= 2 inside the near distance
+  (masked columns only; at detail >= 4 those levels are never the right level there).
+- Water (18.31.26-18.35.11): (a) bright textured blue strips along the near/LOD edge = LOD water voxels' SIDE faces on the edge
+  facing into the near chunk, seen THROUGH the real water. fix8: ml_fs tests water sides' mask by the block in front of them;
+  MetaWorld draws columns touching the mask (1 block wider test) with the masked pipeline so it runs. (b) 18.31.55 two chunk-sized
+  dark teal squares in the LOD sea (71,135,142 vs the LOD water around 148,170,178): LOD water tops with sky light 0 (columns from
+  real chunks ingested before their light), floor 10/15 dimmed the sky reflection. fix8: LOD water tops get sky 15.
+  Not touched: 18.54.55 under water "still dont feel like i can see where water ends"; 18.51.39 mirror lake (Jack: he'll bring the
+  reflection up again if it bothers him).
+- Perf (both logs, perf lines every 10 s): normal play 58-60 fps at vsync, gpu ~16.5 ms with passes 12-14. Dips:
+  * most 30-40 fps windows line up with resource reloads / options screens ("Reloading ResourceManager", "Changing view distance")
+    and the 10 fps windows are the game paused / unfocused (hand+gui 2.33 flat): not steady-state.
+  * real ones: terrain 8.5-9.7 ms (normal 5-6) at the village at night (18:35:48-18:36:18, "fps in 40s here") and while MetaLODS
+    regenerates after travel (18:48-18:53, 19:08-19:09). Terrain vs LOD pages drawn: ~+0.5 ms per 1000 pages (1000 pages 5.5 ms,
+    2500-3500 pages 7.1-7.3). translucent 4-6 ms 18:49:41-18:51:01 (snowy area with a lake filling the view: water SSR).
+  * far shadows: NOT separable in the perf line (the deferred lighting is in the terrain pass, tile memory: can't be cut). fix8
+    makes them cheaper (see below). A/B: MetaLODS "Far shadows" toggle, watch "terrain" in the perf line.
+- Other chat notes, NOT built (not in his list): 18:33 "animals jittering", 18:36 "all ores dont get the proper shit lit up"
+  (fix7d's ore glow not enough), 18:47 "pick is glowing on tips??", 19:20 "diamond items glow", 19:11 "looks bright"/"looks dark"
+  (cave). Ask which he wants next.
+
+### fix8 (66506ae) + fix8b (9eb9a42)
+- Leaf culling (Jack: like Way Better Leaves' culling; WBL is All Rights Reserved, so our own code from the idea only): setting
+  "Leaf culling" (Surfaces, default on, imaginemetal.leafCulling; toggling rebuilds chunks). OwnFrapi.emitted (his path: Fabric
+  API loaded) and OwnBlockRenderer drop a leaf face whose cull-face neighbour is leaves; a kept face whose OPPOSITE neighbour is
+  leaves is marked (OwnQuads.Layer.fillNext -> mat bit FILL -> material corner pattern 1101 = 13). terrain.metal: wc 13 waves whole
+  like leaves; own_fs_g / own_fs_alpha (pre-pass) / ownFsBody keep its transparent texels, filled from the texel half a sprite over
+  (else a quarter), x0.62 (imLeafFill, derivatives taken outside the branch); shadow.metal: wc 13 is not a plant, casts whole
+  (ImShadowOut.fill). Plain culling looked hollow to Jack; this is meant to look like WBL's solid outer leaves. ASK how it looks.
+- Vines: OwnQuads.writeMaterials gave wave 3 (vines) corners 0 (never swayed on our mesher): now 0101 like storeMaterials.
+  terrain.metal: the vine's sway is in its wall's plane only (normal axis = the one where the vertex sits off the block grid,
+  0.05 out for a wall vine, 0.95 for a ceiling one): d *= (0.8, 1.6, 0.8), the normal component zeroed.
+- LOD water sides / tops: above. Far shadows (imFarSun): no march for faces with dot(n, L) <= 0, 12 steps x1.45 (was 18 x1.3, same
+  ~1,200 block reach), stop once the ray is above y 336.
+- Clouds: Jack 21:19 "clouds stay blocky": nothing to change.
+
+### Tell Jack to test
+1. Forest / jungle with F3: fps vs before; trees from outside (solid, not hollow?) and from inside a canopy; toggle "Leaf culling".
+2. Vines on a wall: sway along the wall, never into it.
+3. Fly over the sea and a lake at the near/LOD edge: no blue strips, no dark squares.
+4. Go far (1000+ blocks), come back to spawn: no big LOD boxes in the near land.
+5. The phantom check still needs a rejoin in ONE game session: Save and Quit to title, rejoin; then End and back
+   (`/execute in minecraft:the_end run tp @s 0 70 0`, `/execute in minecraft:overworld run tp @s ~ ~ ~`). Log: "section table copy".
+6. Far shadows A/B: MetaLODS "Far shadows" off/on while flying, perf line "terrain".
+
 
 Where things stand, for picking the work up in a new conversation.
 
-## START HERE: 2026-11-13 18:20, fix7 DEPLOYED (fix6 + MetalFX + fix7a-d), NOT seen in game yet
+## (older) 2026-11-13 18:20, fix7 DEPLOYED (fix6 + MetalFX + fix7a-d), NOT seen in game yet
 mods = fix7: metalods 6721afc, CI run 43471074869, jar sha1 92a4589c... (copy `instances/Imagine metal/imagine-metal-metalods-fix7.jar`).
 Fallbacks in `instances/Imagine metal/`: fx1 (2df4bad5..., fix6 + MetalFX only), fix5 (4ce76e04..., before this chat).
 Jack had NOT launched the game during this chat (latest.log still the 17:22-17:26 fix3 session). First thing: read his new log.
