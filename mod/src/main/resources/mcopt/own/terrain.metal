@@ -2546,6 +2546,17 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 				}
 				color.rgb = mix(color.rgb, tirC, tir);
 				color.a = mix(color.a, 1.0, tir);
+				if ((uint(imf.env.w + 0.5) & 64u) != 0u) {
+					// (fix9: inside the see-through window too the surface is a sheet: a rippling ceiling of light over the eye, the sky
+					// through it only in part. The window was clear, so looking up showed the sky in the water's fog and nothing told
+					// where the water ended (Jack's 18.54.55 "still dont feel like i can see where water ends"))
+					float rl2 = dot(texel.rgb, float3(0.299, 0.587, 0.114));
+					float rip2 = saturate(0.5 + (rl2 - 0.55) * 1.8 + length(fnT.xz) * 5.0);
+					float win = 1.0 - tir;
+					float3 sheet = saturate(tirC * (1.25 + 0.9 * rip2) + float3(0.05, 0.08, 0.08) * rip2);
+					color.rgb = mix(color.rgb, sheet, 0.6 * win);
+					color.a = max(color.a, mix(0.38, 0.62, rip2) * win);
+				}
 			}
 			// what's under the water turns blue (Reimagined's translucentMult: the biome's water colour, normalized; less far away;
 			// with the depth under the water, own_fs_tr's absorption by how deep it is instead)
@@ -2708,7 +2719,7 @@ vertex ImDeferOut im_defer_vs(uint vid [[vertex_id]]) {
 struct ImHeightP {
 	int4 cam;        // xyz the camera's block, w 1 = on
 	float4 frac;     // xyz the camera's position within it, w the world's bottom (y)
-	float4 range;    // x from how far away (blocks) the march is made, yzw unused
+	float4 range;    // x from how far away (blocks) the march is made, y the highest land in the map (world y, 0: unknown), zw unused
 };
 
 // How much of the sun reaches world point p (camera-relative) by the height map: a march toward the light from 20 blocks out, steps
@@ -2724,9 +2735,12 @@ static float imFarSun(float3 p, float3 n, float3 L, constant ImHeightP &hp, devi
 	if (dot(n, L) <= 0.0) return 1.0;
 	float3 o = p + hp.frac.xyz + n * 0.5;  // (relative to the camera's block: exact in floats out here)
 	float shade = 0.0, t = 20.0;
+	// (fix9: the march stops once its ray is above the highest land the map holds, not only above y 336: from the sea or a valley
+	// toward a high sun that is a few steps instead of twelve)
+	float ceilY = hp.range.y > 0.0 ? min(hp.range.y + 1.0, 336.0) : 336.0;
 	for (int i = 0; i < 12; i++, t *= 1.45) {
 		float3 q = o + L * t;
-		if (float(hp.cam.y) + q.y > 336.0) break;
+		if (float(hp.cam.y) + q.y > ceilY) break;
 		int2 b = hp.cam.xz + int2(floor(q.xz));
 		int2 tx = b >> 4;
 		uint v = hm[(uint(tx.y) & 1023u) * 1024u + (uint(tx.x) & 1023u)];
@@ -2785,7 +2799,10 @@ fragment float4 im_defer_fs(ImDeferOut in [[stage_in]], float4 g1 [[color(1)]], 
 		float fr = 1.0 - saturate(dot(m.n, -normalize(p)));
 		fr *= fr;
 		float a = max(mix(0.08, 1.0, fr * fr * 0.9), 0.72);
-		lit *= pow(a, 1.0 / 2.2);  // (display-encoded: a times the linear light)
+		// (fix9: toward the real water's colour beside it: measured at the hand-over in Jack's 22.30.23, the LOD water was
+		// (134,161,182) against the real water's (95,136,158), a pale grey-lavender sheet; in linear light about x(0.42, 0.66,
+		// 0.72) of it, the red most (the real water's body absorbs it))
+		lit *= pow(a * float3(0.42, 0.66, 0.72), 1.0 / 2.2);  // (display-encoded: a times the linear light)
 		mat = 0u;
 	}
 	// Minecraft's own fog amount (terrain.fsh), from the place instead of the vertex distances

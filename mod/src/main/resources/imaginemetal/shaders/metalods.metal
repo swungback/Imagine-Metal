@@ -232,7 +232,11 @@ fragment MLGOut ml_fs(MLOut in [[stage_in]], constant MLFrame &f [[buffer(0)]], 
 		color = mix(color, lc[min(in.level, 5u)], 0.6);
 	}
 	uint mat = (m.flags >> 8) & 255u;
-	if (water && in.face == 2u) {
+	// (fix9: every water face, its sides too, shaded as the water's top (material 0x80 with an upward normal): its sides were the
+	// water texture lit as ground, a bright blue line wherever two water surfaces met at different heights (level seams, lakes),
+	// Jack's 22.30.23 "water in lods still looks like ass")
+	bool wtop = water;
+	if (wtop) {
 		// (LOD water's top: shaded as the real water is by the deferred lighting (terrain.metal im_defer_fs, material 0x80: a
 		// class-0 byte with bit 7, which no block has). Its colour as the real water's surface (the biome's colour toward one
 		// turquoise, terrain.metal's water branch), not the texture tinted and lit as ground: that read cyan beside the real
@@ -245,7 +249,7 @@ fragment MLGOut ml_fs(MLOut in [[stage_in]], constant MLFrame &f [[buffer(0)]], 
 		color = wn * (0.34 + 0.3 * tl);
 		mat = 0x80u;
 	}
-	uint axis = in.face;  // (the G-buffer's axis numbering is ours: +x -x +y -y +z -z)
+	uint axis = wtop ? 2u : in.face;  // (the G-buffer's axis numbering is ours: +x -x +y -y +z -z; fix9: water faces all as tops)
 	float3 n = float3(axis == 0u ? 1.0 : axis == 1u ? -1.0 : 0.0, axis == 2u ? 1.0 : axis == 3u ? -1.0 : 0.0, axis == 4u ? 1.0 : axis == 5u ? -1.0 : 0.0);
 	float2 lq = float2(float((in.light >> 4) & 15u), float(in.light & 15u)) / 15.0;
 	// (a floor on the sky light: real chunks' air under a thick canopy has sky light 0, and the coarser levels' merged leaves
@@ -254,7 +258,7 @@ fragment MLGOut ml_fs(MLOut in [[stage_in]], constant MLFrame &f [[buffer(0)]], 
 	lq.y = max(lq.y, 10.0 / 15.0);
 	// (fix8: water's top under the open sky: columns made from real chunks before their light was worked out stored sky 0 there,
 	// and those chunks' water came out a dark teal square beside the pale sky-lit water around it (Jack's 18.31.55))
-	if (water && in.face == 2u) lq.y = 1.0;
+	if (water) lq.y = 1.0;
 	MLGOut o;
 	o.g1 = float4(saturate(color), float(axis << 1) / 255.0);
 	o.g2 = float4(saturate(tex.rgb), float(mat) / 255.0);

@@ -108,8 +108,15 @@ public final class Rle {
 		if ((r = Voxel.rank(l1)) > rank) { best = l1; rank = r; }
 		if ((r = Voxel.rank(l2)) > rank) { best = l2; rank = r; }
 		if ((r = Voxel.rank(l3)) > rank) { best = l3; rank = r; }
-		if (rank > 0) return best;
-		// all air: the brightest sky and block light of the eight
+		if (rank > Voxel.KIND_WATER) return best;
+		if (rank == Voxel.KIND_WATER) {
+			// (fix9) water only when at least half of the eight is: one waterfall column no longer becomes a pillar 2, 4, 8, 16
+			// blocks wide at the coarser levels (Jack 22.30.05: a floating island's falls as a huge blue block under it)
+			int w = 0;
+			for (int v : new int[] {l0, l1, l2, l3, u0, u1, u2, u3}) if (Voxel.rank(v) == Voxel.KIND_WATER) w++;
+			if (w >= 4) return best;
+		}
+		// all air (or too little water): the brightest sky and block light of the eight
 		int sky = 0, blk = 0;
 		for (int v : new int[] {l0, l1, l2, l3, u0, u1, u2, u3}) {
 			sky = Math.max(sky, Voxel.sky(v));

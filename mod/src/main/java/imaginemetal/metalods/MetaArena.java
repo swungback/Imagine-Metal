@@ -121,7 +121,11 @@ final class MetaArena {
 		}
 	}
 
+	/** (fix9) The highest (top + 1) written into the height map since it was made: the far shadows' march stops above it. */
+	volatile int maxTop;
+
 	private void height(int tx, int tz, int top, int level) {
+		if (top + 1 > this.maxTop) this.maxTop = top + 1;
 		int i = Math.floorMod(tz, HM) * HM + Math.floorMod(tx, HM);
 		int tag = (Math.floorDiv(tx, HM) & 1023) | (Math.floorDiv(tz, HM) & 1023) << 10;
 		long a = this.heights + 4L * i;

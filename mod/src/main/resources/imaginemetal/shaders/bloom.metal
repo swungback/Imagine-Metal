@@ -839,7 +839,9 @@ fragment ImFxMotionOut im_bloom_motion_r(ImBloomOut in [[stage_in]], texture2d<f
 	ImFxMotionOut o;
 	o.motion = imbMotion(in.uv, depth, p);
 	float a = frame.read(uint2(clamp(in.uv, 0.0, 0.9999) * float2(frame.get_width(), frame.get_height()))).a;
-	o.reactive = a > 0.95 && a < 0.97 ? 0.8 : 0.0;
+	// (fix9: 0.4, was 0.8: with the history nearly ignored, each frame's own sub-pixel offset showed on mobs as a shimmer, Jack's
+	// "animals jittering" (18:33); at 0.4 MetalFX still lets most of a moving mob's history go, so it doesn't smear)
+	o.reactive = a > 0.95 && a < 0.97 ? 0.4 : 0.0;
 	return o;
 }
 

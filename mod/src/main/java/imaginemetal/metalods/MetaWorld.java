@@ -720,7 +720,8 @@ final class MetaWorld {
 		MemoryUtil.memPutFloat(hp + 24, (float) (camZ - bz));
 		MemoryUtil.memPutFloat(hp + 28, (float) this.minY);
 		MemoryUtil.memPutFloat(hp + 32, Math.max(96f, imaginemetal.Settings.shadowRange * 0.7f));  // (inside that the shadow maps cover it)
-		MemoryUtil.memPutFloat(hp + 36, 0f);
+		// (fix9: the highest land in the height map, world y: the far shadows' march stops once its ray is above it)
+		MemoryUtil.memPutFloat(hp + 36, this.arena.maxTop > 0 ? (float) (this.minY + this.arena.maxTop) : 0f);
 		MemoryUtil.memPutFloat(hp + 40, 0f);
 		MemoryUtil.memPutFloat(hp + 44, 0f);
 		for (int i = 0; i < this.maskSize * this.maskWords; i++) MemoryUtil.memPutInt(this.arena.mask + 4L * i, this.maskBits[i]);

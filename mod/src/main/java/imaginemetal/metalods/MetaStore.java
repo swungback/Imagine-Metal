@@ -33,6 +33,12 @@ import org.jspecify.annotations.Nullable;
  */
 final class MetaStore {
 	static final int GEN_VERSION = 7;
+	/**
+	 * The real chunks' folder. real2 (fix9): only still water counts (a waterfall's flowing water is air to the LODs) and a
+	 * coarser voxel is water only when at least half of its eight is: the old files hold waterfalls grown into huge water
+	 * pillars under floating islands (Jack 22.30.05), so they are left behind.
+	 */
+	static final String REAL = "real2";
 	private static final int MAGIC = 0x4D4C4F44;  // "MLOD"
 	final Path dir;
 	private final RegistryAccess access;
@@ -64,8 +70,8 @@ final class MetaStore {
 		this.dir = dir;
 		this.access = access;
 		try {
-			Files.createDirectories(dir.resolve("real"));
-			try (var s = Files.list(dir.resolve("real"))) {
+			Files.createDirectories(dir.resolve(REAL));
+			try (var s = Files.list(dir.resolve(REAL))) {
 				s.forEach(p -> {
 					String n = p.getFileName().toString();
 					if (!n.startsWith("r.") || !n.endsWith(".bin")) return;
@@ -133,7 +139,7 @@ final class MetaStore {
 		}
 		if (!this.knownRegions.contains(k) && !create) return null;
 		Region r = new Region();
-		Path p = this.dir.resolve("real").resolve("r." + rx + "." + rz + ".bin");
+		Path p = this.dir.resolve(REAL).resolve("r." + rx + "." + rz + ".bin");
 		if (Files.exists(p)) {
 			try (DataInputStream in = open(p)) {
 				if (in.readInt() == MAGIC) {
@@ -194,7 +200,7 @@ final class MetaStore {
 			int rx = (int) (e.getKey() >> 32), rz = (int) (long) e.getKey();
 			Region r = e.getValue();
 			this.io.execute(() -> {
-				Path p = this.dir.resolve("real").resolve("r." + rx + "." + rz + ".bin");
+				Path p = this.dir.resolve(REAL).resolve("r." + rx + "." + rz + ".bin");
 				try {
 					this.write(p, out -> {
 						out.writeInt(MAGIC);

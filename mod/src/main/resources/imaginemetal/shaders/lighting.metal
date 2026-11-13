@@ -166,7 +166,11 @@ static inline float imBlockCurve(float b) {
 
 // Sky light level 0..1 -> how much of the sky's light reaches the surface.
 static inline float imSkyCurve(float s) {
-	return s * s * (3.0 - 2.0 * s);
+	// (fix9: to the power 1.5: the sky's light that leaks into caves and down ravines (levels 6-12) falls off faster, so a cave
+	// doesn't read daylit and then turn black a few blocks on (Jack's 19.11.32-43 "looks bright" / "looks dark"; with the floor
+	// raised in ImagineFrame); open air (14-15) as before)
+	float c = s * s * (3.0 - 2.0 * s);
+	return c * sqrt(c);
 }
 
 static inline float3 imTonemap(float3 x, float4 t) {
@@ -967,7 +971,14 @@ static float imOre(uint t, float3 c, thread float3 &cm, bool nether) {
 	switch (t) {
 		case 1u:  // iron
 			// (softer than Reimagined's: in a dark cave its pale peach specks blew out to white blobs, the texture gone)
-			if (c.r != c.g && c.r - c.b > 0.15) { cm = pow(max(c, 0.0), 0.75); return pow(c.r, 1.5) * 1.2; }
+			// (fix9: every speck texel lit alike, the dark ones too: its colour brought to one brightness (some of the texture's
+			// shading kept) and a steady glow, softer than diamond's. By the texel's own red it was 0.2-0.9: the pale ones glowed,
+			// the darker ones hardly, Jack's 22.29.30 "iron still not lighting up properly")
+			if (c.r != c.g && c.r - c.b > 0.12) {
+				float mx = max(c.r, max(c.g, c.b));
+				cm = mix(float3(0.78) / max(mx, 0.2), float3(1.0), 0.3);
+				return 1.3;
+			}
 			break;
 		case 2u:  // copper
 			if (max(c.r * 0.5, c.g) - c.b > 0.05 && (c.r + c.g > 1.9 || c.r + c.g + c.b < 1.9)) { cm = c; return c.r * 2.0 + 0.7; }
@@ -1228,7 +1239,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			}
 		}
 	}
-	if (oreE > 0.0) albedo *= oreCm;
+	if (oreE > 0.0) albedo *= (oreT == 1u && cls == IM_MAT_ORE) ? min(oreCm, float3(1.0)) : oreCm;  // (fix9: iron's evened glow colour isn't its albedo)
 	// (sand and sandstone a little richer and less bright: in full sun they washed out to a flat white)
 	if (cls == IM_MAT_SAND && kind == 0u) {
 		float al = imLuma(albedo);
@@ -1771,7 +1782,9 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 		// (warm, or the soul flame's cyan: green and blue well over red, and bright)
 		// (a flame's yellow-orange only, and bright: a red mushroom's cap and other warm items lit up as if they glowed)
 		float warm = step(base.b, base.g) * step(base.g, base.r) * smoothstep(0.3, 0.5, base.g / max(base.r, 1e-3));
-		float soul = step(base.r * 1.6, base.g) * step(base.r * 1.6, base.b) * smoothstep(0.7, 0.9, hi);
+		// (fix9: and blue at least as high as green: soul fire's cyan is, a diamond's (its pickaxe's tips, a diamond, a diamond
+		// block in the hand) is greener, and those glowed as if they gave off light, Jack's 18.47.29 and 19.20.05)
+		float soul = step(base.r * 1.6, base.g) * step(base.r * 1.6, base.b) * step(base.g - 0.012, base.b) * smoothstep(0.7, 0.9, hi);
 		float e = max(warm, soul) * smoothstep(0.75, 0.92, hi) * smoothstep(0.45, 0.75, (hi - lo) / max(hi, 1e-3));
 		c += base * (1.6 * e);
 	}

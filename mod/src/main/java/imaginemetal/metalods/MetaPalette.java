@@ -71,7 +71,8 @@ public final class MetaPalette {
 	static int kindOf(BlockState s) {
 		if (s.isAir()) return Voxel.KIND_AIR;
 		FluidState fs = s.getFluidState();
-		if (s.getBlock() instanceof LiquidBlock) return fs.is(FluidTags.WATER) ? Voxel.KIND_WATER : Voxel.KIND_SOLID;
+		// (fix9) only still (source) water and lava: a waterfall's or lavafall's flowing blocks are air to the LODs
+		if (s.getBlock() instanceof LiquidBlock) return !fs.isSource() ? Voxel.KIND_AIR : fs.is(FluidTags.WATER) ? Voxel.KIND_WATER : Voxel.KIND_SOLID;
 		boolean empty;
 		try {
 			empty = s.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).isEmpty();
