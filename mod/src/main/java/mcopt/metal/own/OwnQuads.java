@@ -15,7 +15,10 @@ import org.lwjgl.system.MemoryUtil;
  * facing test, same stable bucket order (the digest check, -Dmcopt.own.mesh=verify, compares the two for every section).
  */
 public final class OwnQuads {
-	/** (fix8) mat's bit for a culled tree's outer leaf face (its holes filled: writeMaterials gives it the corner pattern 1101). */
+	/**
+	 * mat's bit for a bushy leaf plane (fix9, BushyLeaves: writeMaterials gives it the corner pattern 1101, which the shaders read as
+	 * "a plane": it waves whole and stiff, from the block's centre, and casts no shadow). (fix8 used it for filled leaf faces, gone.)
+	 */
 	static final int FILL = 1 << 16;
 	static final int BUCKETS = 7, QUAD = 64;
 	/**
@@ -228,6 +231,8 @@ public final class OwnQuads {
 		int hintGreys, hintTint;
 		/** (fix8, leaf culling) the next quad: leaves whose opposite face was culled, so their holes are filled (bit FILL of mat). */
 		boolean fillNext;
+		/** (fix9) while BushyLeaves' planes are tesselated (OwnMesher): every quad gets FILL. */
+		boolean planeMode;
 
 		Layer() {
 			for (int b = 0; b < BUCKETS; b++) {
@@ -616,7 +621,7 @@ public final class OwnQuads {
 				float mid = (ylo + yhi) * 0.5F + 1e-4F;
 				int up = 0;
 				for (int v = 0; v < 4; v++) if (p[v * 3 + 1] > mid) up |= 1 << v;
-				this.mat[b][i] = by << 8 | bz << 4 | bx | up << 12 | (this.fillNext ? FILL : 0);
+				this.mat[b][i] = by << 8 | bz << 4 | bx | up << 12 | (this.fillNext || this.planeMode ? FILL : 0);
 			}
 			for (int v = 0; v < 4; v++) {
 				long a = d + v * 16L;

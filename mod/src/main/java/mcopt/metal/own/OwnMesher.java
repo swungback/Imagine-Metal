@@ -148,6 +148,7 @@ public final class OwnMesher {
 		BlockModelLighter.enableCaching();
 		ModelBlockRenderer blockRenderer = new ModelBlockRenderer(ambientOcclusion, true, blockColors);
 		FluidRenderer fluidRenderer = new FluidRenderer(fluidModelSet);
+		OwnFluidEdge fluidEdge = new OwnFluidEdge();
 		OwnRegion own = REGION ? OwnRegion.of(region, minPos) : null;
 		BlockAndTintGetter level = own != null ? own : region;
 		OwnBlockRenderer ownRenderer = own != null && OwnBlockRenderer.ON ? OwnBlockRenderer.get(ambientOcclusion, blockColors) : null;
@@ -187,7 +188,12 @@ public final class OwnMesher {
 						if (blockEntity != null) results.blockEntities.add(blockEntity);
 					}
 					FluidState fluidState = blockState.getFluidState();
-					if (!fluidState.isEmpty()) fluidRenderer.tesselate(level, pos, fluidOutput, blockState, fluidState);
+					if (!fluidState.isEmpty()) {
+						// (fix9b: on the section's side, a neighbour in an unloaded chunk is the same fluid, OwnFluidEdge)
+						int lx = pos.getX() & 15, lz = pos.getZ() & 15;
+						BlockAndTintGetter fl = lx == 0 || lx == 15 || lz == 0 || lz == 15 ? fluidEdge.set(level, pos, blockState, fluidState) : level;
+						fluidRenderer.tesselate(fl, pos, fluidOutput, blockState, fluidState);
+					}
 					if (blockState.getRenderShape() == RenderShape.MODEL && api != null) {
 						// vanilla's region, not OwnRegion: Fabric API extends RenderSectionRegion (block entity render data, biomes) for FRAPI models
 						api.block(SectionPos.sectionRelative(pos.getX()), SectionPos.sectionRelative(pos.getY()), SectionPos.sectionRelative(pos.getZ()), region, pos,
@@ -206,9 +212,14 @@ public final class OwnMesher {
 						BlockStateModel plus = BushyLeaves.plus(region, pos, blockState, blockModelSet.get(blockState), blockState.getSeed(pos));
 						if (plus != null) {
 							float sx = SectionPos.sectionRelative(pos.getX()), sy = SectionPos.sectionRelative(pos.getY()), sz = SectionPos.sectionRelative(pos.getZ());
-							if (api != null) api.block(sx, sy, sz, region, pos, blockState, plus, blockState.getSeed(pos));
-							else if (ownRenderer != null) ownRenderer.tesselateBlock(quadOutput, sx, sy, sz, own, pos, blockState, plus, blockState.getSeed(pos));
-							else blockRenderer.tesselateBlock(quadOutput, sx, sy, sz, level, pos, blockState, plus, blockState.getSeed(pos));
+							quads.layers[0].planeMode = quads.layers[1].planeMode = true;  // (marked as planes: terrain.metal / shadow.metal)
+							try {
+								if (api != null) api.block(sx, sy, sz, region, pos, blockState, plus, blockState.getSeed(pos));
+								else if (ownRenderer != null) ownRenderer.tesselateBlock(quadOutput, sx, sy, sz, own, pos, blockState, plus, blockState.getSeed(pos));
+								else blockRenderer.tesselateBlock(quadOutput, sx, sy, sz, level, pos, blockState, plus, blockState.getSeed(pos));
+							} finally {
+								quads.layers[0].planeMode = quads.layers[1].planeMode = false;
+							}
 						}
 					}
 				} catch (Throwable t) {

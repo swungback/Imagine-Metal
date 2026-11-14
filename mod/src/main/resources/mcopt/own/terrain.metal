@@ -1837,12 +1837,22 @@ vertex VOut own_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant Dr
 		// (10: a tall plant's upper half, Build C2: waves whole like leaves, marked apart from them for the shadow casters)
 		if (wc != 0u && (wc == 15u || wc == 13u || wc == 10u || vine || ((wc >> corner) & 1u) != 0u)) {
 			float3 wp = float3(origin & 1023) + rel;
+			// (fix9b, a bushy leaf plane (1101, BushyLeaves): the whole plane moves as one, by its centre (the leaf block's centre,
+			// halfway between corners 0 and 2), and less: each of its corners swaying on its own, two blocks apart, stretched and
+			// sheared the plane every frame, Jack's "the waving part looks weird", and smeared it under the upscaler's history)
+			float planeAmp = 1.0;
+			if (wc == 13u && OWN_REC && COMPACT) {
+				uint rq = vi >> 2;
+				float3 pc = 0.5 * (ownQrecPos(arenaRaw, rq, 0) + ownQrecPos(arenaRaw, rq, 2));
+				wp += pc - ownQrecPos(arenaRaw, rq, vi & 3u);
+				planeAmp = 0.6;
+			}
 			float tw = g.GameTime * 1200.0;
 			const float amp = 0.065;  // (one for every waving block: a tall plant's halves share their corners and must move alike)
 			float ph = wp.x * 0.55 + wp.z * 0.38;
 			float3 d = float3(sin(tw * 1.6 + ph) * 0.7 + sin(tw * 2.9 + wp.z * 1.3) * 0.3,
 				sin(tw * 2.1 + wp.x * 0.9 + wp.z * 0.7) * 0.15,
-				cos(tw * 1.3 + ph * 0.8) * 0.6 + sin(tw * 3.3 + wp.x * 1.1) * 0.3) * amp;
+				cos(tw * 1.3 + ph * 0.8) * 0.6 + sin(tw * 3.3 + wp.x * 1.1) * 0.3) * amp * planeAmp;
 			// (vines: they hang off a wall 0.05 out, so they sway only along the wall, never toward it or away (fix8: a third across
 			// before, which still pushed them into the wall's blocks): the axis on which the corner sits off the block grid is the
 			// wall's normal (a wall vine's corners lie on the grid in the other two; one under a ceiling sits off it in y))
@@ -2327,7 +2337,7 @@ static float4 sampleRGSS(texture2d<float> source, sampler s, float2 uv, float2 p
 // filled, so one doesn't look into a hollow tree through it: the texel half a sprite over (else a quarter), darker, as the inside
 // of a canopy; failing both, the hole's own colour (vanilla's fast leaves keep a dark green there)
 static inline bool imLeafFilled(uint imMat) {
-	return ((imMat >> 4) & 15u) == 13u;
+	return false;  // (fix9: pattern 1101 now marks a bushy leaf plane, BushyLeaves; no filled faces any more)
 }
 
 // (du, dv: the uv's derivatives, taken by the caller outside its branch, where every pixel of the quad still runs)
@@ -2438,6 +2448,8 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 #ifdef IM_SHADE
 	// (Imagine Metal's render scale: the texture's detail as at full size; own_fs_alpha takes the same, so both passes agree)
 	float imLod = imf.taa.w > 0.01 ? imf.taa.w : 1.0;
+	// (fix9b: a bushy leaf plane one detail level sharper: seen slanted its texture fell two levels and read blurry, Jack 00.46.08)
+	if (((in.imMat >> 4) & 15u) == 13u) imLod *= 0.5;
 #else
 	float imLod = 1.0;
 #endif
@@ -2663,6 +2675,8 @@ fragment ImGOut own_fs_g(VOut in [[stage_in]], constant Globals &g [[buffer(22)]
 	texture2d<float> imPbrN [[texture(27)]]) {
 	float2 pixelSize = 1.0f / float2(t.TextureSize);
 	float imLod = imf.taa.w > 0.01 ? imf.taa.w : 1.0;
+	// (fix9b: a bushy leaf plane one detail level sharper: seen slanted its texture fell two levels and read blurry, Jack 00.46.08)
+	if (((in.imMat >> 4) & 15u) == 13u) imLod *= 0.5;
 	float4 texel = g.UseRgss == 1 ? sampleRGSS(atlas, atlasSampler, in.texCoord0, pixelSize, imLod) : sampleNearest(atlas, atlasSampler, in.texCoord0, pixelSize, imLod);
 	float2 imDu = dfdx(in.texCoord0), imDv = dfdy(in.texCoord0);
 	if (CUTOUT && texel.a < CUTOUT_LIMIT) {
@@ -2881,6 +2895,13 @@ fragment float4 own_fs_tr(VOut in [[stage_in]], float4 imDst [[color(0)]], const
 	}
 	float3 col = mix(behind, pow(max(c.rgb, 0.0), 2.2), a);
 	if (foam > 0.0) col = mix(col, pow(saturate(c.rgb * 1.5 + 0.4), 2.2), foam);
+	{
+		// (fix9b: the clouds drawn over the land before this pass left their cover in the picture's alpha (imsky.m, mode 3):
+		// where they are, the picture already here (with them in it) shows through by that much, so water and glass are no
+		// longer drawn over a cloud between them and the eye, Jack's 00.49.20. A mob's 0.96 / a waving plant's 0.98 read as none)
+		float cover = saturate((0.95 - imDst.a) / 0.95);
+		if (cover > 0.0) col = mix(col, pow(max(imDst.rgb, 0.0), 2.2), cover);
+	}
 	return float4(pow(col, 1.0 / 2.2), a + imDst.a * (1.0 - a));
 }
 #endif
@@ -2981,6 +3002,8 @@ fragment void own_fs_alpha(VOut in [[stage_in]], constant Globals &g [[buffer(22
 	float2 pixelSize = 1.0f / float2(t.TextureSize);
 #ifdef IM_SHADE
 	float imLod = imf.taa.w > 0.01 ? imf.taa.w : 1.0;  // (as ownFsBody's)
+	// (fix9b: a bushy leaf plane one detail level sharper: seen slanted its texture fell two levels and read blurry, Jack 00.46.08)
+	if (((in.imMat >> 4) & 15u) == 13u) imLod *= 0.5;
 #else
 	float imLod = 1.0;
 #endif

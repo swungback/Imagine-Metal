@@ -39,6 +39,12 @@ final class MetaStore {
 	 * pillars under floating islands (Jack 22.30.05), so they are left behind.
 	 */
 	static final String REAL = "real2";
+	/**
+	 * (fix9b) The old folder: still read (a chunk not yet in real2), its levels 1-4 made again from its level 0 by the new rule,
+	 * then saved into real2. Without it every place visited before fix9 was generated from the seed again (Jack 00:46 "making
+	 * new chunks again now??", "lods are slow").
+	 */
+	static final String OLD_REAL = "real";
 	private static final int MAGIC = 0x4D4C4F44;  // "MLOD"
 	final Path dir;
 	private final RegistryAccess access;
@@ -71,7 +77,10 @@ final class MetaStore {
 		this.access = access;
 		try {
 			Files.createDirectories(dir.resolve(REAL));
-			try (var s = Files.list(dir.resolve(REAL))) {
+			// (fix9b: the regions of the old real/ folder are known too: read from it, re-mipped by the new rule (readRegion))
+			for (String folder : new String[] {REAL, OLD_REAL}) {
+			if (!Files.isDirectory(dir.resolve(folder))) continue;
+			try (var s = Files.list(dir.resolve(folder))) {
 				s.forEach(p -> {
 					String n = p.getFileName().toString();
 					if (!n.startsWith("r.") || !n.endsWith(".bin")) return;
@@ -82,6 +91,7 @@ final class MetaStore {
 					} catch (NumberFormatException ignored) {
 					}
 				});
+			}
 			}
 		} catch (IOException e) {
 			System.out.println("[MetaLODS] can't use " + dir + ": " + e);
@@ -140,21 +150,9 @@ final class MetaStore {
 		if (!this.knownRegions.contains(k) && !create) return null;
 		Region r = new Region();
 		Path p = this.dir.resolve(REAL).resolve("r." + rx + "." + rz + ".bin");
-		if (Files.exists(p)) {
-			try (DataInputStream in = open(p)) {
-				if (in.readInt() == MAGIC) {
-					int count = in.readInt();
-					for (int i = 0; i < count; i++) {
-						int idx = in.readUnsignedShort();
-						Rle[] lv = new Rle[5];
-						for (int l = 0; l < 5; l++) lv[l] = this.readRle(in);
-						if (idx < 1024) r.chunks.set(idx, new RealChunk(lv));
-					}
-				}
-			} catch (IOException | RuntimeException e) {
-				System.out.println("[MetaLODS] couldn't read " + p + ": " + e);
-			}
-		}
+		Path old = this.dir.resolve(OLD_REAL).resolve("r." + rx + "." + rz + ".bin");
+		if (Files.exists(old) && this.readRegion(old, r, true) > 0) r.dirty = true;  // (then real2's own chunks over them)
+		if (Files.exists(p)) this.readRegion(p, r, false);
 		synchronized (this.regions) {
 			Region had = this.regions.get(k);
 			if (had != null) return had;
@@ -170,6 +168,29 @@ final class MetaStore {
 			}
 		}
 		return r;
+	}
+
+	/** Reads a region file into r; remip: levels 1-4 made again from level 0 (an old real/ file). Returns the chunks read. */
+	private int readRegion(Path p, Region r, boolean remip) {
+		int n = 0;
+		try (DataInputStream in = open(p)) {
+			if (in.readInt() == MAGIC) {
+				int count = in.readInt();
+				for (int i = 0; i < count; i++) {
+					int idx = in.readUnsignedShort();
+					Rle[] lv = new Rle[5];
+					for (int l = 0; l < 5; l++) lv[l] = this.readRle(in);
+					if (remip) for (int l = 1; l < 5; l++) lv[l] = lv[l - 1].mip();
+					if (idx < 1024) {
+						r.chunks.set(idx, new RealChunk(lv));
+						n++;
+					}
+				}
+			}
+		} catch (IOException | RuntimeException e) {
+			System.out.println("[MetaLODS] couldn't read " + p + ": " + e);
+		}
+		return n;
 	}
 
 	@Nullable RealChunk real(int chunkX, int chunkZ) {

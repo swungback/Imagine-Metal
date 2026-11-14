@@ -166,11 +166,9 @@ static inline float imBlockCurve(float b) {
 
 // Sky light level 0..1 -> how much of the sky's light reaches the surface.
 static inline float imSkyCurve(float s) {
-	// (fix9: to the power 1.5: the sky's light that leaks into caves and down ravines (levels 6-12) falls off faster, so a cave
-	// doesn't read daylit and then turn black a few blocks on (Jack's 19.11.32-43 "looks bright" / "looks dark"; with the floor
-	// raised in ImagineFrame); open air (14-15) as before)
-	float c = s * s * (3.0 - 2.0 * s);
-	return c * sqrt(c);
+	// (fix9b: back as it was: Jack likes the sky's light reaching into caves and down a ravine in the sun (2026-11-14); fix9's
+	// steeper curve took it away)
+	return s * s * (3.0 - 2.0 * s);
 }
 
 static inline float3 imTonemap(float3 x, float4 t) {

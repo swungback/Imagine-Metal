@@ -56,7 +56,10 @@ final class OwnFrapi implements OwnApi.Mesher {
 
 	@Override
 	public void block(float x, float y, float z, BlockAndTintGetter level, BlockPos pos, BlockState state, BlockStateModel model, long seed) {
-		this.leafCull = false;  // (fix9: leaf faces as vanilla draws them again; WBL's culling is on its plus planes, BushyLeaves)
+		// (fix9b: with the bushy planes on, no faces between two leaf blocks: the planes cover the inside of a tree, and those faces
+		// were most of a canopy's alpha-tested overdraw (terrain 6 -> 12-18 ms, shadow maps 1 -> 3 ms with every face kept). No
+		// filled faces any more (fix8's, "looks horrible"))
+		this.leafCull = imaginemetal.Settings.bushyLeaves && imaginemetal.Settings.leafCulling && BushyLeaves.isLeaf(state);
 		if (this.leafCull) {
 			this.level = level;
 			this.at.set(pos);
@@ -72,7 +75,7 @@ final class OwnFrapi implements OwnApi.Mesher {
 	/** Whether the block one step along d (sign s) from the leaves being tesselated is leaves too. */
 	private boolean leavesAt(Direction d, int s) {
 		this.probe.set(this.at.getX() + s * d.getStepX(), this.at.getY() + s * d.getStepY(), this.at.getZ() + s * d.getStepZ());
-		return this.level.getBlockState(this.probe).is(BlockTags.LEAVES);
+		return BushyLeaves.isLeaf(this.level.getBlockState(this.probe));
 	}
 
 	private void emitted(MutableQuadView quad) {
@@ -83,10 +86,7 @@ final class OwnFrapi implements OwnApi.Mesher {
 			// opposite face was culled gets its holes filled (terrain.metal, corner pattern 1101), so through it one doesn't look
 			// into a hollow tree: the "hollow" look of plain leaf culling, which Jack didn't like)
 			Direction cf = quad.cullFace();
-			if (cf != null) {
-				if (this.leavesAt(cf, 1)) return;
-				fill = this.leavesAt(cf, -1);
-			}
+			if (cf != null && this.leavesAt(cf, 1)) return;
 		}
 		if (layer == ChunkSectionLayer.SOLID || layer == ChunkSectionLayer.CUTOUT) {
 			// what quad.buffer + BufferBuilder (BLOCK format: position, ABGR colour, uv, packed light) would store, read straight

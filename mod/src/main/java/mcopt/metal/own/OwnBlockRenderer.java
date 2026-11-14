@@ -90,7 +90,7 @@ final class OwnBlockRenderer {
 	void tesselateBlock(BlockQuadOutput output, float x, float y, float z, OwnRegion level, BlockPos pos, BlockState blockState, BlockStateModel model, long seed) {
 		this.random.setSeed(seed);
 		model.collectParts(this.random, this.parts);
-		this.leafCull = false;  // (fix9: leaf faces as vanilla draws them again; WBL's culling is on its plus planes, BushyLeaves)
+		this.leafCull = imaginemetal.Settings.bushyLeaves && imaginemetal.Settings.leafCulling && BushyLeaves.isLeaf(blockState);  // (fix9b, as OwnFrapi)
 		if (!this.parts.isEmpty()) {
 			try {
 				Vec3 offset = blockState.getOffset(pos);
@@ -118,7 +118,7 @@ final class OwnBlockRenderer {
 	private boolean shouldRenderFace(OwnRegion level, BlockState state, Direction direction, int px, int py, int pz) {
 		BlockState n = level.stateAt(px + direction.getStepX(), py + direction.getStepY(), pz + direction.getStepZ());
 		// (fix8, leaf culling as OwnFrapi's: no face between two leaf blocks)
-		if (this.leafCull && n.is(net.minecraft.tags.BlockTags.LEAVES)) return false;
+		if (this.leafCull && BushyLeaves.isLeaf(n)) return false;
 		return Block.shouldRenderFace(state, n, direction);
 	}
 
@@ -128,8 +128,8 @@ final class OwnBlockRenderer {
 
 	/** Marks the next quads as a culled tree's outer face (its opposite face culled): their holes are filled (terrain.metal). */
 	private void fill(OwnRegion level, Direction d, int px, int py, int pz) {
-		if (!this.leafCull || this.fillSink == null) return;
-		boolean f = level.stateAt(px - d.getStepX(), py - d.getStepY(), pz - d.getStepZ()).is(net.minecraft.tags.BlockTags.LEAVES);
+		if (true) return;  // (fix9b: no filled faces any more)
+		boolean f = false;
 		this.fillSink.layers[0].fillNext = f;
 		this.fillSink.layers[1].fillNext = f;
 	}

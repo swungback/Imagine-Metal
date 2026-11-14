@@ -78,8 +78,11 @@ vertex ImShadowOut im_shadow_vs(uint vid [[vertex_id]], uint iid [[instance_id]]
 		uint m = ((device const uchar *) arenaRaw)[matOff + quad];
 		uint wc = (m >> 4) & 15u, cls = m & 15u;
 		plant = cls != 4u && cls != 6u && wc != 0u && wc != 15u && wc != 13u && wc != 5u;
-		o.fill = cls != 4u && cls != 6u && wc == 13u ? 1u : 0u;
+		o.fill = 0u;  // (fix9: 1101 is a bushy plane now, not a filled face)
 		bool skip = mode == 0u ? plant && wc != 10u : mode == 1u ? plant : !plant;
+		// (fix9b: a bushy leaf plane (1101, BushyLeaves) casts none: the tree's own leaf faces do; the planes in the maps were
+		// 1-2 ms of the shadow passes in a forest)
+		if (cls != 4u && cls != 6u && wc == 13u) skip = true;
 		if (skip) {
 			o.pos = float4(0, 0, 2, 1);
 			o.uv = float2(0);
