@@ -1,6 +1,21 @@
-# Imagine Metal: handoff (2026-11-13, ~23:05)
+# Imagine Metal: handoff (2026-11-14, ~01:10)
 
-## START HERE: 2026-11-13 ~23:05, fix9 DEPLOYED (fix9a + fix9b), not seen in game yet
+## START HERE: 2026-11-14 01:10, fix9c BUILT (440a3f9, CI 43531571576, sha1 77419cf5...), copy in `instances/Imagine metal/imagine-metal-metalods-fix9c.jar`, NOT yet in mods (his game was running): swap it in when latest.log ends with "Stopping!"
+fix9 session (00:43-01:07, his chat): leaves "very blurry", "the waving part looks weird", "see through"; fps in forests 35-43
+(terrain 11-18 ms, shadow maps 2-4 ms, was ~6 and ~1); "making new chunks again" + "lods are slow" (fix9's real2 dropped every
+explored region, regenerated from the seed at ~280 chunks/s, trees 2/3 of an L0 tile); heap 99% and 1-4 fps stalls at 00:49 (GPU
+idle 2.7 s: GC while regenerating); "water through clouds" (00.49.20: water drawn over the clouds-after-land). He LIKES sky light
+reaching into caves/ravines: fix9's steeper sky curve reverted.
+fix9c: leaf faces between two leaf blocks culled when Bushy leaves + Leaf culling are on (OwnFrapi/OwnBlockRenderer, no fill);
+planes marked with pattern 1101 (OwnQuads.Layer.planeMode, set by OwnMesher): stiff sway by the block centre x0.6 (terrain.metal
+own_vs via ownQrecPos), imLod x0.5 (one mip sharper, all three fragment paths), no shadow casting (shadow.metal); imsky.m mode 3
+writes cloud cover into dst alpha, own_fs_tr mixes back toward imDst by it; imSkyCurve back to smoothstep; MetaStore reads old
+real/ when real2 lacks a chunk (levels 1-4 re-mipped by the new rule, saved into real2); OwnFluidEdge: on a section's side a
+neighbour in an unloaded chunk is the same fluid (the dark line/notches at the LOD water hand-over).
+Floating island's grey block (00.54.07, generated, far): that is its stone underside at a coarse level, blocky, not water.
+Test: forest fps and look with Bushy leaves on/off; flying in clouds over water; no regeneration of old areas; caves.
+
+## (older) START HERE: 2026-11-13 ~23:05, fix9 DEPLOYED (fix9a + fix9b), not seen in game yet
 mods = fix9: metalods cd0eb66, CI run 43514922999, jar sha1 2b152b87..., copy `instances/Imagine metal/imagine-metal-metalods-fix9.jar`.
 Fallbacks in `instances/Imagine metal/`: fix8 (30d21a49...), fix7, fx1, fix5. Local Java compile check: JDK 25 + client.jar +
 the 26.3 libraries + fabric-loader/mixin/asm/renderer-api jars, plain javac (see "Local compile" below); Metal only on CI.
