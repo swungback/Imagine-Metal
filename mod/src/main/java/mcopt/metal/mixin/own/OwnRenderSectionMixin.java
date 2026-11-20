@@ -50,6 +50,10 @@ abstract class OwnRenderSectionMixin {
 		CallbackInfoReturnable<Boolean> cir) {
 		OwnTerrain own = OwnTerrain.get();
 		if (own == null || !OwnTerrain.takes(layer) || key.getSectionDraw(layer) == null) return;
+		// (fix4, log only: a section of the last level stored into the arena after the change; its publish is dropped by the guard)
+		if (this.this$0 != net.minecraft.client.Minecraft.getInstance().levelRenderer.sectionRenderDispatcher() && mcopt$staleStores++ < 20)
+			System.out.println("[Imagine Metal] level guard: a section of the last level stored after the change (at " + this.renderOrigin.getX() + " "
+				+ this.renderOrigin.getY() + " " + this.renderOrigin.getZ() + ", " + layer + ")");
 		if (layer == ChunkSectionLayer.TRANSLUCENT) {
 			if (indexBuffer == null) return;  // (vanilla always sorts translucent quads)
 			if (vertexBuffer == null) {
@@ -115,6 +119,8 @@ abstract class OwnRenderSectionMixin {
 
 	@org.spongepowered.asm.mixin.Unique
 	private static int mcopt$dropped;
+	@org.spongepowered.asm.mixin.Unique
+	private static int mcopt$staleStores;
 
 	@Inject(method = "reset", at = @At("TAIL"))
 	private void mcopt$ownCleared(CallbackInfo ci) {

@@ -37,6 +37,15 @@ final class LodTile {
 	final int[] tex;
 	/** The block at the surface (under the water where wet) and the column's biome. */
 	final BlockState[] state;
+	/** (MetaLODS) the block under the surface block, as the material rules put it (null until LodNoise's materials ran). */
+	final BlockState[] under;
+	/**
+	 * (fix21, MetaLODS level 0) The rules' column under the surface block: `under` for underN blocks, then under2 for under2N
+	 * blocks, then the dimension's stone (the game's soil depth varies 0-6 blocks with its surface noise: a fixed 3 made dirt walls
+	 * where the real cliffs show stone after 1-2 blocks, and no sandstone under desert sand). underN < 0: not evaluated (fixed 3).
+	 */
+	final BlockState[] under2;
+	final byte[] underN, under2N;
 	final Holder<Biome>[] biome;
 	/** The ground's own top face (the surface before trees were added; == height where no tree stands). */
 	final short[] ground;
@@ -53,6 +62,8 @@ final class LodTile {
 	final int[] crownTop, crownSide;
 	/** The crown's runs of leaves (a spruce's tiers) as LodTile.runs encodes them; 0: one run from canopyLo to canopyHi. */
 	final int[] crownRuns;
+	/** Exact level-zero tree blocks at ground-relative heights, populated only in columns a tree touches. */
+	BlockState[][] treeBlocks;
 	/**
 	 * A plant standing on the column (level 0: grass, ferns, flowers, from the game's own features or the real chunks): its
 	 * lowest and top blocks (top null: one block), its height in blocks, its color (the lowest block's texture under its tint).
@@ -64,7 +75,17 @@ final class LodTile {
 	boolean waterKnown;
 	/** Impostor canopies from the biome (LodTrees) where no exact trees are planted. */
 	boolean impostorTrees = true;
-	int source;
+	/** (MetaLODS) Asked for by the caller: the terrain density's samples the surface was found in are kept in `volume`. */
+	boolean keepVolume;
+    /** Fast surface publication; final refinement still uses the original path. */
+    boolean surfacePreview;
+	/** With keepVolume: LodNoise.terrainVolume's samples for this tile (g x ny x g, index k + ny (x + g z)), else null. */
+	float @org.jspecify.annotations.Nullable [] volume;
+	/** Exact nearby final-density samples, at integer block positions, y-fast. */
+    float @org.jspecify.annotations.Nullable [] blockVolume;
+    int blockNy;
+    int blockStepY = 1;
+    int source;
 
 	/** A clipmap tile: tile (tx, tz) of level `level`. */
 	LodTile(int level, int tx, int tz) {
@@ -86,6 +107,11 @@ final class LodTile {
 		this.fringe = new boolean[n];
 		this.tex = new int[n];
 		this.state = new BlockState[n];
+		this.under = new BlockState[n];
+		this.under2 = new BlockState[n];
+		this.underN = new byte[n];
+		this.under2N = new byte[n];
+		java.util.Arrays.fill(this.underN, (byte) -1);
 		this.biome = new Holder[n];
 		this.ground = new short[n];
 		this.canopyLo = new short[n];

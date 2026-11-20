@@ -114,7 +114,10 @@ static int im_sky_draw_any(Enc *enc, ImSky *s, id<MTLTexture> target, id<MTLText
 				pd.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorOne;
 				pd.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
 				pd.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorZero;
-				pd.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOne;
+				// (fix9b: after the land (mode 3) the clouds' cover goes into the picture's alpha too (x (1 - cover)): the water,
+				// drawn after them from the copy of this picture, reads it and stays behind the clouds instead of over them, Jack's
+				// 00.49.20 "water through clouds")
+				pd.colorAttachments[0].destinationAlphaBlendFactor = mode == 3 ? MTLBlendFactorOneMinusSourceAlpha : MTLBlendFactorOne;
 			}
 			NSError *e = nil;
 			s->pipeline[mode] = [s->device newRenderPipelineStateWithDescriptor:pd error:&e];

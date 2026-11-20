@@ -37,7 +37,14 @@ public final class EntityShade {
 		if (n.contains("glint")) return glint(name, vs, fs);
 		// (the selection outline: Minecraft's lines, and in 26.x the block outline's own pipelines too)
 		if (n.endsWith("pipeline/lines") || n.endsWith("pipeline/lines_translucent") || n.contains("block_outline")) return outline(name, vs, fs);
-		if (Settings.portals && (n.contains("end_portal") || n.contains("end_gateway"))) return endPortal(name, vs, fs);
+		if (Settings.portals && (n.contains("end_portal") || n.contains("end_gateway"))) {
+			String[] e = endPortal(name, vs, fs);
+			if (e != null) return e;
+		}
+		// (Build C2c: the pipelines skipped below that draw in the level's pass (mobs' glowing eyes, signs' and name tags' text,
+		// beams, leads, the breeze's wind): only the TAA's sub-pixel offset, Minecraft's colour and light kept. Without it the
+		// TAA shifted them by the offset every frame: Jack's dragon eyes "flickering" (2026-11-13 11.01.17))
+		if (!n.contains("gui")) for (String j : JITTER_ONLY) if (n.contains(j)) return jitterOnly(name, vs, fs);
 		for (String skip : SKIP) if (n.contains(skip)) return null;
 		boolean wanted = false;
 		for (String want : WANT) if (n.contains(want)) wanted = true;
@@ -48,7 +55,7 @@ public final class EntityShade {
 			if (!lm && !particle) return null;
 			if (!fs.contains("out.fragColor") || !vs.contains("in.Position")) return null;
 			String v = patchVs(vs, particle);
-			String f = v == null ? null : patchFs(fs, n.contains("armor") ? "2.0" : n.contains("item") ? "1.0" : "0.0");
+			String f = v == null ? null : patchFs(fs, n.contains("armor") ? "2.0" : n.contains("item") ? "1.0" : "0.0", !n.contains("translucent") && !particle);
 			if (v == null || f == null) {
 				System.out.println("[Imagine Metal] entity light: " + name + " left as Minecraft's (its shader isn't the shape expected)");
 				return null;
@@ -119,6 +126,23 @@ public final class EntityShade {
 		}
 	}
 
+	/** Only the TAA's sub-pixel offset in the vertex stage (the fragment stage as Minecraft's): see patch. */
+	private static String[] jitterOnly(String name, String vs, String fs) {
+		try {
+			Matcher m = VS_MAIN.matcher(vs);
+			if (!m.find() || !vs.contains("out.gl_Position")) return null;
+			String v = vs.substring(0, m.end()) + ", constant float4& imOn [[buffer(25)]]" + vs.substring(m.end());
+			v = beforeLastReturn(v, "    if (imOn.x > 0.5 && imOn.x < 1.5) out.gl_Position.xy += float2(imOn.z, -imOn.w) * out.gl_Position.w;");
+			if (v == null) return null;
+			System.out.println("[Imagine Metal] TAA offset: " + name);
+			return new String[] {v, fs};
+		} catch (Throwable t) {
+			return null;
+		}
+	}
+
+	private static final String[] JITTER_ONLY = {"eyes", "pipeline/text", "beam", "leash", "breeze", "energy_swirl"};
+
 	private static final String[] WANT = {"pipeline/entity", "pipeline/armor", "pipeline/item", "particle", "banner_pattern", "pipeline/solid_block",
 		"pipeline/cutout_block", "pipeline/translucent_block"};
 	private static final String[] SKIP = {"oit_", "terrain", "text", "wireframe", "weather", "leash", "beam", "breeze", "lines", "gui", "eyes"};
@@ -173,7 +197,7 @@ public final class EntityShade {
 		return v;
 	}
 
-	private static String patchFs(String fs, String kind) {
+	private static String patchFs(String fs, String kind, boolean mark) {
 		Matcher m = FS_MAIN.matcher(fs);
 		if (!m.find()) return null;
 		String f = fs.substring(0, m.end()) + ", constant float4& imOn [[buffer(25)]], constant ImFrame& imf [[buffer(30)]]"
@@ -196,7 +220,11 @@ public final class EntityShade {
 		f = beforeLastReturn(f, "    if (imOn.x > 0.5 && imOn.x < 1.5) out.fragColor.xyz = imShadeEntity(out.fragColor.xyz, in.imPos, in.imNrm, in.imLm, imf,"
 			+ " imShadowMap, imShadowCmp, imLightVol, imLightSampler, " + kind + ", " + vfog + ");\n"
 			+ "    else if (imOn.x > 1.5 && in.imHand > 0.5) out.fragColor.xyz = imShadeEntity(out.fragColor.xyz, float3(0.0, -0.4, 0.001),"
-			+ " float3(0.0), in.imLm, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, 3.0, float4(0.0));");
+			+ " float3(0.0), in.imLm, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, 3.0, float4(0.0));"
+			// (MetalFX: a mob's pixel marked in the frame's alpha, 0.96 (terrain: 1, a waving plant 0.98). Mobs move by themselves and
+			// have no motion vectors, so MetalFX's history smeared them (Jack's blurry whales, jittery cape); imbloom.m's motion pass
+			// turns the mark into its reactive mask. Only pipelines that don't blend: their alpha is written as it is)
+			+ (mark ? "\n    if (imOn.x > 0.5 && imOn.x < 1.5 && out.fragColor.w > 0.5) out.fragColor.w = 0.96;" : ""));
 		if (f == null) return null;
 		if (lighting == null) lighting = Engine.resource("/imaginemetal/shaders/lighting.metal");
 		return lighting + "\n// ---- Minecraft's shader (SPIRV-Cross), patched ----\n" + f;

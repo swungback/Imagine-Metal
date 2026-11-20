@@ -26,7 +26,15 @@ public final class Benchmark {
 	private record Result(String name, double fps, double ms) {
 	}
 
-	private static final double SETTLE = 1.5, MEASURE = 4.0;  // (3 s windows swung by a few fps either way)
+	private static final double SETTLE = 1.5;
+	/** seconds measured per window (4; ColdTp's bench sets its own, benchMeasure) */
+	static double MEASURE = 4.0;  // (3 s windows swung by a few fps either way)
+	/** (s1119) MetaLODS' far shadows before a step changed them (null: untouched) */
+	private static Boolean savedFarShadows;
+	/** (s1119) MetaLODS' detail and far detail before a step changed them (null: untouched) */
+	private static int[] savedDetail;
+	/** (s1119, ColdTp benchShots=true) called on the render thread at the end of each measured window, with its step's name */
+	static java.util.function.Consumer<String> shot;
 	private static final String REF = "everything on";
 	/** A timing step, not a feature: the terrain's encoder cut into its parts (leaf depth, solid, leaf colour) to time them apart. */
 	private static final String SPLIT = "(timing) terrain cut into its parts";
@@ -46,17 +54,100 @@ public final class Benchmark {
 	private Benchmark() {
 	}
 
+	/** steps after which the land takes a while to come back as it was (the reference after them waits longer, and isn't used) */
+	private static boolean slow(String name) {
+		return name.equals(DISTANCE) || name.startsWith("MetaLODS far detail") || name.startsWith("MetaLODS detail 3");
+	}
+
 	public static boolean running() {
 		return steps != null;
 	}
 
 	public static void start() {
+		start(false);
+	}
+
+	/**
+	 * (s1119, ColdTp's bench=) only the named steps, each between two "everything on" windows, the list run `repeat` times.
+	 * Keys: lods_off, lods_vertex, lods_plain, farshadows_off, shadow128, shadow96, shadows_off, scale50, scale100, split, taa_off,
+	 * ssao_off, shafts_off, deferred_off, airpass_off, bloom_off, clouds_off, pbr_off, normals_off, parallax_off, watertrace_off,
+	 * leafprepass_off, plantshadows_off, sky_off, colouredlight_off, shaders_off, distance8. Unknown keys are logged and skipped.
+	 */
+	public static void startKeys(List<String> keys, int repeat) {
+		List<Step> chosen = new ArrayList<>();
+		for (int r = 0; r < Math.max(1, repeat); r++) for (String k : keys) {
+			Step st = keyed(k.trim());
+			if (st == null) System.out.println("[Imagine Metal] benchmark: unknown step key '" + k + "'");
+			else chosen.add(st);
+		}
+		start(false, chosen);
+	}
+
+	private static Step keyed(String k) {
+		return switch (k) {
+			case "lods_off" -> new Step("MetaLODS not drawn", () -> imaginemetal.metalods.MetaLods.probe = 3);
+			case "lods_vertex" -> new Step("MetaLODS vertex work only (no pixels)", () -> imaginemetal.metalods.MetaLods.probe = 2);
+			case "lods_plain" -> new Step("MetaLODS shading skipped (plain colour)", () -> imaginemetal.metalods.MetaLods.probe = 1);
+			case "lods_lightcheap" -> new Step("MetaLODS pixels lit cheaply (lighting skipped)", () -> imaginemetal.metalods.MetaLods.probe = 4);
+			case "lods_notex" -> new Step("MetaLODS textures skipped (average colour)", () -> imaginemetal.metalods.MetaLods.probe = 5);
+			case "fardetail4" -> new Step("MetaLODS far detail 4 (coarser past the full-detail ring)", () -> {
+				savedDetail = new int[] {imaginemetal.metalods.MetaSettings.detail, imaginemetal.metalods.MetaSettings.farDetail};
+				imaginemetal.metalods.MetaSettings.farDetail = 4;
+			}, 25.0);
+			case "detail3" -> new Step("MetaLODS detail 3 (full-detail ring to 192 blocks, below the menu's 4)", () -> {
+				savedDetail = new int[] {imaginemetal.metalods.MetaSettings.detail, imaginemetal.metalods.MetaSettings.farDetail};
+				imaginemetal.metalods.MetaSettings.detail = 3;
+			}, 25.0);
+			case "farshadows_off" -> new Step("MetaLODS far shadows off", () -> {
+				savedFarShadows = imaginemetal.metalods.MetaSettings.farShadows;
+				imaginemetal.metalods.MetaSettings.farShadows = false;
+			});
+			case "shadow128" -> new Step("shadow range 128", () -> Settings.shadowRange = Math.min(Settings.shadowRange, 128f));
+			case "shadow96" -> new Step("shadow range 96", () -> Settings.shadowRange = Math.min(Settings.shadowRange, 96f));
+			case "shadows_off" -> new Step("shadows off", () -> Settings.shadows = false);
+			case "scale50" -> new Step("render scale 50%", () -> Settings.renderScale = 50, 2.5);
+			case "scale100" -> new Step("render scale 100% (every pixel drawn)", () -> Settings.renderScale = 100, 2.5);
+			case "split" -> new Step(SPLIT, () -> PassTimes.splitTerrain = true);
+			case "taa_off" -> new Step("TAA off", () -> Settings.taa = false);
+			case "ssao_off" -> new Step("ambient occlusion off", () -> Settings.ssao = false);
+			case "shafts_off" -> new Step("light shafts off", () -> Settings.shafts = false);
+			case "deferred_off" -> new Step("deferred lighting off (every terrain fragment lit, as Build B1)", () -> Settings.deferred = false);
+			case "airpass_off" -> new Step("air pass off (the haze in every terrain fragment)", () -> Settings.airPass = false);
+			case "bloom_off" -> new Step("bloom off", () -> Settings.bloom = false);
+			case "clouds_off" -> new Step("clouds off", () -> Settings.clouds = false);
+			case "pbr_off" -> new Step("PBR (reflections, highlights) off", () -> Settings.pbr = false);
+			case "normals_off" -> new Step("generated normals off", () -> Settings.normals = 0f);
+			case "parallax_off" -> new Step("parallax off", () -> Settings.parallax = false);
+			case "watertrace_off" -> new Step("water and glass reflect only the sky (no screen trace)", () -> Settings.waterTrace = false);
+			case "leafprepass_off" -> new Step("leaf depth pre-pass off", () -> Settings.leafPrepass = false);
+			case "plantshadows_off" -> new Step("plant shadows off (C2: their own map slice, a second near pass)", () -> Settings.plantShadows = false);
+			case "sky_off" -> new Step("our sky and air off", () -> Settings.sky = false);
+			case "colouredlight_off" -> new Step("coloured light off", () -> Settings.coloredLight = false);
+			case "shaders_off" -> new Step("shaders off (live, near vanilla)", () -> Live.setOff(true));
+			case "distance8" -> new Step(DISTANCE, Benchmark::distance8, 4.0);
+			default -> null;
+		};
+	}
+
+	/** farOnly (fix19, the MetaLODS screen's button): only the far terrain's steps, about 40 seconds. */
+	public static void start(boolean farOnly) {
+		start(farOnly, null);
+	}
+
+	private static void start(boolean farOnly, List<Step> chosen) {
 		wasOff = Live.isOff();
 		if (wasOff) Live.setOff(false);
 		saved = Live.snapshot();
 		steps = new ArrayList<>();
 		steps.add(new Step("everything on", () -> {
 		}));
+		if (chosen != null) {
+			steps.addAll(chosen);
+		} else if (farOnly) {
+			steps.add(new Step("MetaLODS not drawn", () -> imaginemetal.metalods.MetaLods.probe = 3));
+			steps.add(new Step("MetaLODS vertex work only (no pixels)", () -> imaginemetal.metalods.MetaLods.probe = 2));
+			steps.add(new Step("MetaLODS shading skipped (plain colour)", () -> imaginemetal.metalods.MetaLods.probe = 1));
+		} else {
 		steps.add(new Step(SPLIT, () -> PassTimes.splitTerrain = true));
 		steps.add(new Step("leaf depth pre-pass off", () -> Settings.leafPrepass = false));
 		steps.add(new Step("shadows off", () -> Settings.shadows = false));
@@ -108,19 +199,25 @@ public final class Benchmark {
 			Settings.stars = 0;
 			Settings.nebula = Settings.shootingStars = false;
 		}));
+		// (fix19: the far terrain, part by part: MetaLods.probe; the vertex step shows what the quads cost before any pixel, the
+		// shading step what ml_fs's body costs, not drawn what MetaLODS costs the frame in all)
+		steps.add(new Step("MetaLODS not drawn", () -> imaginemetal.metalods.MetaLods.probe = 3));
+		steps.add(new Step("MetaLODS vertex work only (no pixels)", () -> imaginemetal.metalods.MetaLods.probe = 2));
+		steps.add(new Step("MetaLODS shading skipped (plain colour)", () -> imaginemetal.metalods.MetaLods.probe = 1));
 		steps.add(new Step("shaders off (live, near vanilla)", () -> Live.setOff(true)));
 		// (last: the chunks beyond 8 are dropped and take a while to come back, so the reference window after it waits longer)
 		steps.add(new Step(DISTANCE, Benchmark::distance8, 4.0));
+		}
 		List<Step> ab = new ArrayList<>();
 		boolean slow = false;
 		for (Step st : steps) {
 			if (!ab.isEmpty() || !st.name().equals(REF)) ab.add(new Step(REF, () -> {
-			}, slow ? 12.0 : 0.0));
+			}, slow ? 25.0 : 0.0));
 			if (!st.name().equals(REF)) ab.add(st);
-			slow = st.name().equals(DISTANCE);
+			slow = slow(st.name());
 		}
 		ab.add(new Step(REF, () -> {
-		}, slow ? 12.0 : 0.0));
+		}, slow ? 25.0 : 0.0));
 		steps = ab;
 		index = -1;
 		results.clear();
@@ -164,6 +261,7 @@ public final class Benchmark {
 			double fps = frames / m;
 			Result r = new Result(steps.get(index).name(), fps, 1000.0 * m / Math.max(frames, 1));
 			results.add(r);
+			if (shot != null) shot.accept(r.name);
 			System.out.println("[Imagine Metal] benchmark: " + String.format(Locale.ROOT, "%-36s %6.1f fps %6.2f ms", r.name, r.fps, r.ms));
 			// (and where the GPU's time went in that window, per pass)
 			PassTimes.Window w = PassTimes.bench();
@@ -201,7 +299,7 @@ public final class Benchmark {
 			if (Double.isNaN(before)) before = after;
 			if (Double.isNaN(before)) continue;
 			// (the render distance step: only the window before it; the one after may still be loading its chunks back)
-			if (r.name.equals(DISTANCE)) after = before;
+			if (slow(r.name)) after = before;
 			rest.add(new Result(r.name, r.fps, (before + after) * 0.5 - r.ms));  // (ms here: the saving)
 		}
 		rest.sort((a, b) -> Double.compare(b.ms, a.ms));  // (the biggest saving first)
@@ -252,6 +350,16 @@ public final class Benchmark {
 			savedDistance = -1;
 		}
 		PassTimes.splitTerrain = false;
+		imaginemetal.metalods.MetaLods.probe = 0;
+		if (savedDetail != null) {
+			imaginemetal.metalods.MetaSettings.detail = savedDetail[0];
+			imaginemetal.metalods.MetaSettings.farDetail = savedDetail[1];
+			savedDetail = null;
+		}
+		if (savedFarShadows != null) {
+			imaginemetal.metalods.MetaSettings.farShadows = savedFarShadows;
+			savedFarShadows = null;
+		}
 		if (Live.isOff()) Live.setOff(false);
 		Live.restore(saved);
 	}

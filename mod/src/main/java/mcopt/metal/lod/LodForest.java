@@ -55,6 +55,32 @@ final class LodForest {
 	}
 
 	private static final int VEG = GenerationStep.Decoration.VEGETAL_DECORATION.ordinal();
+	/** (fix21) The disks (gravel, sand, clay, mud around water: the step before the trees) run too: their ground is the real one. */
+	private static final int ORES = GenerationStep.Decoration.UNDERGROUND_ORES.ordinal();
+	static final boolean DISKS = !"false".equals(System.getProperty("metalods.disks"));
+	/** In a chunk's block list: the block was set by a disk feature (the ground's own material). */
+	static final int FROM_GROUND = 1 << 29;
+	private final FeatureSorter.@Nullable StepFeatureData oreStep;
+	private final boolean[] disk;
+	/**
+	 * (fix21) Surface structures from the seed (villages, outposts, pyramids, igloos, ruined portals, the mods' own), as SeedGen
+	 * shows them: each chunk's starts made as the game's createStructures makes them (the same structure sets, placement and
+	 * weighted choice, Structure.generate with its own seeds), their pieces placed into the stand-in level for the chunks of a
+	 * near tile (StructureStart.placeInChunk, the decoration step's own seed). What they set stands on the ground as the trees do:
+	 * a column per block column, its walls' block up to its top block. -Dmetalods.structures=false: off.
+	 */
+	static final boolean STRUCTURES = !"false".equals(System.getProperty("metalods.structures"));
+    static final boolean EXACT_STRUCTURES = STRUCTURES && Boolean.getBoolean("metalods.exactStructures");
+	/** In a chunk's block list: the block was set by a structure piece. */
+	static final int FROM_STRUCT = 1 << 28;
+	/** How far (chunks) a structure's start may lie from a chunk its pieces reach (jigsaw: up to 128 blocks from its centre). */
+	static final int STRUCT_REACH = 8;
+	private static final int SURFACE = GenerationStep.Decoration.SURFACE_STRUCTURES.ordinal();
+	private final ConcurrentHashMap<Long, List<net.minecraft.world.level.levelgen.structure.StructureStart>> starts = new ConcurrentHashMap<>();
+	private final java.util.Map<net.minecraft.world.level.levelgen.structure.Structure, Integer> surfaceIndex = new java.util.IdentityHashMap<>();
+	private final ThreadLocal<net.minecraft.world.level.biome.Climate.Sampler> climate;
+	final java.util.concurrent.atomic.AtomicLong structuresMade = new java.util.concurrent.atomic.AtomicLong(), structureNanos = new java.util.concurrent.atomic.AtomicLong();
+	private volatile boolean structuresFailed;
 	private static final int CACHE_MAX = 40000;
 	private final LodNoise noise;
 	private final ServerLevel level;
@@ -75,12 +101,38 @@ final class LodForest {
 		failures = new java.util.concurrent.atomic.AtomicLong();
 
 	LodForest(LodNoise noise) {
+		this(noise, LodConfig.PLANTS);
+	}
+
+	/** plants: also the small plant features (grass, flowers, bushes); off for the far terrain (a block at 200+ blocks away). */
+	LodForest(LodNoise noise, boolean plants) {
 		this.noise = noise;
 		this.level = noise.level;
 		this.generator = this.level.getChunkSource().getGenerator();
 		this.seed = this.level.getSeed();
 		this.biomeSeed = BiomeManager.obfuscateSeed(this.seed);
-		this.step = stepData(this.generator);
+		List<FeatureSorter.StepFeatureData> all = stepsData(this.generator);
+		this.step = all != null && VEG < all.size() ? all.get(VEG) : null;
+		this.oreStep = DISKS && all != null && ORES < all.size() ? all.get(ORES) : null;
+		boolean[] dk = new boolean[0];
+		if (this.oreStep != null) {
+			var registry = this.level.registryAccess().lookupOrThrow(Registries.PLACED_FEATURE);
+			dk = new boolean[this.oreStep.features().size()];
+			List<String> ids = new ArrayList<>();
+			for (int i = 0; i < dk.length; i++) {
+				dk[i] = isDisk(this.oreStep.features().get(i).feature(), 0);
+				Identifier id = registry.getKey(this.oreStep.features().get(i));
+				if (dk[i]) ids.add(id != null ? id.getPath() : "?");
+			}
+			System.out.println("mcopt-lod: ground disks from " + ids.size() + " features: " + ids);
+		}
+		this.disk = dk;
+		{
+			int j = 0;
+			for (var st : this.level.registryAccess().lookupOrThrow(Registries.STRUCTURE)) if (st.step().ordinal() == SURFACE) this.surfaceIndex.put(st, j++);
+		}
+		this.climate = ThreadLocal.withInitial(() -> this.level.getChunkSource().randomState()
+			.createClimateSampler(net.minecraft.world.level.levelgen.densityfunction.SamplerContext.builder().enableCaches().build()));
 		boolean[] t = new boolean[0], p = new boolean[0];
 		if (this.step != null) {
 			var registry = this.level.registryAccess().lookupOrThrow(Registries.PLACED_FEATURE);
@@ -90,8 +142,11 @@ final class LodForest {
 			List<String> plantIds = new ArrayList<>();
 			for (int i = 0; i < t.length; i++) {
 				Identifier id = registry.getKey(this.step.features().get(i));
-				t[i] = id != null && isTree(id.getPath());
-				p[i] = LodConfig.PLANTS && id != null && !t[i] && isPlants(id.getPath());
+				// (by name as before, or by what it grows: Terralith's tree features have their own names, terralith:dark/trees,
+				// highlands/temperate/dark_oak, flower/blue/trees..., and were left out or run as small plants: its forests were
+				// empty grass on the near LODs until the real chunks came, Jack's 16.17.14)
+				t[i] = id != null && (isTree(id.getPath()) || growsTrees(this.step.features().get(i)));
+				p[i] = plants && id != null && !t[i] && isPlants(id.getPath());
 				if (t[i]) count++;
 				if (p[i]) plantIds.add(id.getPath());
 			}
@@ -107,6 +162,25 @@ final class LodForest {
 			|| path.equals("mushroom_island_vegetation") || path.equals("bamboo_vegetation");
 	}
 
+	/** Whether a placed feature grows trees or huge mushrooms, anywhere in its (random selector) tree of features. */
+	static boolean growsTrees(PlacedFeature placed) {
+		try {
+			return grows(placed.feature(), 0);
+		} catch (RuntimeException e) {
+			return false;
+		}
+	}
+
+	private static boolean grows(Holder<net.minecraft.world.level.levelgen.feature.Feature> h, int depth) {
+		if (depth > 8 || !h.isBound()) return false;
+		var f = h.value();
+		if (f instanceof net.minecraft.world.level.levelgen.feature.TreeFeature
+			|| f instanceof net.minecraft.world.level.levelgen.feature.AbstractHugeMushroomFeature) return true;
+		if (f instanceof net.minecraft.world.level.levelgen.feature.FallenTreeFeature
+			|| f instanceof net.minecraft.world.level.levelgen.feature.CoralTreeFeature) return false;
+		return f.getSubFeatures().limit(64).anyMatch(sub -> grows(sub, depth + 1));
+	}
+
 	/** Features that grow small plants on the surface (not under water, not in caves, not on trees). */
 	private static boolean isPlants(String path) {
 		for (String no : new String[] {"sea", "kelp", "lily", "mushroom", "vine", "lichen", "spring", "bamboo", "cave", "dripleaf", "spore", "moss", "lush"}) {
@@ -119,15 +193,26 @@ final class LodForest {
 	}
 
 	@SuppressWarnings("unchecked")
-	private static FeatureSorter.@Nullable StepFeatureData stepData(ChunkGenerator generator) {
+	private static @Nullable List<FeatureSorter.StepFeatureData> stepsData(ChunkGenerator generator) {
 		try {
 			java.lang.reflect.Field f = ChunkGenerator.class.getDeclaredField("featuresPerStep");
 			f.setAccessible(true);
-			List<FeatureSorter.StepFeatureData> steps = ((Supplier<List<FeatureSorter.StepFeatureData>>) f.get(generator)).get();
-			return VEG < steps.size() ? steps.get(VEG) : null;
+			return ((Supplier<List<FeatureSorter.StepFeatureData>>) f.get(generator)).get();
 		} catch (ReflectiveOperationException | RuntimeException e) {
 			System.out.println("mcopt-lod: no feature list (" + e + "): far trees are impostors");
 			return null;
+		}
+	}
+
+	/** A disk feature (replaces the ground's blocks around a point: gravel, sand, clay, mud), anywhere in its tree of features. */
+	private static boolean isDisk(Holder<net.minecraft.world.level.levelgen.feature.Feature> h, int depth) {
+		try {
+			if (depth > 8 || !h.isBound()) return false;
+			var f = h.value();
+			if (f instanceof net.minecraft.world.level.levelgen.feature.DiskFeature) return true;
+			return f.getSubFeatures().limit(64).anyMatch(sub -> isDisk(sub, depth + 1));
+		} catch (RuntimeException e) {
+			return false;
 		}
 	}
 
@@ -135,18 +220,62 @@ final class LodForest {
 		return this.step != null;
 	}
 
+	/** Grounds being made right now (fix13: two workers asking for one chunk's ground made it twice). */
+	private final ConcurrentHashMap<Long, java.util.concurrent.CompletableFuture<Ground>> making = new ConcurrentHashMap<>();
+	final java.util.concurrent.atomic.AtomicLong groundsMade = new java.util.concurrent.atomic.AtomicLong(), groundsRefused = new java.util.concurrent.atomic.AtomicLong();
+
 	/** The chunk's ground at block resolution (cached). */
 	Ground ground(int chunkX, int chunkZ) {
 		long key = chunkKey(chunkX, chunkZ);
 		Ground g = this.grounds.get(key);
 		if (g != null) return g;
+		java.util.concurrent.CompletableFuture<Ground> mine = new java.util.concurrent.CompletableFuture<>();
+		java.util.concurrent.CompletableFuture<Ground> other = this.making.putIfAbsent(key, mine);
+		if (other != null) {
+			try {
+				return other.join();
+			} catch (RuntimeException e) {
+				// (the other worker failed: make it here)
+				return this.makeGround(chunkX, chunkZ, key);
+			}
+		}
+		try {
+			g = this.grounds.get(key);
+			if (g == null) g = this.makeGround(chunkX, chunkZ, key);
+			mine.complete(g);
+			return g;
+		} catch (RuntimeException e) {
+			mine.completeExceptionally(e);
+			throw e;
+		} finally {
+			this.making.remove(key, mine);
+		}
+	}
+
+	private Ground makeGround(int chunkX, int chunkZ, long key) {
 		LodTile t = new LodTile(0, chunkX * 16, chunkZ * 16, 16);
 		t.impostorTrees = false;
 		this.noise.generate(t);
-		g = groundOf(t, 0, 0, 16);
+		Ground g = groundOf(t, 0, 0, 16);
 		if (this.grounds.size() > CACHE_MAX) this.grounds.clear();
 		this.grounds.put(key, g);
+		this.groundsMade.incrementAndGet();
 		return g;
+	}
+
+	/**
+	 * The chunk's ground if it is known or the chunk is one the tile being planted asked for (its own and the ring around
+	 * them); else null (fix13: a tree at a ring chunk's far edge looking into the chunk beyond made that chunk's whole ground,
+	 * ~17 grounds per level-0 tile in game, two thirds of its trees' time). Beyond: open air, nothing to stand on.
+	 */
+	@Nullable Ground groundNear(int chunkX, int chunkZ, Stand s) {
+		Ground g = this.grounds.get(chunkKey(chunkX, chunkZ));
+		if (g != null) return g;
+		if (s.bounded && (chunkX < s.minCx || chunkX > s.maxCx || chunkZ < s.minCz || chunkZ > s.maxCz)) {
+			this.groundsRefused.incrementAndGet();
+			return null;
+		}
+		return this.ground(chunkX, chunkZ);
 	}
 
 	/** A level-0 tile's chunks go into the ground cache as it is generated (tile cells from (cx, cz), 16 x 16). */
@@ -177,6 +306,155 @@ final class LodForest {
 
 	static long chunkKey(int x, int z) {
 		return (long) x << 32 | (z & 0xFFFFFFFFL);
+	}
+
+	/**
+	 * (fix21) The surface structures whose start is chunk (cx, cz), as the game's ChunkGenerator.createStructures picks them:
+	 * per structure set whose placement chooses this chunk, its single structure or a weighted pick (the large-feature seed,
+	 * trying the next while one fails), Structure.generate with the world's seed and the set's biome check. Cached per chunk.
+	 */
+	List<net.minecraft.world.level.levelgen.structure.StructureStart> starts(int cx, int cz) {
+		long key = chunkKey(cx, cz);
+		var got = this.starts.get(key);
+		if (got != null) return got;
+		List<net.minecraft.world.level.levelgen.structure.StructureStart> out = List.of();
+		LodBaseHeights.enter();  // (s1119: the ground-height walks kept, see LodBaseHeights)
+		try {
+			var state = this.level.getChunkSource().getGeneratorState();
+			net.minecraft.world.level.ChunkPos pos = new net.minecraft.world.level.ChunkPos(cx, cz);
+			for (Holder<net.minecraft.world.level.levelgen.structure.StructureSet> set : state.possibleStructureSets()) {
+				var placement = set.value().placement();
+				if (placement instanceof net.minecraft.world.level.levelgen.structure.placement.ConcentricRingsStructurePlacement) continue;
+				if (!placement.isStructureChunk(state, cx, cz)) continue;
+				var list = set.value().structures();
+				boolean any = false;
+				for (var e : list) any |= e.structure().value().step().ordinal() == SURFACE;
+				if (!any) continue;
+				net.minecraft.world.level.levelgen.structure.StructureStart made = null;
+				if (list.size() == 1) made = this.tryStart(list.get(0), state, pos);
+				else {
+					List<net.minecraft.world.level.levelgen.structure.StructureSet.StructureSelectionEntry> left = new ArrayList<>(list);
+					WorldgenRandom r = new WorldgenRandom(new net.minecraft.world.level.levelgen.LegacyRandomSource(0L));
+					r.setLargeFeatureSeed(state.getLevelSeed(), cx, cz);
+					int total = 0;
+					for (var e : left) total += e.weight();
+					while (!left.isEmpty()) {
+						int pick = r.nextInt(total), j = 0;
+						for (var e : left) {
+							pick -= e.weight();
+							if (pick < 0) break;
+							j++;
+						}
+						var e = left.get(Math.min(j, left.size() - 1));
+						made = this.tryStart(e, state, pos);
+						if (made != null) break;
+						left.remove(e);
+						total -= e.weight();
+					}
+				}
+				if (made != null && made.getStructure().step().ordinal() == SURFACE) {
+					if (out.isEmpty()) out = new ArrayList<>(2);
+					out.add(made);
+					this.structuresMade.incrementAndGet();
+				}
+			}
+		} catch (RuntimeException | StackOverflowError | LinkageError e) {
+			if (!this.structuresFailed) System.out.println("mcopt-lod: structures from the seed stopped (" + e + "): LODs without structures");
+			this.structuresFailed = true;
+		} finally {
+			LodBaseHeights.exit();
+		}
+		if (this.starts.size() > 400_000) this.starts.clear();
+		this.starts.put(key, out);
+		return out;
+	}
+
+	private net.minecraft.world.level.levelgen.structure.@Nullable StructureStart tryStart(net.minecraft.world.level.levelgen.structure.StructureSet.StructureSelectionEntry e,
+		net.minecraft.world.level.chunk.ChunkGeneratorStructureState state, net.minecraft.world.level.ChunkPos pos) {
+		var holder = e.structure();
+		var st = holder.value();
+		var start = st.generate(holder, this.level.dimension(), this.level.registryAccess(), this.generator, this.generator.getBiomeSource(), this.climate.get(),
+			state.randomState(), this.level.getStructureTemplateManager(), state.getLevelSeed(), pos, 0, this.level, st.biomes()::contains);
+		return start.isValid() ? start : null;
+	}
+
+	/**
+	 * (fix21) Levels 1-3 (no trees there): the surface structures reaching tile (x0, z0, span blocks) placed into the stand-in
+	 * level, folded into the tile's columns as the trees are at level 0 (a column of the walls' block up to its top block).
+	 */
+	void structures(LodTile t) {
+		if (!EXACT_STRUCTURES || this.structuresFailed || t.level < 1) return;
+		long t0 = System.nanoTime();
+		int L = t.level, span = t.size << L, x0 = t.x0, z0 = t.z0;
+		net.minecraft.world.level.levelgen.structure.BoundingBox tile = new net.minecraft.world.level.levelgen.structure.BoundingBox(x0, this.level.getMinY(), z0,
+			x0 + span - 1, this.level.getMaxY(), z0 + span - 1);
+		List<net.minecraft.world.level.levelgen.structure.StructureStart> hits = new ArrayList<>();
+		int c0x = (x0 >> 4) - STRUCT_REACH, c0z = (z0 >> 4) - STRUCT_REACH, c1x = ((x0 + span - 1) >> 4) + STRUCT_REACH, c1z = ((z0 + span - 1) >> 4) + STRUCT_REACH;
+		for (int cz = c0z; cz <= c1z; cz++) for (int cx = c0x; cx <= c1x; cx++) {
+			for (var st : this.starts(cx, cz)) if (st.getBoundingBox().intersects(tile)) hits.add(st);
+		}
+		if (hits.isEmpty()) {
+			this.structureNanos.addAndGet(System.nanoTime() - t0);
+			return;
+		}
+		Stand s = this.stands.get();
+		s.reset();
+		s.structFeature = true;
+		s.treeFeature = false;
+		WorldgenRandom random = new WorldgenRandom(new XoroshiroRandomSource(0L));
+		try {
+			for (var st : hits) {
+				var bb = st.getBoundingBox();
+				Integer j = this.surfaceIndex.get(st.getStructure());
+				int bx0 = Math.max(bb.minX(), x0) >> 4, bz0 = Math.max(bb.minZ(), z0) >> 4, bx1 = Math.min(bb.maxX(), x0 + span - 1) >> 4, bz1 = Math.min(bb.maxZ(), z0 + span - 1) >> 4;
+				for (int cz = bz0; cz <= bz1; cz++) for (int cx = bx0; cx <= bx1; cx++) {
+					net.minecraft.world.level.levelgen.structure.BoundingBox box = new net.minecraft.world.level.levelgen.structure.BoundingBox(cx * 16,
+						this.level.getMinY(), cz * 16, cx * 16 + 15, this.level.getMaxY(), cz * 16 + 15);
+					long decoration = random.setDecorationSeed(this.seed, cx * 16, cz * 16);
+					random.setFeatureSeed(decoration, j != null ? j : 0, SURFACE);
+					try {
+						st.placeInChunk(s.proxy, this.level.structureManager(), this.generator, random, box, new net.minecraft.world.level.ChunkPos(cx, cz));
+					} catch (RuntimeException | StackOverflowError | LinkageError e) {
+						if (this.failures.incrementAndGet() <= 5) System.out.println("mcopt-lod: structure piece failed in chunk " + cx + "," + cz + ": " + e);
+					}
+				}
+			}
+		} finally {
+			s.structFeature = false;
+		}
+		int n = t.cells();
+		int[] lo = new int[n], hi = new int[n];
+		java.util.Arrays.fill(lo, Integer.MAX_VALUE);
+		java.util.Arrays.fill(hi, Integer.MIN_VALUE);
+		BlockState[] top = new BlockState[n], base = new BlockState[n];
+		for (var e : s.placed.entrySet()) {
+			long p = e.getKey();
+			if (!s.fromStruct.contains(p)) continue;
+			BlockState st = e.getValue();
+			int bx = BlockPos.getX(p) - x0, y = BlockPos.getY(p), bz = BlockPos.getZ(p) - z0;
+			if (bx < 0 || bz < 0 || bx >= span || bz >= span || st.isAir() || !st.getFluidState().isEmpty()) continue;
+			var shape = st.getCollisionShape(net.minecraft.world.level.EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
+			if (shape.isEmpty() || shape.max(net.minecraft.core.Direction.Axis.Y) < 0.5) continue;
+			int i = (bz >> L) * t.size + (bx >> L);
+			if (y < t.ground[i]) continue;
+			if (y < lo[i]) {
+				lo[i] = y;
+				base[i] = st;
+			}
+			if (y > hi[i]) {
+				hi[i] = y;
+				top[i] = st;
+			}
+		}
+		for (int i = 0; i < n; i++) {
+			if (hi[i] == Integer.MIN_VALUE || t.water[i] != LodTile.DRY && t.water[i] > t.ground[i]) continue;
+			t.canopyLo[i] = (short) t.ground[i];
+			t.canopyHi[i] = (short) hi[i];
+			t.canopyState[i] = top[i];
+			t.trunk[i] = base[i];
+			t.standing[i] = true;
+		}
+		this.structureNanos.addAndGet(System.nanoTime() - t0);
 	}
 
 	/** The chunk's trees (cached): every block the game's tree features set when decorating it. */
@@ -219,6 +497,58 @@ final class LodForest {
 		BlockPos origin = new BlockPos(chunkX * 16, this.level.getMinY(), chunkZ * 16);
 		long decoration = random.setDecorationSeed(this.seed, origin.getX(), origin.getZ());
 		FeaturePlacer placer = new FeaturePlacer(s.proxy, this.generator);
+		if (EXACT_STRUCTURES && !this.structuresFailed) {
+			// (fix21) the surface structures first (their step comes before the disks' and the trees')
+			long t0 = System.nanoTime();
+			net.minecraft.world.level.levelgen.structure.BoundingBox box = new net.minecraft.world.level.levelgen.structure.BoundingBox(chunkX * 16,
+				this.level.getMinY(), chunkZ * 16, chunkX * 16 + 15, this.level.getMaxY(), chunkZ * 16 + 15);
+			net.minecraft.world.level.ChunkPos pos = new net.minecraft.world.level.ChunkPos(chunkX, chunkZ);
+			s.structFeature = true;
+			s.treeFeature = false;
+			try {
+				for (int dz = -STRUCT_REACH; dz <= STRUCT_REACH; dz++) {
+					for (int dx = -STRUCT_REACH; dx <= STRUCT_REACH; dx++) {
+						for (var st : this.starts(chunkX + dx, chunkZ + dz)) {
+							if (!st.getBoundingBox().intersects(box)) continue;
+							Integer j = this.surfaceIndex.get(st.getStructure());
+							random.setFeatureSeed(decoration, j != null ? j : 0, SURFACE);
+							try {
+								st.placeInChunk(s.proxy, this.level.structureManager(), this.generator, random, box, pos);
+							} catch (RuntimeException | StackOverflowError | LinkageError e) {
+								if (this.failures.incrementAndGet() <= 5) System.out.println("mcopt-lod: structure piece failed in chunk " + chunkX + "," + chunkZ + ": " + e);
+							}
+						}
+					}
+				}
+			} finally {
+				s.structFeature = false;
+			}
+			this.structureNanos.addAndGet(System.nanoTime() - t0);
+		}
+		if (this.oreStep != null) {
+			// (fix21) the disks first, as the game decorates (their step comes before the trees'): gravel, sand, clay and mud
+			// around water, which the trees then stand on
+			java.util.BitSet disks = new java.util.BitSet();
+			for (Holder<Biome> b : seen) {
+				List<net.minecraft.core.HolderSet<PlacedFeature>> steps = this.generator.getBiomeGenerationSettings(b).features();
+				if (steps.size() <= ORES) continue;
+				for (Holder<PlacedFeature> pf : steps.get(ORES)) {
+					int idx = this.oreStep.indexMapping().applyAsInt(pf.value());
+					if (idx >= 0 && idx < this.disk.length && this.disk[idx]) disks.set(idx);
+				}
+			}
+			s.groundFeature = true;
+			s.treeFeature = false;
+			for (int idx = disks.nextSetBit(0); idx >= 0; idx = disks.nextSetBit(idx + 1)) {
+				random.setFeatureSeed(decoration, idx, ORES);
+				try {
+					placer.placeWithBiomeCheck(this.oreStep.features().get(idx), random, origin);
+				} catch (RuntimeException e) {
+					if (this.failures.incrementAndGet() <= 5) System.out.println("mcopt-lod: disk feature failed in chunk " + chunkX + "," + chunkZ + ": " + e);
+				}
+			}
+			s.groundFeature = false;
+		}
 		for (int idx = wanted.nextSetBit(0); idx >= 0; idx = wanted.nextSetBit(idx + 1)) {
 			random.setFeatureSeed(decoration, idx, VEG);
 			s.treeFeature = this.tree[idx];
@@ -238,7 +568,8 @@ final class LodForest {
 			out[n++] = BlockPos.getX(p);
 			out[n++] = BlockPos.getY(p);
 			out[n++] = BlockPos.getZ(p);
-			out[n++] = Block.getId(e.getValue()) | (s.fromTree.contains(p) ? FROM_TREE : 0);
+			out[n++] = Block.getId(e.getValue()) | (s.fromTree.contains(p) ? FROM_TREE : 0) | (s.fromGround.contains(p) ? FROM_GROUND : 0)
+				| (s.fromStruct.contains(p) ? FROM_STRUCT : 0);
 		}
 		this.runs.incrementAndGet();
 		this.runNanos.addAndGet(System.nanoTime() - start);
@@ -255,7 +586,22 @@ final class LodForest {
 		if (t.level >= LodConfig.TREE_LEVELS || t.level > 1 || this.step == null) return;
 		int L = t.level, span = t.size << L;
 		int c0x = (t.x0 >> 4) - 1, c0z = (t.z0 >> 4) - 1, c1x = ((t.x0 + span) >> 4), c1z = ((t.z0 + span) >> 4);
+		Stand bounds = this.stands.get();
+		bounds.bounded = true;
+		bounds.minCx = c0x;
+		bounds.minCz = c0z;
+		bounds.maxCx = c1x;
+		bounds.maxCz = c1z;
+		try {
+			this.plant0(t, L, span, c0x, c0z, c1x, c1z);
+		} finally {
+			bounds.bounded = false;
+		}
+	}
+
+	private void plant0(LodTile t, int L, int span, int c0x, int c0z, int c1x, int c1z) {
 		int n = t.cells();
+		if (L == 0) t.treeBlocks = new BlockState[n][];
 		int[] lo = new int[n], hi = new int[n], cols = new int[n];
 		// the blocks a tree fills, up from the ground (bit k: ground + k), for the crown's runs (a spruce's tiers)
 		long[] occ = new long[n];
@@ -273,16 +619,36 @@ final class LodForest {
 					int bx = b[k] - t.x0, y = b[k + 1], bz = b[k + 2] - t.z0;
 					if (bx < 0 || bz < 0 || bx >= span || bz >= span) continue;
 					int i = (bz >> L) * t.size + (bx >> L);
-					BlockState st = Block.stateById(b[k + 3] & ~FROM_TREE);
-					boolean fromTree = (b[k + 3] & FROM_TREE) != 0;
+					BlockState st = Block.stateById(b[k + 3] & ~(FROM_TREE | FROM_GROUND | FROM_STRUCT));
+					boolean fromTree = (b[k + 3] & FROM_TREE) != 0, fromGround = (b[k + 3] & FROM_GROUND) != 0, fromStruct = (b[k + 3] & FROM_STRUCT) != 0;
 					if (st.isAir()) continue;
 					int g = t.ground[i];
-					if (L == 0 && y < g) {
-						// the ground itself changed (podzol, rooted dirt, mud under mangroves)
-						if (y == g - 1 && fromTree) t.state[i] = st;
+					if (fromGround) {
+						// (fix21) a disk's block: the surface or the soil under it takes its material
+						if (L == 0 && y == g - 1) t.state[i] = st;
+						else if (L == 0 && y == g - 2) t.under[i] = st;
 						continue;
 					}
+					if (L == 0 && y < g) {
+						// the ground itself changed (podzol, rooted dirt, mud under mangroves; a village's paths and floors)
+						if (y == g - 1 && (fromTree || fromStruct && st.isSolidRender())) t.state[i] = st;
+						continue;
+					}
+					if (fromStruct && y >= g) {
+						// (fix21) a structure's block: solid ones stand as the column's walls (the lowest one seen) up to its top block
+						var shape = st.getCollisionShape(net.minecraft.world.level.EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
+						if (!st.getFluidState().isEmpty() || shape.isEmpty() || shape.max(net.minecraft.core.Direction.Axis.Y) < 0.5) continue;
+						if (y < lo[i] || t.trunk[i] == null) t.trunk[i] = st;
+					}
 					if (y < g) continue;
+					if (L == 0 && fromTree && y <= this.level.getMaxY()) {
+						int offset = y - g;
+						BlockState[] blocks = t.treeBlocks[i];
+						if (blocks == null) blocks = new BlockState[Math.max(16, offset + 1)];
+						else if (offset >= blocks.length) blocks = java.util.Arrays.copyOf(blocks, Math.max(blocks.length * 2, offset + 1));
+						blocks[offset] = st;
+						t.treeBlocks[i] = blocks;
+					}
 					if (!fromTree) {
 						// a plant (crossed quads) on the ground; solid growth (cacti, pumpkins, melons) stands like a tree; flat
 						// growth (petals, leaf litter) isn't seen from afar
@@ -328,9 +694,18 @@ final class LodForest {
 	/** The stand-in level a chunk's trees grow in: its ground from the far terrain, what the trees set in a map. */
 	private final class Stand implements InvocationHandler {
 		final HashMap<Long, BlockState> placed = new HashMap<>();
+		/** (fix13) The chunks whose ground may be made while planting a tile (else only known grounds are used). */
+		boolean bounded;
+		int minCx, minCz, maxCx, maxCz;
 		/** Blocks the tree features set (the rest: plant features). */
 		final java.util.HashSet<Long> fromTree = new java.util.HashSet<>();
 		boolean treeFeature;
+		/** (fix21) Blocks the disk features set. */
+		final java.util.HashSet<Long> fromGround = new java.util.HashSet<>();
+		boolean groundFeature;
+		/** (fix21) Blocks the structures' pieces set. */
+		final java.util.HashSet<Long> fromStruct = new java.util.HashSet<>();
+		boolean structFeature;
 		/** Per column (x, z packed), per heightmap type: the highest block set that the heightmap counts (heightmaps rise with them). */
 		final HashMap<Long, int[]> tops = new HashMap<>();
 		final WorldGenLevel proxy = (WorldGenLevel) Proxy.newProxyInstance(WorldGenLevel.class.getClassLoader(), new Class<?>[] {WorldGenLevel.class}, this);
@@ -341,6 +716,8 @@ final class LodForest {
 		void reset() {
 			this.placed.clear();
 			this.fromTree.clear();
+			this.fromGround.clear();
+			this.fromStruct.clear();
 			this.tops.clear();
 			this.scratch = null;
 		}
@@ -358,7 +735,8 @@ final class LodForest {
 		BlockState state(int x, int y, int z) {
 			BlockState p = this.placed.get(BlockPos.asLong(x, y, z));
 			if (p != null) return p;
-			Ground g = LodForest.this.ground(x >> 4, z >> 4);
+			Ground g = LodForest.this.groundNear(x >> 4, z >> 4, this);
+			if (g == null) return Blocks.AIR.defaultBlockState();
 			int i = (z & 15) * 16 + (x & 15), h = g.height()[i];
 			if (y < h) {
 				if (y == h - 1) return g.state()[i];
@@ -373,7 +751,9 @@ final class LodForest {
 		}
 
 		int height(Heightmap.Types type, int x, int z) {
-			Ground g = LodForest.this.ground(x >> 4, z >> 4);
+			Ground g = LodForest.this.groundNear(x >> 4, z >> 4, this);
+			// (unknown ground: nothing to stand on there, below the world)
+			if (g == null) return LodForest.this.level.getMinY();
 			int i = (z & 15) * 16 + (x & 15), h = g.height()[i];
 			int[] top = this.tops.get(BlockPos.asLong(x, 0, z));
 			int placedTop = top == null || top[type.ordinal()] == Integer.MIN_VALUE ? Integer.MIN_VALUE : top[type.ordinal()] + 1;
@@ -424,6 +804,10 @@ final class LodForest {
 						this.placed.put(p.asLong(), st);
 						if (this.treeFeature) this.fromTree.add(p.asLong());
 						else this.fromTree.remove(p.asLong());
+						if (this.groundFeature) this.fromGround.add(p.asLong());
+						else this.fromGround.remove(p.asLong());
+						if (this.structFeature) this.fromStruct.add(p.asLong());
+						else this.fromStruct.remove(p.asLong());
 						if (!st.isAir()) {
 							int[] top = this.tops.computeIfAbsent(BlockPos.asLong(p.getX(), 0, p.getZ()), k -> {
 								int[] none = new int[Heightmap.Types.values().length];

@@ -1,0 +1,124 @@
+[18:50:52] [Server thread/INFO]: Stopping server
+[18:50:52] [Server thread/INFO]: Saving players
+[18:50:52] [Server thread/INFO]: herningstang lost connection: Disconnected
+[18:50:52] [Server thread/INFO]: System chat: herningstang left the game
+[18:50:52] [Server thread/INFO]: Stopping singleplayer server as player logged out
+[18:50:52] [Server thread/INFO]: Saving worlds
+[18:50:52] [Server thread/INFO]: ServerLevel[New World]/minecraft:overworld: waiting for 1521 chunks to unload
+[18:50:52] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
+[18:50:53] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
+[18:50:53] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
+[18:50:53] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/iceandfire_fabric:frozen_throne
+[18:50:53] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/iceandfire_fabric:fairy_glade
+[18:50:53] [C2ME Storage #3/INFO]: Storage thread Thread[#135,C2ME Storage #3,8,main] stopped
+[18:50:53] [C2ME Storage #2/INFO]: Storage thread Thread[#134,C2ME Storage #2,8,main] stopped
+[18:50:53] [C2ME Storage #1/INFO]: Storage thread Thread[#133,C2ME Storage #1,8,main] stopped
+[18:50:53] [C2ME Storage #5/INFO]: Storage thread Thread[#137,C2ME Storage #5,8,main] stopped
+[18:50:53] [C2ME Storage #6/INFO]: Storage thread Thread[#138,C2ME Storage #6,8,main] stopped
+[18:50:53] [C2ME Storage #4/INFO]: Storage thread Thread[#136,C2ME Storage #4,8,main] stopped
+[18:50:53] [C2ME Storage #9/INFO]: Storage thread Thread[#141,C2ME Storage #9,8,main] stopped
+[18:50:53] [C2ME Storage #8/INFO]: Storage thread Thread[#140,C2ME Storage #8,8,main] stopped
+[18:50:53] [C2ME Storage #7/INFO]: Storage thread Thread[#139,C2ME Storage #7,8,main] stopped
+[18:50:53] [C2ME Storage #12/INFO]: Storage thread Thread[#144,C2ME Storage #12,8,main] stopped
+[18:50:53] [C2ME Storage #10/INFO]: Storage thread Thread[#142,C2ME Storage #10,8,main] stopped
+[18:50:53] [C2ME Storage #15/INFO]: Storage thread Thread[#147,C2ME Storage #15,8,main] stopped
+[18:50:53] [C2ME Storage #11/INFO]: Storage thread Thread[#143,C2ME Storage #11,8,main] stopped
+[18:50:53] [C2ME Storage #14/INFO]: Storage thread Thread[#146,C2ME Storage #14,8,main] stopped
+[18:50:53] [C2ME Storage #13/INFO]: Storage thread Thread[#145,C2ME Storage #13,8,main] stopped
+[18:50:53] [Render thread/INFO]: Stopping JEI
+[18:50:53] [Render thread/INFO]: Stopping JEI
+[18:50:53] [Render thread/INFO]: Sending Runtime Unavailable...
+[18:50:53] [Render thread/INFO]: Stopping JEI GUI
+[18:50:53] [Render thread/INFO]: Sending Runtime Unavailable took 1.932 milliseconds
+[18:50:53] [Render thread/INFO]: [STDOUT]: mcopt-own reset: 188 meshes released; arena 12.2 -> 0.0 of 64 MB used (was 64), pages renewed, records 0 of 65536, lists 32768, sorted copies 0.0 MB, orphans swept so far 0; own Metal buffers 39, 89.2 MB
+[18:50:53] [Render thread/INFO]: [ETF]: emissive suffixes loaded: [_e]
+[18:50:53] [Render thread/INFO]: [ETF]: emissive suffixes loaded: [_e]
+[18:50:53] [MetaLODS worker 2/INFO]: [STDOUT]: mcopt-lod: terrain from overworld/sloped_cheese (+ top slide) in minecraft:overworld
+[18:50:53] [MetaLODS worker 2/INFO]: [STDOUT]: mcopt-lod: final density: HolderHolder(holder(BinaryFunction(ADD, BinaryFunction(MIN, UnaryFunction(SQUEEZE, BinaryFunction(MUL, BinaryFunction(..), ConstantFunction(..))), HolderHolder(holder(RangeChoiceFunction(InterpolatedFunction(..), -1000000.0, 0.0, ConstantFunction(..), BinaryFunction(..))))), BEARDIFIER)))
+[18:50:53] [MetaLODS worker 2/INFO]: [STDOUT]: mcopt-lod: final density not split (unexpected shape)
+[18:50:53] [MetaLODS worker 2/INFO]: [STDOUT]: mcopt-lod: trees from 18 of the game's 321 vegetal features, plants from 114: [skylands/summer/glowberries, flower/blue/orange_tulips, desert/cactus_flower, shrubland/hot/bushes, skylands/patch_grass, sakura/flowers, sakura/sugarcane, dark/grass, shrubland/bushes, flower/blue/trees, flower/blue/nylium_disk, flower/blue/blue_disk, flower/blue/flowers, flower/blue/amethysts, shrubland/cold/bushes, alpha/flowers_2, alpha/flowers, skylands/winter/grassy_tops, patch_red_shrub, pale_garden_flowers, flower_pale_garden, forest/pale/patch_grass, forest/flower/cloud_trees, forest/flower/tiny/trees_tiny, forest/flower/small/trees_small, forest/flower/mid/trees_mid, forest/flower/tall/trees_tall, flower/white/trees, flower/white/flowers, spires/grass, spires/patch_grass, flower/lavender/trees, flower/lavender/flowers, swamp/vanilla/patch_firefly_bush, swamp/orchid/flowers, forest/vanilla/leaf_litter, highlands/alpine/grass, highlands/alpine/grass_extra, brushland/patch_tall_grass, highlands/alpine/bushes, brushland/bushes, patch_tall_grass, flower_warm, highlands/arid/bushes, brushland/grass, brushland/grass_extra, patch_grass_savanna, patch_grass_jungle, flower_forest_flowers, forest/vanilla/trees_flower, plains/patch_grass, plains/patch_tall_grass, patch_tall_grass_2, patch_sunflower, highlands/steppe/bush, flower_meadow, flower_swamp, patch_large_fern, plains/patch_bush, forest_flowers, wildflowers_birch_forest, skylands/summer/cactus, skylands/summer/tall_flowers, highlands/temperate/flowers, wildflowers_meadow, forest/vanilla/flowers, flower_flower_forest, patch_bush, highlands/flowers, highlands/tall_flowers, highlands/forest/flowers, highlands/forest/tall_flowers, highlands/grass, highlands/forest/grass, forest/vanilla/flowers_windswept, birch/flowers, flower_plains, patch_grass_plain, flower_cherry, cherry/flowers_extra, cherry/azalea_bush, canyon/blooming/flowers, canyon/blooming/flowers_white, flower_default, skylands/patch_golden_dandelion, yellowstone/patch_fern, birch/minecon_flowers, patch_grass_taiga, patch_grass_normal, patch_dead_bush, patch_grass_taiga_2, patch_grass_forest, patch_grass_badlands, patch_dry_grass_desert, patch_dead_bush_2, patch_dry_grass_badlands, patch_dead_bush_badlands, patch_sugar_cane_desert, patch_sugar_cane_swamp, patch_sugar_cane_badlands, patch_pumpkin, patch_firefly_bush_swamp, patch_firefly_bush_near_water_swamp, patch_cactus_desert, patch_cactus_decorated, patch_sugar_cane, skylands/patch_pumpkin, patch_firefly_bush_near_water, jungle/patch_melon, patch_melon, patch_melon_sparse, dark/berry_bushes, patch_berry_common, patch_berry_rare]
+[18:50:54] [MetaLODS worker 1/INFO]: Streams Reflowing: minecraft:overworld builds from y=-64 to y=320, sea level 63, terrain accuracy MEDIUM.
+[18:50:54] [MetaLODS worker 1/INFO]: Streams Reflowing: fast terrain mode OFF for minecraft:overworld.
+[18:50:54] [MetaLODS worker 1/INFO]: Streams Reflowing: streams spawn what minecraft:river spawns.
+[18:50:54] [sr-chunkfill-calibrate/INFO]: Streams Reflowing: a chunk's heights cost 10.82 reads here, so chunks are filled after 8 reads (21.6 ms a fill, 2.0 ms a read).
+[18:50:54] [MetaLODS worker 1/INFO]: [STDOUT]: [MetaLODS] generated a level-0 tile at -21, 31 in 732.5 ms
+[18:50:54] [MetaLODS worker 2/INFO]: [STDOUT]: [MetaLODS] generated a level-0 tile at -22, 31 in 759.3 ms
+[18:50:54] [MetaLODS worker 5/INFO]: [STDOUT]: [MetaLODS] generated a level-0 tile at -23, 31 in 797.4 ms
+[18:50:55] [MetaLODS worker 3/INFO]: [STDOUT]: [MetaLODS] generated a level-2 tile at -3, 11 in 158.6 ms
+[18:50:56] [MetaLODS worker 2/INFO]: [STDOUT]: mcopt-lod: nativeNoise volume calls by size (1 / 2-16 / 17-256 / 257-4k / 4k-64k / more): calls 1338 128870 410 437 36 9, values 1338 1030976 10250 417803 350145 1521000, point calls 1450
+[18:50:56] [MetaLODS worker 5/INFO]: [STDOUT]: [MetaLODS] generated a level-1 tile at -8, 20 in 77.8 ms
+[18:50:56] [MetaLODS worker 5/INFO]: [STDOUT]: mcopt-lod: nativeNoise volume calls by size (1 / 2-16 / 17-256 / 257-4k / 4k-64k / more): calls 1776 259190 539 583 53 9, values 1776 2073544 13475 556516 738665 1521000, point calls 2408
+... first shared-resource failure ...
+[18:51:00] [sr-chunkfill-calibrate/INFO]: Streams Reflowing: a chunk's heights cost 13.34 reads here, so chunks are filled after 8 reads (21.7 ms a fill, 1.6 ms a read).
+[18:51:00] [c2me-worker-4/ERROR]: Couldn't load structure minecraft:ruined_portal/portal_6
+java.nio.channels.ClosedChannelException
+	at java.base/sun.nio.ch.FileChannelImpl.ensureOpen(FileChannelImpl.java:169)
+	at java.base/sun.nio.ch.FileChannelImpl.implRead(FileChannelImpl.java:1160)
+	at java.base/sun.nio.ch.FileChannelImpl.read(FileChannelImpl.java:1152)
+	at jdk.zipfs/jdk.nio.zipfs.ZipFileSystem.readAt(ZipFileSystem.java:1283)
+	at jdk.zipfs/jdk.nio.zipfs.ZipFileSystem.readNBytesAt(ZipFileSystem.java:1271)
+	at jdk.zipfs/jdk.nio.zipfs.ZipFileSystem$EntryInputStream.initDataPos(ZipFileSystem.java:2594)
+	at jdk.zipfs/jdk.nio.zipfs.ZipFileSystem$EntryInputStream.read(ZipFileSystem.java:2536)
+	at jdk.zipfs/jdk.nio.zipfs.ZipFileSystem$2.fill(ZipFileSystem.java:2486)
+	at java.base/java.util.zip.InflaterInputStream.read(InflaterInputStream.java:208)
+	at knot//net.minecraft.util.FastBufferedInputStream.fill(FastBufferedInputStream.java:92)
+	at knot//net.minecraft.util.FastBufferedInputStream.read(FastBufferedInputStream.java:30)
+	at java.base/java.util.zip.CheckedInputStream.read(CheckedInputStream.java:59)
+	at java.base/java.util.zip.GZIPInputStream.readUByte(GZIPInputStream.java:294)
+	at java.base/java.util.zip.GZIPInputStream.readUShort(GZIPInputStream.java:286)
+	at java.base/java.util.zip.GZIPInputStream.readHeader(GZIPInputStream.java:198)
+	at java.base/java.util.zip.GZIPInputStream.<init>(GZIPInputStream.java:82)
+	at java.base/java.util.zip.GZIPInputStream.<init>(GZIPInputStream.java:114)
+	at knot//net.minecraft.nbt.NbtIo.createDecompressorStream(NbtIo.java:41)
+	at knot//net.minecraft.nbt.NbtIo.readCompressed(NbtIo.java:49)
+	at knot//net.minecraft.world.level.levelgen.structure.templatesystem.loader.TemplateSource.readStructure(TemplateSource.java:62)
+	at knot//net.minecraft.world.level.levelgen.structure.templatesystem.loader.TemplateSource.load(TemplateSource.java:50)
+	at knot//net.minecraft.world.level.levelgen.structure.templatesystem.loader.ResourceManagerTemplateSource.load(ResourceManagerTemplateSource.java:35)
+	at knot//net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager.tryLoad(StructureTemplateManager.java:103)
+	at java.base/java.util.concurrent.ConcurrentHashMap.computeIfAbsent(ConcurrentHashMap.java:1724)
+	at knot//net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager.get(StructureTemplateManager.java:93)
+	at knot//net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager.getOrCreate(StructureTemplateManager.java:81)
+	at knot//net.minecraft.world.level.levelgen.structure.TemplateStructurePiece.<init>(TemplateStructurePiece.java:59)
+	at knot//net.minecraft.world.level.levelgen.structure.structures.RuinedPortalPiece.<init>(RuinedPortalPiece.java:87)
+... subsequent registry load ...
+[18:52:52] [Render thread/WARN]: Failed to load level data or datapacks, can't proceed with server load
+java.util.concurrent.ExecutionException: net.minecraft.ReportedException: Registry Loading
+	at java.base/java.util.concurrent.CompletableFuture.wrapInExecutionException(CompletableFuture.java:345)
+	at java.base/java.util.concurrent.CompletableFuture.reportGet(CompletableFuture.java:440)
+	at java.base/java.util.concurrent.CompletableFuture.get(CompletableFuture.java:2094)
+	at knot//net.minecraft.client.gui.screens.worldselection.WorldOpenFlows.loadWorldDataBlocking(WorldOpenFlows.java:213)
+	at knot//net.minecraft.client.gui.screens.worldselection.WorldOpenFlows.loadWorldStem(WorldOpenFlows.java:155)
+	at knot//net.minecraft.client.gui.screens.worldselection.WorldOpenFlows.openWorldLoadLevelStem(WorldOpenFlows.java:432)
+	at knot//net.minecraft.client.gui.screens.worldselection.WorldOpenFlows.lambda$upgradeAndOpenWorld$2(WorldOpenFlows.java:380)
+	at knot//net.minecraft.util.thread.BlockableEventLoop.doRunTask(BlockableEventLoop.java:173)
+	at knot//net.minecraft.util.thread.ReentrantBlockableEventLoop.doRunTask(ReentrantBlockableEventLoop.java:23)
+	at knot//net.minecraft.util.thread.BlockableEventLoop.pollTask(BlockableEventLoop.java:147)
+	at knot//net.minecraft.util.thread.BlockableEventLoop.runAllTasks(BlockableEventLoop.java:127)
+	at knot//net.minecraft.client.Minecraft.runTick(Minecraft.java:1240)
+	at knot//net.minecraft.client.Minecraft.run(Minecraft.java:967)
+	at knot//net.minecraft.client.main.Main.main(Main.java:292)
+	at net.fabricmc.loader.impl.game.minecraft.MinecraftGameProvider.launch(MinecraftGameProvider.java:517)
+	at net.fabricmc.loader.impl.launch.knot.Knot.launch(Knot.java:72)
+	at net.fabricmc.loader.impl.launch.knot.KnotClient.main(KnotClient.java:23)
+	at org.prismlauncher.launcher.impl.StandardLauncher.launch(StandardLauncher.java:115)
+	at org.prismlauncher.EntryPoint.listen(EntryPoint.java:129)
+	at org.prismlauncher.EntryPoint.main(EntryPoint.java:70)
+Caused by: net.minecraft.ReportedException: Registry Loading
+	at knot//net.minecraft.resources.RegistryDataLoader.createReportWithBriefInfo(RegistryDataLoader.java:329)
+	at knot//net.minecraft.resources.RegistryDataLoader.logErrors(RegistryDataLoader.java:294)
+	at knot//net.minecraft.resources.RegistryDataLoader.lambda$load$2(RegistryDataLoader.java:263)
+	at knot//net.minecraft.resources.RegistryDataLoader.mdd3d0a5$fabric-registry-sync-v0$lambda$thenApplyAsync$1$1(RegistryDataLoader.java:565)
+	at java.base/jdk.internal.vm.ScopedValueContainer.callWithoutScope(ScopedValueContainer.java:162)
+	at java.base/jdk.internal.vm.ScopedValueContainer.call(ScopedValueContainer.java:147)
+	at java.base/java.lang.ScopedValue$Carrier.call(ScopedValue.java:419)
+	at knot//net.minecraft.resources.RegistryDataLoader.mdd3d0a5$fabric-registry-sync-v0$lambda$thenApplyAsync$0$0(RegistryDataLoader.java:565)
+	at java.base/java.util.concurrent.CompletableFuture$UniApply.tryFire(CompletableFuture.java:667)
+	at java.base/java.util.concurrent.CompletableFuture$Completion.exec(CompletableFuture.java:504)
+	at java.base/java.util.concurrent.ForkJoinTask.doExec(ForkJoinTask.java:511)
+	at java.base/java.util.concurrent.ForkJoinPool$WorkQueue.topLevelExec(ForkJoinPool.java:1450)
+	at java.base/java.util.concurrent.ForkJoinPool.runWorker(ForkJoinPool.java:2019)
+	at java.base/java.util.concurrent.ForkJoinWorkerThread.run(ForkJoinWorkerThread.java:187)
+Caused by: java.lang.IllegalStateException: Failed to load registries due to errors
+	at knot//net.minecraft.resources.RegistryDataLoader.createReportWithBriefInfo(RegistryDataLoader.java:313)
+	... 13 more
+[18:53:02] [CullThread/INFO]: [STDOUT]: Shutting down culling task!

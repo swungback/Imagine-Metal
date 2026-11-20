@@ -15,6 +15,11 @@ import org.lwjgl.system.MemoryUtil;
  * facing test, same stable bucket order (the digest check, -Dmcopt.own.mesh=verify, compares the two for every section).
  */
 public final class OwnQuads {
+	/**
+	 * mat's bit for a bushy leaf plane (fix9, BushyLeaves: writeMaterials gives it the corner pattern 1101, which the shaders read as
+	 * "a plane": it waves whole and stiff, from the block's centre, and casts no shadow). (fix8 used it for filled leaf faces, gone.)
+	 */
+	static final int FILL = 1 << 16;
 	static final int BUCKETS = 7, QUAD = 64;
 	/**
 	 * -Dmcopt.own.mesh.order=plane: inside each facing bucket, quads sorted by plane coordinate, then by a Morton cell of their
@@ -224,6 +229,10 @@ public final class OwnQuads {
 		int stubs;
 		boolean hinted;
 		int hintGreys, hintTint;
+		/** (fix8, leaf culling) the next quad: leaves whose opposite face was culled, so their holes are filled (bit FILL of mat). */
+		boolean fillNext;
+		/** (fix9) while BushyLeaves' planes are tesselated (OwnMesher): every quad gets FILL. */
+		boolean planeMode;
 
 		Layer() {
 			for (int b = 0; b < BUCKETS; b++) {
@@ -430,7 +439,9 @@ public final class OwnQuads {
 				for (int i = 0, n = this.count[b]; i < n; i++) {
 					int m = mt[i];
 					int gb = grid[m & 4095], wave = gb >> 4 & 3;
-					int corners = wave == 2 ? ((gb & 0x40) != 0 ? 10 : 15) : wave == 1 ? m >>> 12 & 15 : 0;  // (10: a tall plant's top, Materials)
+					int corners = wave == 2 ? ((gb & 0x40) != 0 ? 10 : (m & FILL) != 0 ? 13 : 15) : wave == 1 ? m >>> 12 & 15 : wave == 3 ? 5 : 0;  // (10: a tall plant's top, Materials)
+					// (fix8: vines 0101 as OwnTerrain.storeMaterials gives them: on our own mesher they got 0 and never swayed; 13: leaves
+					// whose face toward the inside of the tree was culled (leaf culling), drawn with their holes filled, terrain.metal)
 					// (Imagine Metal: an ore's upper bits are which ore it is, not corners: ores don't wave)
 					int cls = gb & 15;
 					MemoryUtil.memPutByte(dst++, (byte) (cls == 4 || cls == 6 ? gb : cls | corners << 4));
@@ -610,7 +621,7 @@ public final class OwnQuads {
 				float mid = (ylo + yhi) * 0.5F + 1e-4F;
 				int up = 0;
 				for (int v = 0; v < 4; v++) if (p[v * 3 + 1] > mid) up |= 1 << v;
-				this.mat[b][i] = by << 8 | bz << 4 | bx | up << 12;
+				this.mat[b][i] = by << 8 | bz << 4 | bx | up << 12 | (this.fillNext || this.planeMode ? FILL : 0);
 			}
 			for (int v = 0; v < 4; v++) {
 				long a = d + v * 16L;

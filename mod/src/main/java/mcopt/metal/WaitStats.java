@@ -8,10 +8,29 @@ import java.util.Map;
  * there, how often, and for frame retires which frame it waited for (lag = the submit being recorded minus the frame waited on);
  * fence waits by their caller outside the backend. Render thread only; nothing is allocated on the hot path unless a fence blocks.
  */
-final class WaitStats {
+public final class WaitStats {
 	static final boolean PRINT = Boolean.getBoolean("mcopt.metal.waitStats");
 	/** The hooks run for the once-a-second print and for FrameLog's per-frame rows. */
-	static final boolean ON = PRINT || FrameLog.ON;
+	static final boolean ON = true;  // (fix19: always counted, cheap; Imagine Metal's frames line reads them, take())
+	private static final long[] winNanos = new long[5], winMax = new long[5];
+	private static long frameWait[] = new long[5];
+
+	/** (fix19) ns waited per site since the last call ([0..4]), then the longest single frame's wait per site ([5..9]). */
+	public static synchronized long[] take() {
+		long[] r = new long[10];
+		for (int s = 0; s < 5; s++) {
+			r[s] = winNanos[s];
+			r[5 + s] = winMax[s];
+		}
+		java.util.Arrays.fill(winNanos, 0);
+		java.util.Arrays.fill(winMax, 0);
+		return r;
+	}
+
+	/** (fix19) this frame's waits so far per site (reset at each submit). */
+	public static long frameWait(int site) {
+		return frameWait[site];
+	}
 	static final int INFLIGHT = 0, FENCE = 1, DRAWABLE = 2, PACE = 3, DRAIN = 4;
 	private static final String[] NAMES = {"in-flight limit", "fence", "nextDrawable", "pacer", "drain"};
 	private static final long[] nanos = new long[5], counts = new long[5];
@@ -24,6 +43,10 @@ final class WaitStats {
 
 	static void wait(int site, long ns, long lag) {
 		if (FrameLog.ON) FrameLog.waited(site, ns);
+		synchronized (WaitStats.class) {
+			winNanos[site] += ns;
+			frameWait[site] += ns;
+		}
 		nanos[site] += ns;
 		counts[site]++;
 		lagNanos[site][(int) Math.max(0, Math.min(5, lag))] += ns;
@@ -41,6 +64,12 @@ final class WaitStats {
 	/** End of a submit (one frame); submitIndex is the submit just made. */
 	static void frame(long submitIndex) {
 		if (FrameLog.ON) FrameLog.frame(submitIndex);
+		synchronized (WaitStats.class) {
+			for (int s = 0; s < 5; s++) {
+				if (frameWait[s] > winMax[s]) winMax[s] = frameWait[s];
+				frameWait[s] = 0;
+			}
+		}
 		if (!PRINT) return;
 		long now = System.nanoTime();
 		if (lastSubmit != 0) wall += now - lastSubmit;

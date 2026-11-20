@@ -26,6 +26,7 @@ abstract class OwnSolidExtractorMixin {
 		// yet, floating pieces of the Overworld over the End's islands. The new level's sections are all compiled anew anyway.
 		if (level != null && level == mcopt$lastLevel) return;
 		mcopt$lastLevel = level;
+		imaginemetal.metalods.MetaLods.levelChanged(level);
 		mcopt.metal.own.OwnTerrain own = mcopt.metal.own.OwnTerrain.get();
 		if (own != null) own.disposeAll();
 	}

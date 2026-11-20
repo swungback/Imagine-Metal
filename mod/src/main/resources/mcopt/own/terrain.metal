@@ -1835,16 +1835,34 @@ vertex VOut own_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant Dr
 		if ((ov.imMat & 15u) == 4u || (ov.imMat & 15u) == 6u) wc = 0u;  // (an ore's upper bits say which ore it is)
 		bool vine = wc == 5u;
 		// (10: a tall plant's upper half, Build C2: waves whole like leaves, marked apart from them for the shadow casters)
-		if (wc != 0u && (wc == 15u || wc == 10u || vine || ((wc >> corner) & 1u) != 0u)) {
+		if (wc != 0u && (wc == 15u || wc == 13u || wc == 10u || vine || ((wc >> corner) & 1u) != 0u)) {
 			float3 wp = float3(origin & 1023) + rel;
+			// (fix9b, a bushy leaf plane (1101, BushyLeaves): the whole plane moves as one, by its centre (the leaf block's centre,
+			// halfway between corners 0 and 2), and less: each of its corners swaying on its own, two blocks apart, stretched and
+			// sheared the plane every frame, Jack's "the waving part looks weird", and smeared it under the upscaler's history)
+			float planeAmp = 1.0;
+			if (wc == 13u && OWN_REC && COMPACT) {
+				uint rq = vi >> 2;
+				float3 pc = 0.5 * (ownQrecPos(arenaRaw, rq, 0) + ownQrecPos(arenaRaw, rq, 2));
+				wp += pc - ownQrecPos(arenaRaw, rq, vi & 3u);
+				planeAmp = 0.6;
+			}
 			float tw = g.GameTime * 1200.0;
 			const float amp = 0.065;  // (one for every waving block: a tall plant's halves share their corners and must move alike)
 			float ph = wp.x * 0.55 + wp.z * 0.38;
 			float3 d = float3(sin(tw * 1.6 + ph) * 0.7 + sin(tw * 2.9 + wp.z * 1.3) * 0.3,
 				sin(tw * 2.1 + wp.x * 0.9 + wp.z * 0.7) * 0.15,
-				cos(tw * 1.3 + ph * 0.8) * 0.6 + sin(tw * 3.3 + wp.x * 1.1) * 0.3) * amp;
-			// (vines: a third across, more up and down, slower down the strand: they hang off a wall 0.05 out)
-			if (vine) d *= float3(0.33, 1.6, 0.33);
+				cos(tw * 1.3 + ph * 0.8) * 0.6 + sin(tw * 3.3 + wp.x * 1.1) * 0.3) * amp * planeAmp;
+			// (vines: they hang off a wall 0.05 out, so they sway only along the wall, never toward it or away (fix8: a third across
+			// before, which still pushed them into the wall's blocks): the axis on which the corner sits off the block grid is the
+			// wall's normal (a wall vine's corners lie on the grid in the other two; one under a ceiling sits off it in y))
+			if (vine) {
+				d *= float3(0.8, 1.6, 0.8);
+				float3 og = abs(fract(wp + 0.5) - 0.5);
+				if (og.x >= og.y && og.x >= og.z) d.x = 0.0;
+				else if (og.z >= og.y) d.z = 0.0;
+				else d.y = 0.0;
+			}
 			float4x4 m = CPU_CLIP ? df.clip : proj.ProjMat * t.ModelViewMat;
 			float4 dc = m * float4(d, 0.0);
 			dc.y = -dc.y;
@@ -2314,6 +2332,25 @@ static float4 sampleRGSS(texture2d<float> source, sampler s, float2 uv, float2 p
 	return mix(nearestColor, rgssColor, blendFactor);
 }
 
+#ifdef IM_SHADE
+// (fix8, leaf culling) a culled tree's outer leaf face (material corner pattern 1101: its opposite face was culled) has its holes
+// filled, so one doesn't look into a hollow tree through it: the texel half a sprite over (else a quarter), darker, as the inside
+// of a canopy; failing both, the hole's own colour (vanilla's fast leaves keep a dark green there)
+static inline bool imLeafFilled(uint imMat) {
+	return false;  // (fix9: pattern 1101 now marks a bushy leaf plane, BushyLeaves; no filled faces any more)
+}
+
+// (du, dv: the uv's derivatives, taken by the caller outside its branch, where every pixel of the quad still runs)
+static float4 imLeafFill(float4 texel, float2 uv, float4 rect, texture2d<float> atlas, sampler s, float2 pixelSize, float2 du, float2 dv, float lod) {
+	float2 sz = max(rect.zw - rect.xy, float2(1e-6));
+	float2 f = (uv - rect.xy) / sz;
+	float2 ts = sqrt(du * du + dv * dv);
+	float4 t2 = sampleNearestG(atlas, s, rect.xy + fract(f + float2(0.5, 0.25)) * sz, pixelSize, du * lod, dv * lod, ts);
+	if (t2.a < 0.5) t2 = sampleNearestG(atlas, s, rect.xy + fract(f + float2(0.25, 0.5)) * sz, pixelSize, du * lod, dv * lod, ts);
+	return float4((t2.a >= 0.5 ? t2.rgb : texel.rgb) * 0.62, 1.0);
+}
+#endif
+
 static float linear_fog_value(float vertexDistance, float fogStart, float fogEnd) {
 	if (vertexDistance <= fogStart) return 0.0;
 	else if (vertexDistance >= fogEnd) return 1.0;
@@ -2379,6 +2416,13 @@ static float4 imFogTail(float4 color, float3 imPos, uint imMat, float fogValue, 
 		imFog = wf.w;
 		imFogColor = wf.rgb;
 	}
+	// Opaque land/LOD water gets this in im_air_fs. Translucent surfaces run after that
+	// pass, so their own reflected/body light must get the same distance haze here.
+	// The destination already contains haze; fogging the completed blend again would double it.
+	if (translucentPass) {
+		float lf = imLodFogAmount(imPos, imf);
+		if (lf > 0.001) color.rgb = mix(color.rgb, imLodFogColor(imPos, imf), lf);
+	}
 	imFog = 1.0 - (1.0 - imFog) * (1.0 - imFade);
 	// (waving plants marked for the TAA (alpha 0.98, invisible): it can't follow their sway, and its history left ghost copies
 	// of grass and dead bushes on the sand; there it keeps less of it)
@@ -2393,7 +2437,7 @@ static float4 imFogTail(float4 color, float3 imPos, uint imMat, float fogValue, 
 // behind this fragment (water blue, stained glass its colour; 1: not at all).
 static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, constant Fog &fog, texture2d<float> atlas, sampler atlasSampler
 #ifdef IM_SHADE
-	, constant ImFrame &imf, depth2d_array<float> imShadowMap, sampler imShadowCmp, texture3d<float> imLightVol, sampler imLightSampler, texture3d<float> imSeeds, texture2d<float> imPbrN, texture2d<float> imPbrS
+	, constant ImFrame &imf, device const uint *imChunkFade, depth2d_array<float> imShadowMap, sampler imShadowCmp, texture3d<float> imLightVol, sampler imLightSampler, texture3d<float> imSeeds, texture2d<float> imPbrN, texture2d<float> imPbrS
 	, texture2d<float> imHistColor, depth2d<float> imHistDepth, sampler imHistSampler, thread float3 &imTint, thread float3 &imWaterN, depth2d<float> imUnderDepth
 	, texture3d<float> imLightFilt, texture3d<float> imLightOpen
 #endif
@@ -2407,10 +2451,15 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 	if (OWN_TPROBE == 7 && CUTOUT && CUTOUT_LIMIT < 0.2)
 		return sampleNearest(atlas, atlasSampler, in.texCoord0, 1.0f / float2(t.TextureSize), 1.0f) * getColor(in);
 #endif
+#ifdef IM_SHADE
+    if (!imLodNearVisible(in.imPos, in.pos.xy, imf, imChunkFade)) discard_fragment();
+#endif
 	float2 pixelSize = 1.0f / float2(t.TextureSize);
 #ifdef IM_SHADE
 	// (Imagine Metal's render scale: the texture's detail as at full size; own_fs_alpha takes the same, so both passes agree)
 	float imLod = imf.taa.w > 0.01 ? imf.taa.w : 1.0;
+	// (fix9b: a bushy leaf plane one detail level sharper: seen slanted its texture fell two levels and read blurry, Jack 00.46.08)
+	if (((in.imMat >> 4) & 15u) == 13u) imLod *= 0.5;
 #else
 	float imLod = 1.0;
 #endif
@@ -2425,6 +2474,11 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 	// the vertex alpha and the fade's alpha mix let translucent block quads (stained glass, the nether portal) and some cutout ones
 	// (the copper torch) come out with almost none: glass showed only its tint, the portal and the torch not at all)
 	color.a = texel.a;
+	float2 imDu = dfdx(in.texCoord0), imDv = dfdy(in.texCoord0);
+	if (CUTOUT && CUTOUT_LIMIT > 0.2 && color.a < CUTOUT_LIMIT && imLeafFilled(in.imMat)) {
+		texel = imLeafFill(texel, in.texCoord0, in.imRect, atlas, atlasSampler, pixelSize, imDu, imDv, imLod);
+		color = float4(texel.rgb * getColor(in).rgb, 1.0);
+	}
 #else
 	if (F_RICH) color = mix(fog.FogColor * float4(1, 1, 1, color.a), color, in.chunkVisibility);
 #endif
@@ -2472,11 +2526,8 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 				// with the depth under the water (own_fs_tr): the water body's colour, the biome's (normalized, brightened, nudged a
 				// little toward turquoise), lit like any surface; own_fs_tr lays it over what's under the water by how deep it is.
 				// Here only the surface's own share: its ripples faintly, and more at a grazing angle
-				float3 wn = wc / max(max(wc.r, max(wc.g, wc.b)), 1e-3);
-				wn = mix(wn, float3(0.3, 0.9, 0.85), 0.5);  // (every biome's water toward one turquoise: blue ones read purple over sand)
-				float tl = mix(0.62, dot(texel.rgb, float3(0.299, 0.587, 0.114)), 0.35);
-				color.rgb = wn * (0.34 + 0.3 * tl);
-				color.a = mix(0.05 + 0.1 * tl * tl, 1.0, fr * fr * 0.9);
+				color.rgb = imWaterBodyColor(wc, texel.rgb);
+				color.a = imWaterSurfaceAlpha(texel.rgb, dot(fnT, -normalize(in.imPos)));
 			} else {
 				// Reimagined (water.glsl, its own style): the texture squared, tinted by the biome's water colour (its green kept up),
 				// a little warmer; nearly opaque where deep, clear up close, opaque at a grazing angle
@@ -2496,13 +2547,35 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 				float3 wfc0 = pow(max(fog.FogColor.rgb, 1e-3), float3(0.33, 0.21, 0.26)) * 0.2;
 				float fb = 1.0 - saturate(abs(dot(fnT, normalize(in.imPos))));
 				float tir = smoothstep(0.25, 0.55, fb);
+				// (Build C3, env.w bit 32: the window wide, the mirror only at a grazing angle, and never wholly: Jack could only see out
+				// through a circle straight up)
+				if ((uint(imf.env.w + 0.5) & 32u) != 0u) tir = 0.85 * smoothstep(0.62, 0.92, fb);
 				// (Build C2b, ImFrame.env.w bit 16: the water's own fog colour there, as everything under water fades into, instead of
 				// that colour a fifth as bright: around the see-through window straight up it made a dark, murky ring, near black at
 				// night, that the fog only half turned teal)
 				float3 tirC = (uint(imf.env.w + 0.5) & 16u) != 0u ? imWaterFog(fog.FogColor.rgb, length(in.imPos), imf).rgb
 					: pow(imPresent(wfc0, imf), 1.0 / 2.2);
+				// (fix4, env.w bit 64: the surface reads as a surface from below: lit by the day through it, so brighter than the water's
+				// fog it would otherwise melt into (Jack: "cant really tell im underwater / when the water turns to air", 14.01.45: the
+				// surface was exactly the fog's colour), and rippling with the waves and the water texture)
+				if ((uint(imf.env.w + 0.5) & 64u) != 0u) {
+					float rl = dot(texel.rgb, float3(0.299, 0.587, 0.114));
+					float rip = saturate(0.5 + (rl - 0.55) * 1.6 + length(fnT.xz) * 4.0);
+					tirC *= 1.35 + 0.7 * rip;
+				}
 				color.rgb = mix(color.rgb, tirC, tir);
 				color.a = mix(color.a, 1.0, tir);
+				if ((uint(imf.env.w + 0.5) & 64u) != 0u) {
+					// (fix9: inside the see-through window too the surface is a sheet: a rippling ceiling of light over the eye, the sky
+					// through it only in part. The window was clear, so looking up showed the sky in the water's fog and nothing told
+					// where the water ended (Jack's 18.54.55 "still dont feel like i can see where water ends"))
+					float rl2 = dot(texel.rgb, float3(0.299, 0.587, 0.114));
+					float rip2 = saturate(0.5 + (rl2 - 0.55) * 1.8 + length(fnT.xz) * 5.0);
+					float win = 1.0 - tir;
+					float3 sheet = saturate(tirC * (1.25 + 0.9 * rip2) + float3(0.05, 0.08, 0.08) * rip2);
+					color.rgb = mix(color.rgb, sheet, 0.6 * win);
+					color.a = max(color.a, mix(0.38, 0.62, rip2) * win);
+				}
 			}
 			// what's under the water turns blue (Reimagined's translucentMult: the biome's water colour, normalized; less far away;
 			// with the depth under the water, own_fs_tr's absorption by how deep it is instead)
@@ -2554,7 +2627,7 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]], constant Terrain &t [[buffer(23)]], constant Fog &fog [[buffer(24)]],
 	texture2d<float> atlas [[texture(16)]], sampler atlasSampler [[sampler(14)]]
 #ifdef IM_SHADE
-	, constant ImFrame &imf [[buffer(30)]], depth2d_array<float> imShadowMap [[texture(20)]], sampler imShadowCmp [[sampler(13)]]
+	, constant ImFrame &imf [[buffer(30)]], device const uint *imChunkFade [[buffer(25)]], depth2d_array<float> imShadowMap [[texture(20)]], sampler imShadowCmp [[sampler(13)]]
 	, texture3d<float> imLightVol [[texture(21)]], sampler imLightSampler [[sampler(12)]], texture3d<float> imSeeds [[texture(24)]], texture2d<float> imPbrN [[texture(27)]], texture2d<float> imPbrS [[texture(28)]]
 	, texture2d<float> imHistColor [[texture(22)]], depth2d<float> imHistDepth [[texture(23)]], sampler imHistSampler [[sampler(11)]]
 	, depth2d<float> imUnderDepth [[texture(26)]], texture3d<float> imLightFilt [[texture(29)]], texture3d<float> imLightOpen [[texture(30)]]
@@ -2562,7 +2635,7 @@ fragment float4 own_fs(VOut in [[stage_in]], constant Globals &g [[buffer(22)]],
 	) {
 #ifdef IM_SHADE
 	float3 imTint = float3(1.0), imWaterN = float3(0.0);
-	return ownFsBody(in, g, t, fog, atlas, atlasSampler, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imSeeds, imPbrN, imPbrS, imHistColor, imHistDepth,
+	return ownFsBody(in, g, t, fog, atlas, atlasSampler, imf, imChunkFade, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imSeeds, imPbrN, imPbrS, imHistColor, imHistDepth,
 		imHistSampler, imTint, imWaterN, imUnderDepth, imLightFilt, imLightOpen);
 #else
 	return ownFsBody(in, g, t, fog, atlas, atlasSampler);
@@ -2605,15 +2678,22 @@ static inline float3 imOctDec(float2 e) {
 }
 
 fragment ImGOut own_fs_g(VOut in [[stage_in]], constant Globals &g [[buffer(22)]], constant Terrain &t [[buffer(23)]],
-	texture2d<float> atlas [[texture(16)]], sampler atlasSampler [[sampler(14)]], constant ImFrame &imf [[buffer(30)]],
+	texture2d<float> atlas [[texture(16)]], sampler atlasSampler [[sampler(14)]], constant ImFrame &imf [[buffer(30)]], device const uint *imChunkFade [[buffer(25)]],
 	texture2d<float> imPbrN [[texture(27)]]) {
+    if (!imLodNearVisible(in.imPos, in.pos.xy, imf, imChunkFade)) discard_fragment();
 	float2 pixelSize = 1.0f / float2(t.TextureSize);
 	float imLod = imf.taa.w > 0.01 ? imf.taa.w : 1.0;
+	// (fix9b: a bushy leaf plane one detail level sharper: seen slanted its texture fell two levels and read blurry, Jack 00.46.08)
+	if (((in.imMat >> 4) & 15u) == 13u) imLod *= 0.5;
 	float4 texel = g.UseRgss == 1 ? sampleRGSS(atlas, atlasSampler, in.texCoord0, pixelSize, imLod) : sampleNearest(atlas, atlasSampler, in.texCoord0, pixelSize, imLod);
+	float2 imDu = dfdx(in.texCoord0), imDv = dfdy(in.texCoord0);
+	if (CUTOUT && texel.a < CUTOUT_LIMIT) {
+		if (imLeafFilled(in.imMat)) texel = imLeafFill(texel, in.texCoord0, in.imRect, atlas, atlasSampler, pixelSize, imDu, imDv, imLod);
+		else discard_fragment();
+	}
 	float4 color = texel * getColor(in);
 	float imFade = 0.0;
 	if (F_RICH) imFade = 1.0 - in.chunkVisibility;
-	if (CUTOUT && texel.a < CUTOUT_LIMIT) discard_fragment();
 	float2 imLightQ = in.imLight;
 	if (in.imQuv.x > -0.5) {
 		float2 st = saturate(in.imQuv);
@@ -2642,7 +2722,7 @@ fragment ImGOut own_fs_g(VOut in [[stage_in]], constant Globals &g [[buffer(22)]
 
 struct ImDeferParams {
 	float4x4 clipInv;  // clip (Minecraft's, y up; depth 0..1 reversed) -> camera-relative world: this frame's terrain transform
-	float4 size;       // xy the target's size in pixels
+	float4 size;       // xy target size in pixels; z 1 = second, water-only lighting phase
 };
 
 struct ImDeferOut {
@@ -2656,7 +2736,50 @@ vertex ImDeferOut im_defer_vs(uint vid [[vertex_id]]) {
 	return o;
 }
 
-fragment float4 im_defer_fs(ImDeferOut in [[stage_in]], float4 g1 [[color(1)]], float4 g2 [[color(2)]], float4 g3 [[color(3)]], float4 g4 [[color(4)]],
+// (fix7) MetaLODS' far shadows: the land's height map (MetaArena.heights, 1024 x 1024 texels of 16 x 16 blocks, wrapping) and
+// where the camera is in whole blocks (mcown.m binds both, at 27 and 28, when MetaLODS draws; cam.w 0: off)
+struct ImHeightP {
+	int4 cam;        // xyz the camera's block, w 1 = on
+	float4 frac;     // xyz the camera's position within it, w the world's bottom (y)
+	float4 range;    // x from how far away (blocks) the march is made, y the highest land in the map (world y, 0: unknown), zw unused
+};
+
+// How much of the sun reaches world point p (camera-relative) by the height map: a march toward the light from 20 blocks out, steps
+// growing by 1.3 to about 2 km; a texel higher than the ray shades it, softly by how much (the map's 16-block texels make a tree's
+// top the whole texel's height, so nothing within the first texel or so is counted against it)
+// (s1119: start = from how far away; hp.range.x for the real chunks, 0 for MetaLODS pixels)
+static float imFarSun(float3 p, float3 n, float3 L, constant ImHeightP &hp, device const uint *hm, float start) {
+	if (hp.cam.w == 0 || L.y < 0.01) return 1.0;
+	float dist = length(p);
+	if (dist < start) return 1.0;
+	// (fix8, cost: a face turned away from the sun gets none of it anyway, so no march for it; 12 steps growing by 1.45 reach as
+	// far (1,200 blocks) as the 18 by 1.3 did with a third fewer reads of the 4 MB height map, whose reads land all over it; and
+	// the march stops once the ray is above any land there can be)
+	if (dot(n, L) <= 0.0) return 1.0;
+	float3 o = p + hp.frac.xyz + n * 0.5;  // (relative to the camera's block: exact in floats out here)
+	float shade = 0.0, t = 20.0;
+	// (fix9: the march stops once its ray is above the highest land the map holds, not only above y 336: from the sea or a valley
+	// toward a high sun that is a few steps instead of twelve)
+	float ceilY = hp.range.y > 0.0 ? min(hp.range.y + 1.0, 336.0) : 336.0;
+	for (int i = 0; i < 12; i++, t *= 1.45) {
+		float3 q = o + L * t;
+		if (float(hp.cam.y) + q.y > ceilY) break;
+		int2 b = hp.cam.xz + int2(floor(q.xz));
+		int2 tx = b >> 4;
+		uint v = hm[(uint(tx.y) & 1023u) * 1024u + (uint(tx.x) & 1023u)];
+		uint tag = (uint(tx.x >> 10) & 1023u) | (uint(tx.y >> 10) & 1023u) << 10;
+		if (v == 0u || (v >> 12) != tag) continue;
+		float top = float(v & 4095u) - 1.0 + hp.frac.w;
+		float y = float(hp.cam.y) + q.y;
+		shade = max(shade, saturate((top - y - 1.0) / (2.0 + 0.04 * t)));
+		if (shade >= 1.0) break;
+	}
+	// (eased in from the march's start, so where the shadow maps fade out the change is gradual)
+	return 1.0 - shade * smoothstep(start, start + 48.0, dist);
+}
+
+fragment float4 im_defer_fs(ImDeferOut in [[stage_in]], float4 imDst [[color(0)]], float4 g1 [[color(1)]], float4 g2 [[color(2)]], float4 g3 [[color(3)]], float4 g4 [[color(4)]],
+	constant ImHeightP &hp [[buffer(27)]], device const uint *hm [[buffer(28)]],
 	constant Fog &fog [[buffer(24)]], constant ImDeferParams &dp [[buffer(29)]], constant ImFrame &imf [[buffer(30)]],
 	depth2d_array<float> imShadowMap [[texture(20)]], sampler imShadowCmp [[sampler(13)]],
 	texture3d<float> imLightVol [[texture(21)]], sampler imLightSampler [[sampler(12)]], texture3d<float> imSeeds [[texture(24)]],
@@ -2671,16 +2794,32 @@ fragment float4 im_defer_fs(ImDeferOut in [[stage_in]], float4 g1 [[color(1)]], 
 	float3 p = w.xyz / w.w;
 	uint flags = uint(g1.a * 255.0 + 0.5);
 	uint mat = uint(g2.a * 255.0 + 0.5);
+	if (dp.size.z > 0.5 && mat != 0x80u && imf.lodFog.y < 0.5) discard_fragment();
+	// (s1119: the Benchmark probe "LOD pixels lit cheaply", MetaLods.probe 4: ml_fs marks them 0x81, hp.range.z 1)
+	if (hp.range.z > 0.5 && mat == 0x81u) return float4(g1.rgb * 0.8, 1.0);
+	if (imf.lodFog.y > 0.5) {
+		// Coverage: real opaque grey, LOD solid orange, LOD water cyan. Mask view adds
+		// green candidates normally discarded; it intentionally changes visible coverage.
+		float3 c = mat == 0x83u ? float3(0.1, 1.0, 0.1) : mat == 0x82u ? float3(0.0, 0.8, 1.0)
+			: mat == 0x81u ? float3(1.0, 0.4, 0.05) : float3(0.4);
+		return float4(c, 1.0);
+	}
 	uint axis = (flags >> 1) & 7u;
 	float2 lq = floor(g3.rg * 65535.0 + 0.5);
 	float2 lhi = floor(lq / 16.0);
 	float2 light = lhi / 4095.0;
-	float2 lean = (lq - lhi * 16.0 - 8.0) * (0.7 / 7.0);
+	// (s1119: ml_fs writes the block light's low code 0, which own_fs_g never does (1..15): that marks a MetaLODS pixel)
+	float2 lcode = lq - lhi * 16.0;
+	bool lodPix = lcode.x < 0.5;
+	float2 lean = lodPix ? float2(0.0) : (lcode - 8.0) * (0.7 / 7.0);
 	ImPre m;
 	m.on = true;
+	m.lod = lodPix;
 	m.slanted = (flags & 1u) != 0u;
-	m.N = imOctDec(g3.ba);
 	float3 an = float3(axis < 2u ? 1.0 : 0.0, axis == 2u || axis == 3u ? 1.0 : 0.0, axis >= 4u ? 1.0 : 0.0) * ((axis & 1u) != 0u ? -1.0 : 1.0);
+	// Water reuses g3.ba for thickness, so reconstruct BOTH lighting normals
+	// from its face axis. Keeping N pointing up reflected side/bottom faces as tops.
+	m.N = mat == 0x80u ? an : imOctDec(g3.ba);
 	m.n = m.slanted ? m.N : an;
 	float3 tv = axis < 2u ? float3(0.0, lean.x, lean.y) : axis < 4u ? float3(lean.x, 0.0, lean.y) : float3(lean.x, lean.y, 0.0);
 	m.Lt = m.slanted ? m.n : normalize(m.n * 0.75 + tv);
@@ -2688,8 +2827,26 @@ fragment float4 im_defer_fs(ImDeferOut in [[stage_in]], float4 g1 [[color(1)]], 
 	// the texture's own texel on a full block's face; the material mixed in so two materials' patterns differ)
 	float3 wq = fract(p + imf.world.xyz - m.n * 0.01) * 16.0;
 	m.texel = floor(axis < 2u ? wq.yz : axis < 4u ? wq.xz : wq.xy) + float2(mat * 16u, mat * 48u);
-	float3 lit = imShade(g1.rgb, g2.rgb, p, light, mat | 0x10000u, in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imLightFilt, imLightOpen,
+	m.farSun = imFarSun(p, m.n, imf.lightDir.xyz, hp, hm, hp.range.x);
+	// (MetaLODS water's top, material 0x80 (metalods.metal ml_fs): shaded as the real water's surface (kind 1: its waves, sun glint,
+	// the sky's reflection by the angle), then laid over deep water's seabed, which the water has absorbed to nearly black, by the
+	// share the real water takes there (own_fs_tr: at least 0.72 deep, opaque at a grazing angle). It was lit as cyan ground)
+	bool lodWater = mat == 0x80u;
+	float3 surfaceColor = lodWater ? imWaterBodyColor(g1.rgb, g2.rgb) : g1.rgb;
+	float3 lit = imShade(surfaceColor, g2.rgb, p, light, (lodWater ? 0x100u : mat) | 0x10000u, in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imLightFilt, imLightOpen,
 		imSeeds, imHistColor, imHistColor, float2(0.0), float4(0.0), imHistColor, imHistColor, imHistDepth, imHistSampler, imUnderDepth, m);
+	if (lodWater) {
+        // The opaque bed has already been shaded into colour 0. Match own_fs_tr's
+        // linear-light absorption, depth-dependent volume and Fresnel surface blend.
+        if (imf.water.z < 0.5) {
+            float thickness = g3.b * 64.0;
+            float a = imWaterSurfaceAlpha(g2.rgb, dot(m.n, -normalize(p)));
+            if (imf.toggles.w > 0.5) a = max(a, imWaterVolumeAlpha(thickness));
+            float3 behind = imWaterTransmitted(imDst.rgb, g1.rgb, thickness, imf.toggles.w > 0.5);
+            lit = pow(max(mix(behind, pow(max(lit, 0.0), 2.2), a), 0.0), 1.0 / 2.2);
+        }
+		mat = 0u;
+	}
 	// Minecraft's own fog amount (terrain.fsh), from the place instead of the vertex distances
 	float fogValue = max(linear_fog_value(length(p), fog.FogEnvironmentalStart, fog.FogEnvironmentalEnd),
 		linear_fog_value(max(length(p.xz), abs(p.y)), fog.FogRenderDistanceStart, fog.FogRenderDistanceEnd));
@@ -2704,13 +2861,15 @@ fragment float4 im_defer_fs(ImDeferOut in [[stage_in]], float4 g1 [[color(1)]], 
 // glass its colour), then the fragment laid over it by its alpha, in linear light.
 fragment float4 own_fs_tr(VOut in [[stage_in]], float4 imDst [[color(0)]], constant Globals &g [[buffer(22)]], constant Terrain &t [[buffer(23)]],
 	constant Fog &fog [[buffer(24)]], texture2d<float> atlas [[texture(16)]], sampler atlasSampler [[sampler(14)]]
-	, constant ImFrame &imf [[buffer(30)]], depth2d_array<float> imShadowMap [[texture(20)]], sampler imShadowCmp [[sampler(13)]]
+	, constant ImFrame &imf [[buffer(30)]], device const uint *imChunkFade [[buffer(25)]], depth2d_array<float> imShadowMap [[texture(20)]], sampler imShadowCmp [[sampler(13)]]
 	, texture3d<float> imLightVol [[texture(21)]], sampler imLightSampler [[sampler(12)]], texture3d<float> imSeeds [[texture(24)]], texture2d<float> imPbrN [[texture(27)]], texture2d<float> imPbrS [[texture(28)]]
 	, texture2d<float> imHistColor [[texture(22)]], depth2d<float> imHistDepth [[texture(23)]], sampler imHistSampler [[sampler(11)]]
 	, texture2d<float> imUnder [[texture(25)]], depth2d<float> imUnderDepth [[texture(26)]], texture3d<float> imLightFilt [[texture(29)]], texture3d<float> imLightOpen [[texture(30)]]
 	) {
+	// Keep the pre-translucent diagnostic visible through near water/glass.
+	if (imf.lodFog.y > 0.5) return imDst;
 	float3 imTint = float3(1.0), imWaterN = float3(0.0);
-	float4 c = ownFsBody(in, g, t, fog, atlas, atlasSampler, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imSeeds, imPbrN, imPbrS, imHistColor, imHistDepth,
+	float4 c = ownFsBody(in, g, t, fog, atlas, atlasSampler, imf, imChunkFade, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imSeeds, imPbrN, imPbrS, imHistColor, imHistDepth,
 		imHistSampler, imTint, imWaterN, imUnderDepth, imLightFilt, imLightOpen);
 	float a = saturate(c.a);
 	float3 dst = imDst.rgb;
@@ -2731,7 +2890,7 @@ fragment float4 own_fs_tr(VOut in [[stage_in]], float4 imDst [[color(0)]], const
 			// (0.02: at 0.045 the shore's stones swam about under a few blocks of water)
 			float2 uv1 = in.pos.xy / sz + imWaterN.xy * (0.02 * saturate(thick * 0.5) / max(1.0, dist * 0.08));
 			uint2 p1 = uint2(clamp(uv1 * sz, float2(0.0), sz - 1.0));
-			float du1 = imUnderDepth.read(p1);
+			float du1 = all(p1 == pi) ? du0 : imUnderDepth.read(p1);
 			// (only toward something that's under the water too: never toward a thing in front of it)
 			if (du1 < in.pos.z) dst = imUnder.read(p1).rgb;
 			else dst = imUnder.read(pi).rgb;
@@ -2745,18 +2904,8 @@ fragment float4 own_fs_tr(VOut in [[stage_in]], float4 imDst [[color(0)]], const
 		} else {
 			dst = imUnder.read(pi).rgb;
 		}
-		float3 wc = getColor(in).rgb;
-		wc.g = max(wc.g, 0.39);
-		float3 wn = wc / max(max(wc.r, max(wc.g, wc.b)), 1e-3);
-		// (toward one turquoise: a blue biome's water took the red out of the sand under it and the seabed read lavender, "purple",
-		// a deep blue one "hella blue")
-		wn = mix(wn, float3(0.45, 0.95, 0.85), 0.55);
-		// (clearer: at 0.42 and 0.16 water ten blocks deep was two thirds its own colour and the seabed's red gone, read as not
-		// see-through)
-		float3 absorb = (1.0 - wn) * 0.26 + 0.02;
-		// (the seabed's light given back what the sky light's fall with depth took: a level a block, dark below a few blocks)
-		behind = pow(max(dst, 0.0), 2.2) * (1.0 + 0.8 * saturate(thick / 10.0)) * exp(-absorb * thick);
-		float vol = (1.0 - exp(-thick * 0.09)) * 0.72;
+		behind = imWaterTransmitted(dst, getColor(in).rgb, thick, true);
+		float vol = imWaterVolumeAlpha(thick);
 		a = max(a, vol);
 	} else {
 		behind = pow(max(dst, 0.0), 2.2) * imTint;
@@ -2766,6 +2915,13 @@ fragment float4 own_fs_tr(VOut in [[stage_in]], float4 imDst [[color(0)]], const
 	}
 	float3 col = mix(behind, pow(max(c.rgb, 0.0), 2.2), a);
 	if (foam > 0.0) col = mix(col, pow(saturate(c.rgb * 1.5 + 0.4), 2.2), foam);
+	{
+		// (fix9b: the clouds drawn over the land before this pass left their cover in the picture's alpha (imsky.m, mode 3):
+		// where they are, the picture already here (with them in it) shows through by that much, so water and glass are no
+		// longer drawn over a cloud between them and the eye, Jack's 00.49.20. A mob's 0.96 / a waving plant's 0.98 read as none)
+		float cover = saturate((0.95 - imDst.a) / 0.95);
+		if (cover > 0.0) col = mix(col, pow(max(imDst.rgb, 0.0), 2.2), cover);
+	}
 	return float4(pow(col, 1.0 / 2.2), a + imDst.a * (1.0 - a));
 }
 #endif
@@ -2860,12 +3016,17 @@ fragment float4 own_fs_flat(VOut in [[stage_in]]) {
 fragment void own_fs_alpha(VOut in [[stage_in]], constant Globals &g [[buffer(22)]], constant Terrain &t [[buffer(23)]], constant Fog &fog [[buffer(24)]],
 	texture2d<float> atlas [[texture(16)]], sampler atlasSampler [[sampler(14)]]
 #ifdef IM_SHADE
-	, constant ImFrame &imf [[buffer(30)]]
+	, constant ImFrame &imf [[buffer(30)]], device const uint *imChunkFade [[buffer(25)]]
 #endif
 	) {
+#ifdef IM_SHADE
+    if (!imLodNearVisible(in.imPos, in.pos.xy, imf, imChunkFade)) discard_fragment();
+#endif
 	float2 pixelSize = 1.0f / float2(t.TextureSize);
 #ifdef IM_SHADE
 	float imLod = imf.taa.w > 0.01 ? imf.taa.w : 1.0;  // (as ownFsBody's)
+	// (fix9b: a bushy leaf plane one detail level sharper: seen slanted its texture fell two levels and read blurry, Jack 00.46.08)
+	if (((in.imMat >> 4) & 15u) == 13u) imLod *= 0.5;
 #else
 	float imLod = 1.0;
 #endif
@@ -2873,6 +3034,7 @@ fragment void own_fs_alpha(VOut in [[stage_in]], constant Globals &g [[buffer(22
 #ifdef IM_SHADE
 	// (the same decision as ownFsBody's with Imagine Metal: the texture's alpha alone. A pre-pass that kept a fragment the colour
 	// pass then dropped left the block's depth with the colour behind it: the block see-through)
+	if (imLeafFilled(in.imMat)) a = 1.0;  // (fix8: a culled tree's filled outer face, as own_fs_g keeps it)
 #else
 	a *= getColor(in).a;
 	if (F_RICH) a = mix(fog.FogColor.a * a, a, in.chunkVisibility);

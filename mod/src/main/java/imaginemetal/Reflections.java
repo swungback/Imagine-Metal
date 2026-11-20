@@ -65,7 +65,7 @@ public final class Reflections {
 		// water's surface over shallows doesn't count as something between the seabed and the sun: dark straight-edged patches)
 		boolean air = airPromised;
 		airPromised = false;
-		boolean clouds = Sky.latePending();
+		boolean clouds = Sky.latePending() && imaginemetal.metalods.MetaSettings.coverageDebug == 0;
 		if (state == 0 || underFailed || !(water || Settings.mobShadows || air || clouds) || !Engine.TERRAIN) {
 			underDepthReady = false;
 			return;
@@ -85,8 +85,12 @@ public final class Reflections {
 				long airM = 0, lib = 0;
 				var own = mcopt.metal.own.OwnTerrain.get();
 				if (air && nowSet && own != null && Math.abs(clipNow.determinant()) > 1e-12f) {
-					airM = stack.ncalloc(4, 16, 4);
+					airM = stack.ncalloc(4, 18, 4);
 					new Matrix4f(clipNow).invert().get(MemoryUtil.memFloatBuffer(airM, 16));
+					// (and MetaLODS' far fog: where it starts and its density, imssr.m hands them on as the params' zw)
+					imaginemetal.metalods.MetaLods.farFog(FAR_FOG);
+					MemoryUtil.memPutFloat(airM + 64, FAR_FOG[0]);
+					MemoryUtil.memPutFloat(airM + 68, FAR_FOG[1]);
 					lib = ImNative.terrainLibrary(own.ownHandle());
 				}
 				// (Build C1: the clouds, after the air and before the colour copy: the sky pass left them for here)
@@ -126,6 +130,7 @@ public final class Reflections {
 		}
 	}
 
+	private static final float[] FAR_FOG = new float[2];
 	static volatile boolean underReady, underDepthReady;
 	private static boolean airPromised, airOff, airLogged;
 	private static int airMisses;
@@ -136,7 +141,7 @@ public final class Reflections {
 	 * translucent pass can be taken: the state exists, classic transparency (the hook is in its pass).
 	 */
 	static boolean promiseAir(boolean ourFog) {
-		boolean ok = ourFog && Settings.airPass && Settings.debug == 0 && !Live.isOff() && !airOff && state != 0 && !underFailed && Engine.TERRAIN && !failed;
+		boolean ok = (ourFog || imaginemetal.metalods.MetaSettings.coverageDebug != 0) && Settings.airPass && Settings.debug == 0 && !Live.isOff() && !airOff && state != 0 && !underFailed && Engine.TERRAIN && !failed;
 		if (ok) {
 			try {
 				if (Minecraft.getInstance().gameRenderer.useImprovedTransparency()) ok = false;

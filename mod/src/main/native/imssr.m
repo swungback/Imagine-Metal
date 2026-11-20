@@ -140,7 +140,7 @@ void im_under_clouds(ImSsr *s, void *sky, id<MTLTexture> target, const float *ro
 	imCloudSet = 1;
 }
 
-// air: this frame's inverse clip (16 floats, camera-relative world <- clip) when the air pass is wanted, else NULL; lib the terrain
+// air: this frame's inverse clip (16 floats, camera-relative world <- clip; then MetaLODS' far fog start and density, 2 floats) when the air pass is wanted, else NULL; lib the terrain
 // library, frame the ImFrame bytes. Returns 0 (copied or skipped), 1 with err, 2 copied and the open pass reopened; + 4 when the air
 // pass was drawn; + 8 when the clouds were (im_under_clouds).
 int im_under_capture(Enc *enc, ImSsr *s, id<MTLTexture> color, id<MTLTexture> depth, id<MTLTexture> airTarget, id<MTLLibrary> lib, const float *air,
@@ -209,7 +209,8 @@ int im_under_capture(Enc *enc, ImSsr *s, id<MTLTexture> color, id<MTLTexture> de
 			memcpy(ap, air, 64);
 			ap[16] = (float) airTarget.width;
 			ap[17] = (float) airTarget.height;
-			ap[18] = ap[19] = 0;
+			ap[18] = air[16];  // (MetaLODS' far fog: where it starts, blocks; its density, 0 none)
+			ap[19] = air[17];
 			[r setRenderPipelineState:airPso];
 			[r setCullMode:MTLCullModeNone];
 			[r setFragmentTexture:s->underDepth atIndex:0];

@@ -36,7 +36,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 /**
- * -Dmcopt.lod.nativeNoise=neon|java|vector (default off): the far terrain's density sampling with the game's hottest noise
+ * -Dmcopt.lod.nativeNoise=neon|java|vector (default neon; plain/off opts out): the far terrain's density sampling with the game's hottest noise
  * primitives evaluated outside the game's own classes, bit-exact. The compiled density function tree (the game's
  * DensitySampler records) is copied with two kinds of leaves replaced:
  * - NoiseFunction$Sampler over a NoiseStack of PerlinNoise or SmearedPerlinNoise layers (the cave noises, the terrain's
@@ -64,8 +64,8 @@ final class LodNativeNoise {
 		NEON
 	}
 
-	/** The backend asked for, or null (off: the samplers are not even copied). */
-	static final @Nullable Backend CONFIGURED = parse(System.getProperty("mcopt.lod.nativeNoise", ""));
+	/** The backend asked for, or null (off: only interpolation is optimized). */
+	static final @Nullable Backend CONFIGURED = parse(System.getProperty("mcopt.lod.nativeNoise", "neon"));
 	/** -Dmcopt.lod.nativeNoise.verify=N: every Nth volume a leaf computes is computed again by the game's sampler and compared. */
 	static final int VERIFY = Integer.getInteger("mcopt.lod.nativeNoise.verify", 0);
 
@@ -93,7 +93,12 @@ final class LodNativeNoise {
 	/** Volume calls by size: 1, 2-16, 17-256, 257-4096, 4097-65536, more (and their values), logged every 2^17 calls. */
 	static final java.util.concurrent.atomic.AtomicLongArray sizeCalls = new java.util.concurrent.atomic.AtomicLongArray(6), sizeValues = new java.util.concurrent.atomic.AtomicLongArray(6);
 
+    // Per-noise diagnostics used to bounce four shared cache lines between every
+    // worker on every tiny volume. Stage timings remain on; detailed leaf counts
+    // belong to the benchmark or an explicit diagnostic run.
+    private static final boolean COUNT_CALLS = LodGenBench.ENABLED || Boolean.getBoolean("mcopt.lod.nativeNoise.stats");
 	static void counted(int size) {
+        if (!COUNT_CALLS) return;
 		long n = volumes.incrementAndGet();
 		volumePoints.addAndGet(size);
 		int b = size <= 1 ? 0 : size <= 16 ? 1 : size <= 256 ? 2 : size <= 4096 ? 3 : size <= 65536 ? 4 : 5;
@@ -123,19 +128,15 @@ final class LodNativeNoise {
 		};
 	}
 
-	/** Whether the samplers are copied (the flag is on, or the generation bench wants the backends side by side). */
-	static boolean enabled() {
-		return CONFIGURED != null || LodGenBench.ENABLED;
-	}
-
 	// ---- the copied tree ----
 
 	/**
-	 * A worker's sampler set whose samplers are the copies (the same set when off). The copies are kept per owner (the
+	 * A worker's sampler set with sparse lattice interpolation and, when enabled, native noise. The copies are kept per owner (the
 	 * dimension's LodNoise), so a world left behind takes its copies with it.
 	 */
 	static DensitySamplerSet wrap(DensitySamplerSet set, Object owner) {
-		if (!enabled()) return set;
+		// Even with native noise disabled, copy the LOD sampler tree to avoid the
+		// game's dense intermediate volumes at aligned sparse lattice positions.
 		return wrap(set, owner, LOD, CONFIGURED == Backend.NEON || LodGenBench.ENABLED, "the far terrain's");
 	}
 
@@ -170,6 +171,7 @@ final class LodNativeNoise {
 		/** Roots already copied, read without the lock (replaced whole on every addition; a handful of roots per dimension). */
 		private volatile Map<Object, DensitySampler> roots = new IdentityHashMap<>();
 		private int leaves, blends, unknown;
+		private int latticeXz = 1, latticeY = 1;
 
 		Copier(Mode mode, boolean natives, String what) {
 			this.mode = mode;
@@ -186,13 +188,16 @@ final class LodNativeNoise {
 		private synchronized DensitySampler rewriteLocked(DensitySampler root) {
 			int before = this.leaves + this.blends;
 			DensitySampler r = this.copy(root);
+            // Keep full aligned LOD volumes intact: tiny safety batches otherwise
+            // repeat caches, allocations and native calls thousands of times.
+            if (this.mode == LOD && this.unknown == 0)
+                r = new LodDensityBatch.SparseRoot(r, this.latticeXz, this.latticeY);
 			Map<Object, DensitySampler> next = new IdentityHashMap<>(this.roots);
 			next.put(root, r);
 			this.roots = next;
-			if (this.leaves + this.blends != before) {
-				System.out.printf(Locale.ROOT, "mcopt-lod: nativeNoise %s: %d noise stacks and %d blended noises replaced in %s samplers (%d records kept)%n",
-					this.mode.backend.name().toLowerCase(Locale.ROOT), this.leaves, this.blends, this.what, this.unknown);
-			}
+            if (this.roots.size() == 1 || this.leaves + this.blends != before)
+                System.out.println(String.format(Locale.ROOT, "mcopt-lod: nativeNoise %s: root %s -> %s; %d noise stacks, %d blends, %d unsupported nodes",
+                    this.mode.backend.name().toLowerCase(Locale.ROOT), root.getClass().getName(), r.getClass().getName(), this.leaves,this.blends,this.unknown));
 			return r;
 		}
 
@@ -205,6 +210,30 @@ final class LodNativeNoise {
 		}
 
 		private DensitySampler replace(DensitySampler s) {
+			if (this.mode == LOD && s.getClass().getName().equals(
+				"net.minecraft.world.level.levelgen.densityfunction.op.InterpolatedFunction$Sampler")) {
+				try {
+					var input = s.getClass().getDeclaredMethod("input");
+					var xz = s.getClass().getDeclaredMethod("cellSizeXz");
+					var y = s.getClass().getDeclaredMethod("cellSizeY");
+					input.setAccessible(true); xz.setAccessible(true); y.setAccessible(true);
+					int cx = (int) xz.invoke(s), cy = (int) y.invoke(s);
+                    // Vanilla lattice widths are powers of two. Unknown widths
+                    // retain bounded batching rather than assuming divisibility.
+                    if (Integer.bitCount(cx) != 1 || Integer.bitCount(cy) != 1) this.unknown++;
+                    this.latticeXz = Math.max(this.latticeXz, cx);
+                    this.latticeY = Math.max(this.latticeY, cy);
+                    return new LodLatticeSampler(s, this.copy((DensitySampler) input.invoke(s)), cx, cy);
+				} catch (ReflectiveOperationException | RuntimeException e) {
+					// The existing bounded batching remains the safe fallback.
+					this.unknown++;
+					return s;
+				}
+			}
+			if (this.mode.backend == Backend.PLAIN && !LodGenBench.ENABLED) {
+				// Keep the game's own noise leaves; only interpolation needs changing.
+				return this.copyRecord(s);
+			}
 			Blend b = blend(s);
 			if (b != null) {
 				this.blends++;
@@ -217,7 +246,16 @@ final class LodNativeNoise {
 					return new Leaf(ns, k, this.mode);
 				}
 			}
-			if (!(s instanceof Record r)) return s;
+			return this.copyRecord(s);
+		}
+
+		private DensitySampler copyRecord(DensitySampler s) {
+			if (!(s instanceof Record r)) {
+                // A mod may hide an interpolator in a non-record sampler. Keep
+                // bounded batching unless the graph is completely inspectable.
+                if (!s.getClass().getPackageName().startsWith("net.minecraft.")) this.unknown++;
+                return s;
+            }
 			RecordComponent[] comps = r.getClass().getRecordComponents();
 			Object[] args = new Object[comps.length];
 			boolean changed = false;
@@ -322,7 +360,7 @@ final class LodNativeNoise {
 		public float sampleValue(SamplerContext ctx, int x, int y, int z) {
 			Backend b = this.mode.backend;
 			if (b == Backend.PLAIN) return this.original.sampleValue(ctx, x, y, z);
-			points.incrementAndGet();
+			if (COUNT_CALLS) points.incrementAndGet();
 			double xz = this.original.xzScale(), ys = this.original.yScale();
 			return b == Backend.NEON ? Natives.stackPoint(this.stack, x * xz, y * ys, z * xz) : LodNoiseKernels.stackPoint(this.stack, x * xz, y * ys, z * xz);
 		}
@@ -354,7 +392,7 @@ final class LodNativeNoise {
 		public float sampleValue(SamplerContext ctx, int x, int y, int z) {
 			Backend b = this.mode.backend;
 			if (b == Backend.PLAIN) return this.original.sampleValue(ctx, x, y, z);
-			points.incrementAndGet();
+			if (COUNT_CALLS) points.incrementAndGet();
 			return b == Backend.NEON ? Natives.blendedPoint(this, x, y, z)
 				: LodNoiseKernels.blendedPoint(this.main, this.lo, this.hi, x, y, z, this.mainXz, this.mainY, this.limitXz, this.limitY);
 		}

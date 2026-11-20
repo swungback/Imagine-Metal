@@ -1,6 +1,1584 @@
-# Imagine Metal: handoff (2026-11-12, ~23:40)
+# START HERE — 2026-11-20 15:45 Claude s1119d: hitches (GC), light grid, LOD loading profiled (structures, not trees)
+
+## Installed: imagine-metal-s1119-perf1.jar (claude-scratch/s1119/) = light3 + the items below. Rollback: s1119-light3.jar.
+Prism instance JVM arguments now: -Dmcopt.own.prepass=true -XX:MaxGCPauseMillis=20 (set in Prism's UI; instance.cfg).
+Jack (20 Nov): "dont want to just lower the res ... cant u optimize what we do have"; "fps was unstable before lods so dont
+just give lods all the blame". His Mac had other apps open (GeForce NOW, Chrome, Spotify) and Prism warned of memory pressure:
+runs today are noisier than yesterday's; compare within a day.
+
+1. GC hitches: G1 young pauses averaged 74 ms (r7: 35 pauses, 2.6 s), every few seconds even when idle (77 ms). With
+   MaxGCPauseMillis=20: 16-18 ms each (r9 154 pauses / 2.5 s, r11 168 / 3.1 s). Frames >100 ms: r7 23 -> r9 8 (r11 noisier).
+2. LightVolume: no step once the light settled (32 steps with no move, no section rewrite, no light-carrying entity;
+   -Dimaginemetal.lightQuiet=0: as before). "light grid" (0.7 ms) gone from settled frames.
+3. LOD generation profile (JFR ExecutionSample, r9/r10): the "trees" stage is 82 % structure starts (LodForest.tryStart ->
+   Structure.generate): findValidGenerationPoint -> NoiseBasedChunkGenerator.getBaseHeight (~60 %, a full noise column per call,
+   ~50 ms CPU each, plus the allocation: L2 tile 0.9-1.8 GB) and Ice and Fire's mixin giveWay -> StructureRoom.check ->
+   getFirstFreeHeight (~40 %). LOD workers allocated 24.6 GB in ~2.5 min (render thread 1.6 GB).
+   Added LodBaseHeights + mixin GenBaseHeightCacheMixin (mcopt-metal-gen.mixins.json, GenMixinPlugin): exact per-worker cache of
+   getBaseHeight while inside LodForest.starts: works, but only 5-6 % hits (columns rarely repeat). Kept (harmless).
+   -Dmcopt.gen.baseHeightCache=false: off. Next for this: a cheaper exact column height for structure placement (the game
+   builds a whole NoiseChunk + aquifer per call), or reuse the LOD tile's own block-exact L0 ground where it is exact.
+4. Tried, rejected: workers at utility QoS during bursts (-Dmetalods.burstQos=utility): LODs ~7x slower, frames no better.
+GPU while LODs load: every pass ~20-30 % slower (taa 1.9 -> 2.5 ms) while the CPU is at 90-100 %: shared power/bandwidth.
+
+## Next (GPU, no visual change)
+MetalFX: write its output straight to the screen texture (skip "MetalFX to screen" copy) and fold the motion pass into the
+resolve (native: imbloom.m, CI build). LOD faces still hidden (392k: tops 193k, sides 181k, leaves 95k). Real leaves 4.3 ms.
+
+---
+
+# START HERE — 2026-11-19 19:30 Claude s1119c: LOD light under overhangs (underpass) fixed in code; lake checked vs real chunks
+
+## Installed now: imagine-metal-s1119-light3.jar (= s1119-ao + the edits below). Copies in claude-scratch/s1119/.
+Rollback: imagine-metal-s1119-ao.jar, then imagine-metal-claude-fix24.jar. options.txt restored to renderDistance 6
+(a copy of Jack's is s1119/options.txt.jack). instance.cfg restored (s1119/instance.cfg.orig).
+
+## Jack (16:29): LODs "fully light under huge underpass dont make sense" (real chunks dark there). Causes and edits:
+1. metalods.metal ml_fs: sky light floor `max(lq.y, 10/15)` on every LOD face -> only on leaves (its reason).
+2. MetaMesher.skyLight(level): -1 a voxel -> -2^L a voxel (a level-L voxel is 2^L blocks); water and leaves -1 a block, not 2
+   (the game's dampening 1); open water passes 15 straight down like air; water voxels take the computed light (generated
+   water at 15 takes it, real-chunk water is raised to it): LOD lake beds lit as open sky, as the real ones are (via oa).
+3. ml_fs writes g3.r's low code 0 (own_fs_g writes 1..15) = LOD pixel; im_defer_fs (terrain.metal) decodes it -> m.lod
+   (ImPre.lod in lighting.metal, false elsewhere); imShade: wantOpen (C1's open-air test, imShadowX oa) is skipped for LOD
+   pixels: the shadow maps have no LOD casters, so under a LOD overhang it read "open" and let the sun and sky back in.
+   imFarSun got a start parameter (always hp.range.x now).
+Tried and reverted: height-map shadows (imFarSun) for LOD pixels from 0 blocks, multiplied with the maps: the 16-block texels
+darkened a lake with higher shores (shots/cmp-lake-real-old-new.jpg: real / old / that try).
+Check: shots/cmp-lake-real-old-r7.jpg (real chunks at render distance 12 / s1119-ao LODs / light3 LODs, same spot and time):
+light3 matches. The underpass itself is NOT verified yet: need a spot (ask Jack for coords).
+
+## FPS (Jack: 30s-40s in F3 during the runs). Log r1 (s1119/latest-r1.log): while LODs generate/load after the teleport,
+frames 21-26 ms with the CPU at 90-99 % of 8 cores; once done 18-20 ms. At his spot (-192 94 836): light3 55 fps (18.2 ms),
+MetaLODS 5.0 ms. Output is 1728x1080: render scale 67 % = 1158x724, 50 % = 864x540.
+Cost table at that spot (s1119-ao, r1): render scale 50 % 4.8 ms, MetaLODS 4.6, MetalFX 4.3 (1.9 timed + ~2.5 untimed MetalFX
+encoders shown as "idle"), real leaves 4.3 of terrain 8.7, shadows 2.1, coloured light 1.2, normals 0.7, rest ~0.
+Next: the CPU load while LODs generate (what drops play to 30s), more invisible LOD face cuts (392k quads: tops 193k,
+sides 181k, leaves 95k), Jack's answers on render scale / MetalFX.
+
+---
+
+# START HERE — 2026-11-19 16:30 Claude s1119b: fix22's "no per-block AO on LODs" never took effect; fixed (-30 % LOD quads, +3 fps)
+
+## Installed now: imagine-metal-s1119-ao.jar (SHA256 6ac1dc3c5bff084d...) = probe3 + MetaMesher.BLOCK_AO fix
+Copy in claude-scratch/s1119/. Rollback: imagine-metal-claude-fix24.jar. ColdTp config left enabled=false.
+Cause: MetaMesher.BLOCK_AO = !"false".equals(getProperty("metalods.blockAo")) = ON unless -Dmetalods.blockAo=false. fix22's
+handoff says false; every jar since fix22 (fix22/23/24, probe3) has it ON (checked the class constants). So LOD faces still only
+merged where all 4 corners shade alike (most stayed 1x1). Now "true".equals(...): off by default, -Dmetalods.blockAo=true = old.
+Jack approved this on 11-18 ("DH looks alright, do that if it's much faster").
+Build: repo source compiled to probe3's classes byte for byte (422/422) first; only MetaMesher*.class changed. Orig source:
+claude-scratch/s1119/orig2/MetaMesher.java.
+
+## Measured (same spot/time as below, bench=lods_off; q3 = before, q4 = after; logs s1119/latest-q3.log, latest-q4.log)
+| | q3 (AO on) | q4 (AO off) |
+|---|---|---|
+| frame, everything on | 16.66 / 16.55 ms (60 fps) | 15.86 / 15.76 / 15.81 ms (63 fps) |
+| MetaLODS cost | 7.1 ms | 5.7 / 6.2 ms |
+| LOD quads | 657k (L0 208k, L1 228k, L2 200k, L3 22k; tops 370k, sides 283k; leaves 166k, water 8k) | 462k (L0 159k, L1 148k, L2 140k, L3 15k; tops 231k, sides 227k; leaves 135k, water 8k) |
+Look: shots/cmp-q3-q4.jpg (q3 top, q4 bottom): same, far slopes a little flatter (no crease darkening), as DH.
+
+## Next
+Quads are spread evenly over levels 0-2 (not the far rings). Still ~460k quads: sides 227k and leaves 135k are next. Ideas
+to measure: leaf faces fully inside canopies; side faces below ~1 px at L1/L2 (would change the look slightly: ask Jack).
+Then Jack's steps 2-4 (below). Native LOD shadows: ASK Jack first.
+
+---
+
+# START HERE — 2026-11-19 16:05 Claude s1119: FPS measured (cause found: MetaLODS ~7 ms of a 17 ms frame); nothing visual changed
+
+Jack's plan (chat 15:16): 1 FPS (measure LODs off / farShadows off / shadowRange 128 / renderScale at one spot + time, find the
+cause, fix without lowering visible quality unasked), 2 LOD shadows at the hand-over (native: check CI first; his yes/ask choice
+was left as template text, so: ASK before native work), 3 real vs LOD at trees/water/cliffs, 4 fix22's MetaLODS tile speed plan.
+His fix24 test report was also left as template text: no fix24 play session or F2 shots exist (newest are 2026-11-18 21:17-21:19).
+Stopped at 16:00 because the Mac's screen locked (computer use can't launch while locked).
+
+## Installed now: imagine-metal-s1119-probe3.jar (SHA256 ec9b432a33d576b8...) = fix24 + inert harness/probes below
+Rollback: imagine-metal-claude-fix24.jar (instance folder). ColdTp config left enabled=false. Test saves IM-coldtp-q3 in saves/
+(p1, v1, q1, q2 moved to claude-scratch/s1119/). Logs per run: claude-scratch/s1119/latest-*.log, shots in s1119/shots.
+
+## Harness added (s1119)
+- ColdTp `bench=key,key,...` (+ benchWait, benchMeasure, benchRepeat, benchTimeout, benchShots=true): after the teleport run, the
+  Benchmark's steps at that spot, each between two "everything on" windows, then report + quit. `bench=full` = the whole list.
+  Keys: Benchmark.keyed() (lods_off, lods_vertex, lods_plain, lods_lightcheap, lods_notex, farshadows_off, shadow128, shadow96,
+  shadows_off, scale50, scale100, split, taa_off, ssao_off, shafts_off, deferred_off, airpass_off, ..., fardetail4, detail3).
+- New probes: MetaLods.probe 4 (LOD pixels skip im_defer_fs: ml_fs marks 0x81 at params.z 13, hp.range.z 1), probe 5 (LOD
+  textures skipped, params.z 14). Shader edits: metalods.metal (2 lines), terrain.metal im_defer_fs (1 line). Inert at probe 0.
+- MetaLODS stats now also log "[MetaLODS] drawn quads: N (by level ..; tops/sides/bottoms; leaves, water)" — NOT run yet.
+- Build: device VM, JDK 25 in ~/jdk-25.0.5+8 (gone with the VM session), cp = s1117d/libs.tgz + Terralith + Streams; fix24 source
+  compiled to the installed fix24 jar byte for byte before the changes. Overlay script: re-create from the fix24 entry.
+
+## Measurements (spot -124 149 475, yaw 25.2 pitch 8, time 5000, render distance 6, LODs 112, detail 4 / far 6, 1080 out @ 67 %)
+Frame 16.6 ms (60 fps) in run p1; 17-19 ms in later runs (the Mac was busier: memory-pressure warning at launch). GPU-bound.
+| saving when off (ms) | p1 (x2) | q1 (x2) |
+|---|---|---|
+| MetaLODS not drawn | 7.0 / 6.9 | 7.8 / 7.7 |
+| LOD pixels (vertex work kept) | 5.7 / 5.6 | 6.2 / 5.9 |
+| ml_fs body (plain colour) | 2.1 / 2.1 | 2.3 / 2.2 |
+| LOD pixels' lighting (im_defer_fs) | - | 2.1 / 1.7 |
+| LOD textures | - | 0.4 / 0.1 |
+| TAA off (= MetalFX temporal scaler) | 3.7 / 3.4 | |
+| render scale 50 % | 3.6 / 3.4 | (100 %: costs 9.5) |
+| deferred off | 4.2 / 4.1 (but it drops the LODs: no G pass; forward costs ~2.8 more) | |
+| shadows off | 1.4 / 1.4 | |
+| light shafts | 0.6 / 0.4 | |
+| far shadows off | 0.3 / 0.2 | |
+| shadow range 128 | -0.1 / -0.3 (nothing) | |
+| ssao, air pass, leaf pre-pass, plant shadows | <= 0.2 | |
+q2: far detail 4 saves 0.6, detail 3 0.2 (quads 804k -> 764k): the far rings are not where the quads are.
+So MetaLODS = ~42 % of the frame: vertex ~1.5, rasterizing + G writes ~1.7, ml_fs ~2.2, lighting its pixels ~1.9.
+~800k quads for ~600k LOD pixels (~1 quad per pixel). Tried: ml_fs's G-buffer reads (color(2-4)) only in the water variant
+([[function_constant(ML_WATER)]]: compiles) to let HSR drop hidden LOD faces: no change (v1, 7.8 vs 7.7): reverted.
+
+## Next
+1. Launch q3 (config: world IM-coldtp-q3, label q3, bench=lods_off, enabled=true) and read "drawn quads": which levels/faces/leaves
+   hold the 800k quads. Hypothesis: level-0 ring (96-256 blocks, 1-block voxels) + leaves (exactTrees) dominate.
+2. Then a quality-neutral cut where the quads are (e.g. leaf/canopy faces fully hidden inside canopies, quads below a pixel);
+   anything that changes the look: ask Jack. Check every look change against real chunks (same spot/time) first.
+3. Step 2 (LOD shadows): CI CAN build the native code: .github/workflows/build.yml on macos-15-intel runs clang -arch arm64 for
+   libmcmetal.dylib (mod/build.gradle compileNative: mcmetal.m ... metalods.m) and compiles every .metal; runs on any push
+   (artifact "imagine-metal"), dev release only from main. The local repo is on branch screenshot-audit with 99 files uncommitted
+   since 2026-11-14 (Codex works here too): a CI build means pushing this working tree to a new branch (from the cloud container,
+   not touching Jack's local git). Plan: mml_shadow_draw (metalods.m) + ml_shadow_vs (metalods.metal: same vertex pulling,
+   depth only, quads in chunks the real terrain draws collapsed), drawn into the far cascade (slice 1, kept/redrawn <= every
+   200 ms) for columns between the real edge and shadowRange; ask Jack first.
+
+---
+
+# START HERE — 2026-11-18 22:20 Claude fix24 INSTALLED (on fix23): LOD structures are the game's own; 900 ms chunk dissolve
+
+Jack 21:20-21:30 (screens 2026-11-18_21.17.49 to 21.19.30, New World (10)): "a structure in lod not being there" = the sandy house
+lumps (21.19.12, 21.19.15); "pop in and switch is too clear" / "couldn't see the blend, looked like straight pop in"; "some things
+wayy too different on lod"; fps pretty bad; asked for faked shadows/dark areas on LODs (a huge shadow appears close when a real
+chunk arrives) and what DH + SeedGen do.
+
+## Causes found
+- Sandy houses: LodStructurePreviews (not ours originally) stamped a village centre + random pool houses at every structure set's
+  *possible* chunk, checked only against the biome at a guessed ground; the game's own pick/terrain checks never ran. New World (10)'s
+  region files hold no surface structure near -165 75 550 (scan: claude-scratch/s1118-fix24, tools in ~/tools of that VM session),
+  only the Ice and Fire witch cottage at -121..-103, 68..86, 518..536, which the previews never showed.
+- Pop: the per-chunk dissolve (MetaWorld CHUNK_FADE_MS) was 300 ms. The band dither ran (edge blend 100 % in his log).
+- Big shadow: LODs are never in the shadow maps (MetaLods draws no shadow pass); inside 0.7 x shadowRange (179 blocks) LOD pixels
+  get only real casters, the height-map far shadows start at 179. A real chunk arriving brings its casters in one frame.
+- FPS (his 21:15-21:19 log): render thread waits 12-16 ms/frame on the GPU (CPU 4.5-7.6 ms), even with LOD workers idle; up to
+  885k LOD quads at 112 chunks, farShadows on. Not measured further yet.
+- DH + SeedGen + Reimagined (iris test instance): Reimagined sets dhShadow.enabled = false; LODs get lightmap^8 sky darkening + N.L,
+  shadows fade out over the last 16 blocks of shadowDistance; DH noise texture on; ditherDhFade, vanillaFadeMode DOUBLE_PASS.
+
+## fix24 (imagine-metal-claude-fix24.jar, SHA256 6f1f409cd019e7c6..., Java only, shaders = fix23's)
+1. LodStructurePreviews rewritten: starts from LodForest.starts (now package-private; the game's createStructures logic, cached per
+   chunk; Streams' keepFootprintOffRivers runs in it), pieces stamped where the game puts them (PoolElementStructurePiece: template
+   at position/rotation; TemplateStructurePiece: template/placeSettings/templatePosition by reflection). TERRAIN_MATCHING pieces,
+   coded pieces and processors left out. L0: exact blocks into treeBlocks (a tree in the same column dropped); L1-3: column from
+   the lowest block (walls) to the top (roof). Verified: g23 vs g24 (claude-scratch/s1118-fix24/shots/g-crop.jpg, same spot, same
+   time, real2 store moved out): the sandstone lumps are gone.
+2. MetaStore.GEN_VERSION 9 -> 10 (gen9 tiles hold the fake houses); L4+ read from gen9 then gen8. Cost: every world regenerates
+   its L0-3 seed tiles once.
+3. CHUNK_FADE_MS 300 -> 900 (-Dmetalods.chunkFadeMs). Not judged in game yet.
+4. ColdTp: fly=true (hover), shots=s,s,... (screenshots/coldtp-LABEL-NN.Ns.png, HUD hidden), time=N (/time set at the teleport).
+Cost seen: MetaLODS workers spend time in Structure.generate (Streams river wait, StructureTemplateManager/DataFixer) at new
+places (f24-far JFR hot frames); the first LODs at an unexplored spot were equally late in f23 and f24 (none by 15 s in both).
+
+## Tried and reverted (claude-scratch/s1118-fix24/tried-shaders)
+- LOD pixels marked (lean code 0 in g3.r), shadow maps skipped for them, height-map shadows from 0 blocks: the 16-block texels
+  shaded whole gullies the real terrain leaves lit (shots/slope-compare.jpg). Worse match.
+- Reimagined-style sky^8 darkening on LODs: LOD lakes went dark (seabed sky light drops under water) where real lakes are bright.
+## Next
+- Shadows at the hand-over need LODs in the shadow map near the band (native: mcown.m / MetaLods draw, needs the Mac) or a finer
+  height map; ask Jack.
+- FPS: GPU cost per pass (LODs off, farShadows off, shadowRange 128) at one spot, same time of day (ColdTp time=).
+- Structures: only templates; jigsaw paths (TERRAIN_MATCHING) and coded structures (temples) missing.
+
+---
+
+# START HERE — 2026-11-18 21:05 Claude fix23 INSTALLED: real chunks after a cold teleport ~40 % sooner (C2ME priority, MetaLODS backs off, Polymer look-ahead)
+
+Task (Jack, via a Codex chat that ran out): real chunks load slowly in unexplored land ("stuck in LOD hell"). Keep LOD 512, visuals
+and worldgen; keep the LOD-to-real transition; profile first. Codex's experiments (Polymer bypass, template-cache presize, worker
+priority) were NOT in the source (only a stray StructureTemplateCacheMixin.class in mod/build/libs); the installed jar matched
+the repo byte for byte, so that was the baseline. Codex's /private/tmp logs weren't reachable.
+
+## Harness (inert by default): imaginemetal.ColdTp
+config/imaginemetal-coldtp.properties enabled=true + world=IM-coldtp-* (refuses any other folder; switches itself off when it
+starts). Opens the save from whatever menu shows, waits `settle` s, teleports to x,y,z (3000,300,2600, yaw 0 pitch 25), flying
+off (the fall guard must hold), then per chunk of the 9x9 ring: server FULL (polled on the server thread), client has it, real
+terrain drawn whole (MetaLODS hand-over mask; only the 40 in view count); frame times by 5 s window; CPU by thread group;
+thread states + hot stacks (server-thread chunk waits with their caller); server ticks; player y (guard); JFR (profile). Report
+logs/coldtp-LABEL.txt (+.jfr), then quits. Launch: Prism > File > Launch > Launch (computer use, background). JFR reader:
+claude-scratch/s1118-coldtp/Jt.java (modes threads, threadsw -Dbucket, samples, contains, block, blocktop, nsamples, -Dfrom/-Dto).
+All runs: identical copies of New World (9), same spot. Saves, reports, JFRs: claude-scratch/s1118-coldtp/.
+
+## What the profile showed (baseline A)
+- C2ME puts its workers at a fixed Mach priority on macOS (client default preset LOWER = priority 23, below every default-QoS
+  thread at 31) and that also takes them out of QoS for good (pthread_set_qos_class_self_np -> EPERM, qos_class_self 0x0).
+  Six workers runnable 44 % of the time got 0.4-1.5 cores between them while MetaLODS (burst QoS default) took 1.2-1.9, Streams'
+  sampler ~1, GC/JIT/Metal ~1.5 and other apps (ChatGPT/Codex, Claude) ~2-3: the Mac sat at 99-100 % of 8 cores.
+- Server thread: Polymer's predictive-mining ray (ServerPlayerGameMode.tick -> PolymerImplUtils.clientCorrectedBlockClip ->
+  getChunk) and vanilla (teleport accept -> Entity.move, Entity.isInWall) load the player's chunk synchronously: ticks froze
+  20-36 s. Polymer's ray hit a chunk other than the one under the player: that chunk was FULL at 33.7 s but reached the client at 43.2.
+- Diagnostic C (LOD generation off): 16.7 s, so MetaLODS contention was about half of it.
+- Not ours to fix: Streams computes the new region's river network first (~5-7 s, sampler threads) and C2ME waits on it
+  (RiverEngine.networkFor); first use of each structure template in a session runs the DataFixer (deep DFU stacks) inside
+  StructureTemplateManager's computeIfAbsent; vanilla's own waits for the player's chunk (harmless: that chunk comes first).
+
+## fix23 (imagine-metal-claude-fix23.jar = installed, SHA256 f0732181a87775fc...; source in the repo, compiles to it exactly)
+1. compat.C2mePriorityMixin (only with c2me-base): C2ME's macOS setCurrentThreadPriority is skipped; the thread goes into the
+   worldgen QoS class instead. GenMixinPlugin: -Dmcopt.gen.worldgenQos now defaults to `default` (=off: as before). User-initiated
+   was tried (E, G): no faster, and 1.2-2.4 s frame stalls while the chunks came in.
+2. MetaWorld: under pressure (chunks missing in the render distance) the workers stay at utility (PRESSURE_QOS), never the burst
+   class; -Dmetalods.pressureQos=utility|background|off. Background was tried (D-F): frame stalls. -Dmetalods.pressureWorkers=N
+   (default YIELD_WORKERS, 2); 0 was tried (F): no gain, so LODs near you keep coming during a teleport as before.
+3. compat.PolymerPredictMixin + mcopt.metal.compat.ChunkWaitGuard: Polymer's ray misses when a chunk on it isn't loaded on the
+   server (no synchronous load). -Dmcopt.chunkWaitGuard=false: off.
+4. LodGenQos.once logs the class a thread had ("was 0x..").
+ci/metalods/check.sh: all Java checks PASS (the clang++ part needs the Mac).
+
+## Before / after (client = what you see; frames after the teleport)
+| run | chunk under player: server / client | 81-chunk ring on client | under player drawn | frames >100 ms / max |
+|---|---|---|---|---|
+| A baseline | 33.7 / 43.2 s | 57.2 s | 47.5 s | 10 / 208 ms |
+| A2 baseline | 35.9 / 36.0 s | 62.8 s | 51.1 s | 20 / 223 ms |
+| C LOD gen off (diagnostic) | 16.7 / 16.7 s | 31.3 s | 24.5 s | 9 / 452 ms |
+| H fix23 | 23.2 / 23.2 s | 40.0 s | 31.4 s | 16 / 183 ms |
+| H2 fix23 repeat | 23.1 / 23.1 s | 37.0 s | 30.4 s | 14 / 154 ms |
+Frame p50 ~20 ms in all (LOD 512 loading). Fall guard: y held at 300.0 while the chunk under the player was missing, fell
+normally once it arrived and landed (y 112). Edge blend 100 % of frames at the end of every run, baseline and fixed.
+
+## Next
+- Still ~23 s: Streams' network + C2ME's own chain. Ideas: warm Streams' network / structure templates for the area ahead in the
+  background before the player gets there (MetaLODS already knows where it's heading); measure a walk/flight, not only a teleport.
+- Cyclops cave (Ice and Fire placed feature) has no LOD preview (Codex's finding; MetaLODS previews a limited set).
+- Other apps on the Mac took 2-3 cores during every run: closing ChatGPT/Codex while playing gives the game those cores.
+
+---
+
+# START HERE — 2026-11-18 15:30 Claude fix22 INSTALLED (on fix21): LODs without per-block AO (merged faces), cave fill fix, band diagnostics
+
+Jack 15:23 (two DH screens, 2026-11-14_02.26.59/02.27.04: DH dissolves the vanilla chunks into its LODs with per-pixel noise over a
+wide band): "DH looks alright so do that if it's much faster" (answer to the AO question); "when are you making the fade like these";
+"our shit needs to perform better and look as good or better or there's no point compared to just adding DH support"; "why was it so
+much faster earlier, the only difference is water being fixed? it took seconds, now ~10 minutes and keeps loading more when I move";
+"as close to DH/Voxy and SeedGen in speed and polish". He hasn't run fix21 yet (latest.log still the 14:07 ZGC session).
+
+## fix22 (imagine-metal-claude-fix22.jar, SHA256 6f9bb16d999dd777..., MetaMesher + MetaWorld over fix21)
+1. MetaMesher.BLOCK_AO false: no per-block corner shading on LOD faces (0xFF), so faces merge by block/biome/light alone.
+   Offline (cols/nw12): near L0 4591 -> 3465, far L0 1854 -> 1216, L1 1708 -> 1126, L2 1216 -> 939, L3 362 -> 280 quads/column.
+   The SSAO pass (bloom.metal im_bloom_ao) stops at 48 blocks, so the LODs have no AO now (as DH). -Dmetalods.blockAo=true.
+2. Bug in fix21: MetaMesher.DIM defaulted to 0, not 4 (the handoff said 4). Now 4: near L0 with both 7139 -> 3018 (-58 %).
+   CaveCheck updated (a pocket lit <= DIM closes, lit DIM+1 stays).
+3. Stats line: "edge blend on N % of frames (off: % not possible, % a LOD missing in the band)". The band (fix21: 32 blocks)
+   exists since fix17 but switches off whenever one chunk in it lacks a ready LOD (transitionCovered): Jack has likely never
+   seen it while moving. Read this number first.
+
+## Why it got slow (answer given to Jack, from the logs)
+16 Nov 21:51 (512 chunks, detail 10): 710 tiles in ~1 min, 252 ms per tile (wall), meshes 6.2 ms. 18 Nov 14:11: ~1000 ms per
+tile, meshes 33-37 ms, workers on the CPU 26 % of their wall time. What changed after 16 Nov evening (not the water): fix12
+block-exact surfaces from the whole router at levels 0-1 (384 samples per column instead of 49; the accuracy Jack asked to keep),
+fix16 the game's trees on far level-0 tiles again (~445 ms of an L0 tile), Streams queries, and 1 GB/s of garbage from the
+block-exact sampling (GC eating cores; meshes 6x slower = the whole process starved, not the mesher: offline 1-6 ms).
+"Keeps loading when I move": far tiles are remade with the whole router (caves) and trees when you come within ~224 blocks,
+and new level-0 tiles are needed as the fine rings move.
+
+## Next (new chat): the speed plan, measure each step in game
+1. Read his fix21/fix22 session: allocation MB/s by group, GC pauses, tiles/s, CPU % of wall, edge blend %, held back %.
+2. Trees: LodForest's stand-in level is a java.lang.reflect.Proxy (string switch + boxing per getBlockState/setBlock): profile
+   a tree chunk offline (needs a level: build a harness from the server classes or time it in game with JFR) and replace it.
+3. Level 1 (733 ms density in game): bracket the surface first (LodSurfaceSearch: 32/16/8-block planes, batched) and sample
+   block by block only in the bracket (as fix17's shell does with corners at L0); ShellCheck-style equality test.
+4. Band: if "a LOD missing" dominates, give the band's columns first place in the job order and keep the last drawn mesh of a
+   column until its replacement is ready (no gap = band stays on).
+5. Then time a full view at 112 chunks against fix20/fix21; goal: seconds, as 16 Nov.
+Not possible without a Mac build: per-chunk real-terrain fade (ImFrame fixed 944 bytes in native mcown.m).
+
+---
+
+# START HERE — 2026-11-18 14:50 Claude fix21 INSTALLED (on fix20): allocation cut, soil/disks, cave faces, structures, yield, wider band
+
+Jack 13:55-14:19 (see fix20 below and the project doc): lag spikes, "chunk to LOD not smooth, still pops", LOD dirt where real
+chunks have stone, "make it as fast as before but DH / SeedGen fast", structures like SeedGen; 14:12 screens (14.11.57,
+14.12.01, 14.12.21 "in an lod"): dirt cliffs on a near LOD, standing on LODs where real chunks hadn't loaded; 14:14 "take more
+inspo from Voxy, it looks better". He ran 14:09-14:13 with -XX:+UseZGC -XX:+ZGenerational in Prism (instance.cfg JvmArgs):
+p50 19-26 ms, 87 frames > 50 ms in ~2.5 min, 3.8-4.1 tiles/s (the G1 run before: 6+). No gain from ZGC.
+
+## Measured (claude-scratch/s1118/bench/benchpkg: AllocBench, MeshAlloc, MeshWhere, PrelimCheck, cmp*.py, rle.py)
+- Allocation per tile, density only, offline (Terralith, New World seed, java backend): near L0 187 MB, far L0 68, L1 106, L2-3
+  61. 45 % the density functions' intermediate buffers (SamplerContext's default arena = DensityBufferArena.GLOBAL, unpooled),
+  the rest our createUnpooled stripes and kept volumes. 4-7 tiles/s x that = the 0.85-1.1 GB/s F3 showed.
+- Materials, New World (9) store (real2 vs gen9-t2 L0, 17.7k dry columns at equal height): LOD soil always 4 deep (top + 3),
+  real 0-5 by the rules' surface depth; 89 % of top-block mismatches within 2 blocks of water (gravel/clay/mud/sand/stone):
+  the disk features (UNDERGROUND_ORES step), not rules. Not the preliminary surface (PrelimCheck: all "above").
+  MC 26.3 steep = gradX <= -4 || gradZ >= 4; minSurfaceLevel = floor(preliminarySurface(x,0,z)) + surfaceDepth - 8.
+- Near L0 meshes (cols/nw12-near-L0): 7139 quads/column, 5185 below the top: generated air has sky 15, so closeCaves never
+  saw a dark cave. Far L0 1838.
+
+## fix21 (jar imagine-metal-claude-fix21.jar, SHA256 2adc8278fb4bc49d..., 22 classes over fix20; source in the repo)
+1. LodBuffers (new): per-thread DensityBufferPool (the game's) as the workers' SamplerContext arena and for our stripes
+   (LodSurface/Shell/Lattice/Solid samplers, LodDensityBatch, LodNoise grid/coarse/terrainVolume); kept volumes reuse a
+   thread array (slot 0 blockVolume, slot 1 volume; used up by MetaGen in the same thread). tick() after each tile (age 6).
+   Offline: 0.4-2.3 MB per tile, output bit-identical (hash). -Dmetalods.pool=false: as before.
+2. Logs: generation line "(allocated surface + trees + 3D + columns MB)" per level; stats line "allocated per job (mesh), per
+   real chunk", "chunks missing in the render distance, workers held back %"; frames line "GC pauses" (ZGC Cycles / G1
+   Concurrent beans excluded) + "allocation MB/s: render, server, MetaLODS, game workers, C2ME, other, total; heap used".
+   Trees line: "structures found N (ms of placing per tree chunk)".
+3. Soil: LodNoise.surfaceMaterials at level 0 runs the rules down the column (SOIL_MAX 8): under x underN, under2 x under2N,
+   stone below (LodTile.under2/underN/under2N; MetaGen.cell). -Dmetalods.soil=false.
+4. Disks: LodForest runs the UNDERGROUND_ORES step's DiskFeature placements (before the trees, the step's own seeds); their
+   blocks (FROM_GROUND) set the surface / the block under it. -Dmetalods.disks=false.
+5. Caves: MetaMesher.skyLight(): the game's sky light spread over the mesh grid (15 down through air, -1 otherwise, leaves and
+   water -1 more); air stored at 15 takes it (real chunks' own light kept). closeCaves fills enclosed air lit <= DIM (4).
+   Near L0 7139 -> 4010 quads/column (-44 %), entrance walls lit 5-15 kept. -Dmetalods.skyFill=false, caveDim, caveBlocks.
+6. Levels 2+: density every second voxel across (LodNoise.stride, MetaGen same): CostBench far-vol-h2, 0.30 % voxels differ,
+   heights within 2 voxels, 3.7x less CPU. -Dmetalods.farHalf=false.
+7. Structures from the seed (LodForest.starts/tryStart/structures): per chunk as createStructures picks them (placement
+   isStructureChunk, single or weighted pick with the large-feature seed, Structure.generate with the world's seed and
+   biome check; concentric rings skipped), surface step only; pieces placed with StructureStart.placeInChunk into the Stand
+   (decoration seed + index in the surface step). L0: inside run() with trees (FROM_STRUCT: walls' lowest block as trunk,
+   top block on top; paths/floors at ground-1 set the surface). L1-3: LodForest.structures(t) folds them per cell. Starts
+   cached (cleared at 400k chunks). Untested in game (no ServerLevel offline). -Dmetalods.structures=false.
+8. Yield: while > 2 chunks within render distance - 1 are missing on the client, only 2 workers make LODs (nearest first),
+   the rest only ingest real chunks (MetaWorld.pressure, every 10 frames). -Dmetalods.yieldWorkers=N (0 off).
+9. Edge band 16 -> 32 blocks (MetaLods.EDGE_BAND: MLFrame camBlock.w and ImFrame lodFog.z via lodTransition; no shader change).
+10. Store: level 0 dir -t3, levels 1-3 -s1 (regenerated: soil, disks, structures, h2); gen8 fallback only for L4+.
+
+## Not done / why
+- AO-preserving greedy merge: faces merge only with equal per-voxel AO bytes and the shader lays one byte over every voxel of a
+  quad; merging different AO needs another encoding (per-vertex AO or screen-space AO for LODs). Asked Jack (look change).
+- Per-chunk real-terrain fade when a chunk arrives: needs a per-chunk table in the lighting pass; ImFrame is a fixed 944-byte
+  buffer in native mcown.m (imFrame[944]), can't grow without a Mac build.
+- Streams banks (gravel/stone by rivers above sea level): the Stand only has water below sea level; Streams is proprietary.
+- "Voxy look": asked Jack what he means (textures, no DH noise/desaturation, lighting?).
+
+## Next
+Read his fix21 session: allocation MB/s by group, GC pauses, tiles/s, structures found, missing chunks/held back %, frames.
+Recommend to Jack: remove -XX:+UseZGC -XX:+ZGenerational from Prism's JVM arguments (keep -Dmcopt.own.prepass=true).
+Rollback: imagine-metal-claude-fix20.jar in the instance folder.
+
+---
+
+# START HERE — 2026-11-18 14:15 Claude fix20 INSTALLED: far detail independent of detail; detail set to 4 (see the project doc
+"claude/HANDOFF - START HERE.md" for the full measurements: LOD cost is geometry, lag spikes are G1 GC pauses at ~1 GB/s
+allocation; next steps: ZGC via Prism JVM args, MetaLODS allocation pooling, near-tile cave faces, AO-preserving merge)
+
+---
+
+# START HERE — 2026-11-18 14:00 Claude fix19 INSTALLED: frame-time diagnostics + far-terrain benchmark (on fix18b crossfades)
+
+Jack 13:36: plays with MetaLODS ~100 chunks (512 only to pre-load); the cherry-blossom 20s were on Friday (13 Nov) in a random
+cherry biome; performance is mid and unstable even before LODs; find the issues and fix them, don't assume it's all LODs.
+## Evidence (perf lines of every session since 10 Nov; 10-fps windows = game minimized/unfocused, inactivityFpsLimit, excluded)
+- options.txt: enableVsync true, maxFps 60, fullscreen. Since ~12 Nov fps sits at the 60 cap when the GPU frame is < ~16 ms;
+  before (10-11 Nov) up to 115-122 fps. GPU frame with almost no LODs on screen is already 14.7-17 ms (render scale 67%):
+  terrain 3.3, taa 1.9, resolve 1.0, light grid 0.2-0.9, hand+gui 0.8-2.0, uploads 0.5-1.5, translucent (water) 0.5-4,
+  reflection copies 0.35, ao 0.3, bloom 0.25 + GPU idle inside the frame 2.5-4.5 ms. So every scene is at the 16.7 ms edge:
+  with vsync, a frame that misses it waits for the next refresh (60 -> 30 steps) = unstable feel.
+- Friday (13 Nov, 256 chunks) lows: 5-8 windows under 40 fps with the GPU having spare time = CPU-side stalls, not GPU.
+- At ~100 chunks tonight (00:39-00:41): 5-7k LOD pages drawn, terrain 12-16 ms, 33-47 fps; 15-16 Nov at 96 chunks: 3.6k pages,
+  terrain ~7 ms, 49-60 fps. LOD geometry per view about doubled since 16 Nov.
+- Offline: 76-87% of LOD faces are 1x1 (per-corner AO blocks merging; ignoring AO = 32-41% fewer faces).
+## fix19 (installed, SHA256 fb80e1fbf9f44db4...)
+1. "[Imagine Metal] frames:" line every 10 s (Perf.framesLine): frame time p50/p90/p99/max, % over 20/34 ms, per frame: render
+   thread CPU, waits by site (GPU in flight, fence, vsync/drawable, pacer, drain; WaitStats now always counts, take()), rest
+   off-CPU, GC, MetaLODS render-thread time (MetaLods.frame timed). "[Imagine Metal] slow frame:" for frames > 50 ms (max 8/10 s).
+2. MetaLods.probe + Benchmark steps (not drawn / vertex only / shading skipped) and a MetaLODS-screen button
+   "Benchmark the far terrain (~40 s)" (Benchmark.start(true)). Shader: ml_vs params.z 12, ml_fs params.z 11.
+3. fix18b underneath (crossfades in the masked pipeline only, sliding edge band).
+Next: read his session's frames/slow-frame/benchmark lines, then fix what they show (CPU stall source; LOD faces vs pixels).
+
+---
+
+# START HERE — 2026-11-18 00:40 Claude fix17 INSTALLED: exact shell sampling on far L0, far-detail falloff, HUD % by columns
+
+Jack 00:04 chose A + B from the measured proposal below (C not wanted). He also asked why the view "didn't finish in 3.4 min"
+and the HUD said 0%.
+- 0%: the HUD's "current view N% ready" was weighted by AREA. With nearest first, the L0 + L1 rings are 48% of the columns but
+  2.6% of the area (L4 columns are 1,024 chunks each): it sat at 0-3% for most of a load. fix17 counts columns.
+- 3.4 min was my offline model. In game tonight 4.7-4.8 tiles/s -> 1,318 tiles = ~4.7 min, ~1.4x the model (real-chunk ingest,
+  re-meshes, Streams, tree grounds, JIT/GC). No session tonight ran long enough to finish (77 s to 5.5 min).
+
+## fix17 in game (Jack 00:36-00:41, New World (12), 512 chunks, detail 10, far detail 6)
+Joined 00:37:08, MetaLODS started 00:37:13, "0 asked, 0 jobs queued" at ~00:39:13: the whole view in ~2 min (887 tiles, 7.4-7.8
+tiles/s at peak, MetaLODS 1.4-2.8 cores). HUD 100% then 92-94%: he moved ~130 blocks (-189,-239 -> -321,-232; real chunks
+416 -> 1,105), ~200 new columns at the edges. Screens 00.41.07/22. His next asks: some LOD areas wrongly coloured (not
+identified from these screens: asked him for F2 + note), and DH-style smooth transitions. metalods.properties now says
+distance=112 (changed in the menu during/after the session).
+Existing transition: a 16-block static per-pixel dither at the real terrain's edge (metalods.metal imLodEdge*, lighting.metal),
+only once every chunk in that band has a ready LOD (transitionCovered). Hard swaps remain: a chunk arriving (mask bit flips),
+LOD level swaps (4 children replace a parent at once). Shader changes can't be Metal-compiled from Claude's sandbox.
+
+## fix17 changes
+1. LodShellSampler (new) + LodNoise: far level-0 tiles (LodNoise.far, which has no noodle caves) take the density at the 4x4x4
+   cells' corners first and sample block by block only through the y span of cells whose corners differ in sign (+1 cell).
+   ShellCheck (ci/metalods, new): 40+25 Terralith tiles per level on two seeds and 20 vanilla: 0 heights and 0 of ~230M blocks'
+   solid/air differ from LodSurfaceSampler. L0 115-131 -> 57-63 ms. Level 1 left block by block (corners cost nearly as much;
+   vanilla L1 was slower with it). Near (whole router) tiles unchanged. -Dmetalods.shell=false turns it off. Stored columns stay
+   valid (identical output): no folder rename.
+2. MetaSettings.farDetail (default 6, 4-16, "Far detail" slider beside Detail, metalods.properties farDetail): the refine factor
+   for levels 2-4. Level 1 (-> L0 ring) and level 5 keep `detail`, so with Jack's detail 10 L0 still reaches 640 blocks and L5
+   is never drawn (untested level). Bands at 512 chunks: L0 0-640, L1 640-768, L2 -1,536, L3 -3,072, L4 -8,192.
+   Tiles for a cold view 1,318 -> 810 (tiles.py). farDetail 16 (or = detail) = the old layout.
+3. HUD percentage by columns (colsAll/colsReady in count()); the 95% detail gate and the done/backlog logic still use area.
+Expected (model x 1.4 in-game factor, 1.7 cores): cold view ~4.7 -> ~2.6 min, the L0 ring ~67 -> ~54 s. Not measured in game.
+Visible: nothing inside 640 blocks; beyond, voxels about twice as big at the same distance (see the measured section below).
+
+## Build / install
+javac --release 25 of all mod/src/main/java against libs.tgz; overlay onto fix16 of MetaWorld(+inner), MetaSettings,
+MetaLodsScreen(+Slider), MetaLods, LodNoise(+inner), new LodShellSampler (the unchanged classes' bytecode was checked equal to
+fix16's: same source). check.sh Java fixtures PASS; coverage_check.py not run (needs clang++). ShellCheck PASS also against the
+jar's own classes. Installed SHA256 b53f0a00780a39d5..., copy `Imagine metal/imagine-metal-claude-fix17.jar`.
+Rollback: game closed, copy `imagine-metal-claude-fix16.jar` over minecraft/mods/imagine-metal-0.1.0.jar (or set Far detail 16).
+
+---
+
+# START HERE — 2026-11-18 00:30 Claude: MetaLODS cost MEASURED (nothing changed, nothing installed; fix16 still installed)
+
+Jack 23:32: make MetaLODS much cheaper (DH + SeedGen style: less detail far, full-detail ring near, nearest first), keep all
+fixes (cave entrances, no ledges, Terralith arches/spikes/islands, game trees near, LOD water incl. Streams rivers + fix16 banks).
+Measure first, then say what changes and what it trades away BEFORE building. Proposal below sent; waiting for his choice.
+
+## 16 Nov 21:51 (log 2026-11-16-5) was a warm, cheaper load, not a cold one
+- World `overlev`, opened at 96 chunks in 5 sessions on 15-16 Nov. gen7 file mtimes: 24,472 columns on disk before 21:51,
+  2,392 written 21:51-21:53. The view at 512/detail 10 needs 5,063 columns (tonight's log: "5064 asked"), so ~half was
+  cached, incl. nearly all of the L0/L1 ring. It made 710 tiles, mostly L2-L4.
+- It ran fix9 (= renderer-work/backups/2026-11-17-recovery jar, SHA ce6999e4...): vanilla `overworld/sloped_cheese` + top
+  slide (its log says so) = no Terralith extras, no cave entrances, 4x8-interpolated L0/L1.
+- MetaLODS CPU was the same then: ~90 CPU-s of work in 61 s = ~1.5 cores (tonight 1.5-2.0).
+- A cold view with the 16 Nov code would be ~146 CPU-s (~1.4 min); today's is ~342 CPU-s (~3.4 min at 1.7 cores).
+
+## Per tile CPU (ms, one thread; container Temurin 25, nativeNoise=java; seed of New World (12), Terralith 2.6.5)
+Calibration: in-game L1/L2 density wall x CPU share 0.30 = 179/210 ms vs offline 207/212: container ~= M1 per thread.
+| level | 16 Nov (cheese) | now | notes |
+| L0 far | 6 (4x8 grid) | 108-119 block-exact (LodFarTerrain) | far 4x8 grid 15; corners 4x4x4 only 29 |
+| L0 near | 6 | 189 (whole router) | |
+| L1 | 18 | 207 | far 4x8 grid 54; corners 104-111 |
+| L2/L3/L4 | 79/83/81 (65x40x65) | 212-224 / 215 / 208 (65x49x65 far) | InterpolatedFunction stripping: no change (no densify overhead) |
+Not density (in-game timers x 0.30): L0 game trees ~67, L0 materials+columns ~27, L1 ~31, L2+ biomes+materials+columns ~58.
+Meshing (MeshBench on stored columns): 0.5-1.7 ms per mesh, near L0 with caves 4.9; current mesher +15-30% vs HEAD;
+2.2 meshes per column tonight vs 1.4 on 16 Nov. Total meshing ~16 CPU-s of 342: small.
+Cold view at 512/detail 10, rd 6 (tiles.py): L0 349 (50 near), L1 277, L2 272, L3 272, L4 148 = 1,318 tiles.
+What each change since 16 Nov costs (cold view): Terralith-correct far shape at L2-L4 +93 CPU-s; block-exact L0/L1 +79;
+meshing +10; trees/materials same both. Workers' CPU share unchanged (~1.5-2 cores; Mac saturated by C2ME + others).
+
+## Candidate levers, measured
+A (exact, no visible change): far L0 tiles from the 4x4x4 corners (the game's own interpolation points: Terralith's terrain
+  is one InterpolatedFunction 4x4 cells, see tree dump), block by block only through cells whose corners change sign (+1 cell
+  margin): 4.25% of blocks. 16 tiles: heights 100% equal, 3D voxels 0.00% differ. L0 108-119 -> 56 ms; L1 211 -> 175.
+  NOT for near tiles (whole router: noodle caves fit between corners). Must be re-checked bit-exact on many tiles when built.
+B (visible: coarser far): keep L0 ring, faster falloff beyond: refine factor 6 (now 10) for levels 2+. Tiles 1,318 -> 750
+  (L0 to 640) / 658 (L0 to 512). Voxels beyond the ring ~1.7x bigger on screen. Adds L5 (32-block voxels) beyond ~6 km.
+  L0 to 512 means MetaCanopy estimated trees from 512 instead of 640.
+C (visible, small): L2+ density every 2nd cell, lerped (as the game does inside cells). L2 224 -> 64 ms: 0.30% voxels differ,
+  98% of overhang/island/arch voxels kept, heights within 1 voxel. L3/L4 -> 58-59 ms but only 68-76% of those voxels kept.
+  Narrow cave mouths/spikes < 2 cells (8 blocks at L2) can close/blur.
+Cold view (CPU-s / min at 1.7 cores): now 342/3.4; A+B640 174/1.7; A+B512 160/1.6; +C at L2 158/1.5, 144/1.4;
++C at L2+ 120/1.2, 106/1.0. Full-detail L0 ring done: now ~48 s, A+B640 ~39 s, A+B512 ~27 s.
+Nothing touches water (sea/aquifer, LodStreams + fix16 banks run on every level as now) or nearest-first priority.
+Rejected: vertical sample every 16 blocks at L2+ (y16): loses 27-41% of overhang voxels for ~40% less cost; crop by a 32-block
+pre-pass: no gain.
+
+## Files
+Bench sources + results: `Imagine metal/claude-scratch/s1117e/bench/` (CostBench.java in package mcopt.metal.lod, MeshBench.java
+in imaginemetal.metalods, tiles.py view simulator, model.py cost model, bench2-4.txt). Columns sampled: s1117e/cols.tgz.
+Run: javac with out/ (all of mod/src/main/java) + libs on the classpath; java -Dmcopt.lod.nativeNoise=java
+mcopt.metal.lod.CostBench <terralith unzipped> -5565927190423133569 all 12.
+
+---
+
+# START HERE — 2026-11-17 23:40 Claude fix16 INSTALLED: Streams corridor banks fitted to the real world, game trees back on far L0
+
+Jack 23:10 (fix15-diag session 23:08-23:10, NEW WORLD "New World (12)", same seed -5565927190423133569, screenshots 23.09.32-58): "its bad".
+Screens: 23.09.42 round blob trees + red/beige mushroom caps in Old Growth Pine Taiga = fix13's estimated trees on far L0 tiles
+(tiles near him were still "far", waiting in the refine queue: "0 near" all session). 23.09.32/34 standing inside LOD trees
+(real chunks not loaded there yet). 23.09.56/58 from under the world (y -35, -184): the LODs are surface shells, hollow below.
+
+## Speed: measured (fix15 diag lines, 23:09:13-23:09:53)
+- The Mac's 8 cores at 100% the whole time. The game ~6.2 cores: Java threads ~4.9 (MetaLODS 1.5-2.0, C2ME 0.6-1.0, "other"
+  1.0-1.6, render 0.4-0.7, server 0.1-0.3, Worker-Main 0-0.3) + ~1.3 GC/JIT/native. ~1.8 cores outside the game (other apps).
+- MetaLODS workers RUNNABLE 96-100% of samples, never waiting on locks (<0.3%), yet 6 of them got 1.5-2 cores: time-sliced.
+  CPU per tile matches offline cost. GC young pauses ~0.3-0.4 s per 10 s (~4%), heap 1.6-2.4 of 4 GB: not the problem.
+- Worker time: ~50-60% density/noise (LodLatticeSampler, PerlinNoise, native blended/stack volumes), ~25-30% meshing
+  (MetaMesher greedy/faces/exposed/mesh/closeCaves; ~9 meshes per tile), ~5% Streams plan, ~5% surface materials.
+- Throughput 4.4-4.8 tiles/s, ~430 chunk-eq/s. The view at distance 512 / detail 10 is ~1,100 tiles (~300 CPU-s): ~3 min on
+  ~1.8 cores. No bug: the CPU is full. Levers (not changed, Jack to choose): detail (biggest), meshing cost, the "other" threads
+  (fix16 names them in the cpu line), apps outside the game.
+
+## Rivers: measured, then fixed (fix16)
+Plan dump (claude-diag/streams-plan-13_-167.csv) vs the real world's heightmaps vs the seed's fill: inChannel = 62% of real
+water, 97% of it real water, plan waterY = real water top in 87%, bedY within 1 in 90%. Streams also reshapes inCorridor
+(a strip up to ~12 blocks beside its channel): 41% of corridor columns lowered (p90 20), outside channel+corridor only 2%. The
+LOD left corridor ground at seed height = the walls ("ledge"). fix16: corridor columns lowered to min(seed, waterY + BANK[d]),
+d = 8-neighbour distance (blocks) to the channel, BANK = {2,2,3,8,19,21,25,26,27,28,31,31,31} fitted to the real world.
+CorridorCheck (ci/metalods, inputs from session data): within 2 blocks of the real ground 40% -> 67%, mean error 7.4 -> 3.6
+blocks; cross-validated halves 60->73% and 30->54%. Margin queried only for columns with a corridor (12 blocks of plan calls).
+Data kept in `Imagine metal/claude-scratch/s1117d/` (real12.json, plan12.csv, data/hm.py region-heightmap reader).
+
+## Trees
+fix13's estimated trees on far L0 tiles reverted (game trees again); far folder renamed -far3 so the estimate columns stored by
+fix13-15 are made again. LodForest ground dedupe + ring limit kept. fix14 QoS kept. fix15 diagnostics kept (+ "other threads").
+
+Installed SHA256 bbc72f7e..., copy `Imagine metal/imagine-metal-claude-fix16.jar`. Rollback: fix15-diag / fix12 jars in the instance folder.
+
+---
+
+# START HERE — 2026-11-17 19:45 Claude fix15-diag INSTALLED: river banks reverted, diagnostics only (Jack: find the cause first)
+
+Jack 19:20 (fix14 session 19:18-19:19, screenshots 19.19.01-45): still slow; fix13's banks look wrong ("how did u think that would
+fix anything"). He asked to figure out the cause before fixing anything.
+
+## Rivers: what the real world shows (measured, nothing changed but the revert)
+Read the world's real region files (dimensions/minecraft/overworld/region, heightmaps OCEAN_FLOOR / MOTION_BLOCKING_NO_LEAVES,
+189k columns, script `claude-scratch` ~/an/hm.py in the device VM) against the seed's own fill (GorgeCheck, final density +
+aquifers). 72% of columns equal the seed within 1 block; Streams Reflowing's changes are a band of ground lowered >10 blocks
+where its water is, often far wider than a stream (z -28: water 62 from x 92 to 156, seed ground 84-90 there). Its banks are
+STEEP and NARROW: dry columns lowered >2 blocks: 38% at 1 block from water, 23% at 3, 14% at 5, 3% at 8, ~0 beyond 10 (p90
+lowering 25, 16, 4, 1). fix13 cut a 1:1 cone out to 32 blocks: 4-5x too wide, so funnels/amphitheatres. REVERTED in fix15 to
+fix12's channel cut. Still unknown: whether Streams' plan (inChannel/bedY/waterY) covers its whole wide water or only a stream in
+it (the LOD gorge looked narrower than the real water). fix15 dumps the plan once per session around the player (384 x 384,
+`saves/<world>/metalods/minecraft_overworld/claude-diag/streams-plan-X_Z.csv`: x,z,inChannel,inCorridor,bedY,waterY), to compare
+against the real heightmaps. inCorridor is a public accessor of the plan record, only read.
+
+## Speed: what fix14 showed
+4.8 tiles/s (was 1.9), ~450 chunk-eq/s, but "CPU 28% of the tiles' wall time": while making a tile a worker runs ~28% of the time.
+The CPU work per far L0 tile (652 ms wall x 0.28 = ~180 ms) matches the offline single-thread cost (~190 ms), so the generator isn't
+slow, the workers don't get to run. Unknown: who holds the CPU (other threads, GC pauses, locks). fix15 logs every 10 s:
+"[MetaLODS] cpu:" machine load, this game's cores, Java thread CPU by group (render, server, C2ME, MetaLODS, Worker-Main, ...),
+GC count/ms per collector, heap; "[MetaLODS] workers:" RUNNABLE / BLOCKED / WAITING / IDLE shares from 20 Hz stack samples of the
+workers; "worker frames:" top frames (first MetaLODS frame <- top frame); "worker locks:" which lock and its holder.
+Next: read those lines and decide; don't change anything before.
+
+Installed SHA256 6c894095..., copy `Imagine metal/imagine-metal-claude-fix15-diag.jar` (= fix14 + LodStreams back to fix12 + plan dump
++ MetaDiag). fix13's far-tree estimates and tree-ground limits and fix14's QoS stay.
+
+---
+
+# START HERE — 2026-11-17 18:25 Claude fix14 INSTALLED: workers at default QoS while a view fills; CPU-share stat
+
+Jack 18:16 after fix13 (session 18:14-18:16 at 107 115 -28): "very very slow". Log: trees now 94-264 ms per L0 tile (were ~2,000;
+grounds made 179, beyond the ring refused 19,736) but the far L0 surface rose to 1.9-3.6 s per tile (fix12 ~0.95) and tiles/s stayed
+1.6-1.9: total throughput unchanged with a third of the work gone. Offline the same far 64x64 block-exact surface+3D is ~0.19 s
+(java backend), so in game each worker got roughly a tenth of a core: the workers are utility QoS (MetaWorld.work, "so the game's
+threads come first") and the M1's performance cores are held by the render thread (interactive), server (initiated) and C2ME's
+6 worldgen threads; utility work is pushed to the efficiency cores.
+fix14: each worker sets its own class every loop: default (0x15, C2ME's class) while jobs + details waiting > 24, else utility
+(-Dmetalods.burstQos=default|initiated|off, -Dmetalods.burstJobs=N). New in the generation line: "CPU N% of the tiles' wall time"
+(thread CPU time / wall time while making tiles): near 100% = the workers get their cores; far below = still starved.
+Risk: FPS lower while a view fills (render thread stays above the workers). Not measured in game.
+Installed SHA256 ce0326723eac8edf..., copy `Imagine metal/imagine-metal-claude-fix14.jar`; rollback `imagine-metal-claude-fix13.jar` (or fix12).
+
+---
+
+# START HERE — 2026-11-17 18:05 Claude fix13 INSTALLED: Streams river banks (the "ledge"), far level-0 trees as estimates, tree grounds
+
+Jack 17:42 (fix12 session 17:39-17:40, screenshots 17.40.24/37/42 near spawn, 107 115 -28): the ledge is still there; still slow; take
+more from DH + SeedGen ("it was fast earlier").
+
+## The ledge was never the surface sampler
+GorgeCheck (ci/metalods, seed -5565927190423133569 = New World (11), Terralith pack): the game's own fill (final density + aquifers,
+NoiseChunk exactly as NoiseBasedChunkGenerator.doFill) has NO gorge at 60..250, -128..40: a plain at 83-94 with one small cave mouth
+at 102-112, -10..-2. Aquifer barriers change nothing there. The vertical-walled gorge in the LODs is LodStreams (Streams Reflowing's
+rivers): channel() cut every in-channel column straight down to the bed, columns whose plan had no water over the bed (wy < by) were
+skipped and kept the full terrain, and nothing shaped the ground beside the channel. The real chunks have sloped, stepped banks.
+fix13 LodStreams.apply: (1) also asks the plan in a margin around the column (min(16, 32/cell) cells, every 2nd cell at levels 0-1),
+so rivers just outside the column cut its bank too; (2) channel cells without water: the ground lowered to the bed (lower()); (3)
+every other column within 32 blocks of a channel: the ground capped at the nearest channel's water top + 1 voxel per cell away
+(chamfer distance), its top 4/2/1 voxels (surface + under) moved down with it, trees on the cut ground removed, lakes untouched.
+Only the plan's public accessors already used (plan, inChannel, bedY, waterSurfaceY, platesTouchingBox, platesReady).
+BankCheck (ci/metalods, needs the MC classpath): river 22 blocks under a plain -> ground 88..66 in 1-voxel steps, grass kept.
+Not verified in game: real Streams banks may be steeper/wider than 1:1 within 32 blocks.
+
+## Speed (fix12 log: L0 tile 3.0 s = surface 0.95 + trees 2.0; "L0 1664" generate calls for 93 tiles = ~17 ring grounds per tile)
+1. Far level-0 tiles (beyond max(192, transition+96) = 224 blocks) no longer run the game's tree features: impostor canopy at
+   generation and MetaCanopy at derive (as levels 1+; MetaWorld.streamChannels also for store.isFar columns). Near tiles keep the
+   game's trees and plants; a far tile is still remade with the whole router + game trees when the player comes near.
+   At detail 10 level 0 reaches ~640 blocks: ~275 of ~315 level-0 tiles are far ones.
+2. LodForest: grounds made once (in-flight futures: two workers made the same chunk's ground); while planting a tile only the tile's
+   chunks + the 1-chunk ring may have their ground made, a lookup beyond answers air / no height (was a whole 16x16 ground per
+   chunk two rings out). Stats: "grounds made N, beyond the ring refused M" after "tree chunks".
+Expected (not measured): far L0 tile ~1 s instead of ~3 s; near trees roughly half. At detail 10 the view is ~1,100 tiles; detail
+6-8 would cut that a lot (Jack's setting, not changed).
+
+## Build
+Same as before (javac --release 25 against minecraft-merged.jar 26.3 + gradle-home libraries staged from this Mac; overlay of the
+changed classes onto fix12): LodStreams, MetaGen, LodForest, MetaWorld (+ inner classes), new VoxelLogs. check.sh all PASS.
+Installed SHA256 ec6555c8339223141280e7e213de9e1fb254585e32bcf3980d7ca3a48658dc52, copy `Imagine metal/imagine-metal-claude-fix13.jar`.
+Rollback: game closed, copy `imagine-metal-claude-fix12.jar` (or `../backups/2026-11-17-claude-fix12/`) over mods/imagine-metal-0.1.0.jar.
+
+---
+
+# START HERE — 2026-11-17 17:33 Claude fix12 INSTALLED: nearest first, far L0/L1 block-exact, far trees without plants
+
+Jack 17:27 (fix11b session 17:16-17:26): trees much better; "blocky ledge turning into landscape" (17.24.38 -> 17.24.47, a
+gorge drawn as flat stone walls), still too slow, nearer chunks must load first; asks why DH + SeedGen is faster and more accurate.
+Log: 8.7 tiles/s, ~4.6-5.1k chunk-eq/s at peak, falling to ~5 as L0 trees rose to 800 ms/tile; near (whole router) tiles
+2,683 ms each, far 430-780 ms. First tiles made were levels 4/3 (prio was distance / column width: coarse far columns first).
+fix12:
+1. Job priority = (distance + 16) blocks x (in view 1, else 3) for every level; TileJobs lanes 6 near : 1 far : 1 deferred.
+2. LodNoise.far has accurateSurface = true: far L0/L1 use Codex's block-exact LodSurfaceSampler on the cave-free terrain (fix11
+   interpolated 4x8 corners there = the blocky ledges). FarTerrainCheck: 64x64 block-exact surface+3D, plain backend: L0 whole
+   router 248 ms -> far 135 ms, L1 532 -> 287 ms; heights within 1 block 95.4-95.7 %. Far folder renamed `-far2` so fix11's
+   interpolated far L0/L1 columns are made again.
+3. Far LodForest runs tree features only (no grass/flower features: invisible past ~200 blocks). Near tiles keep plants.
+Installed SHA256 25dadca6a9b24d676e6a7f4e42a063e266c807ccacf90a5de72ec4cd3ca6aa15; previous jars in the instance folder.
+check.sh fixtures all PASS. Not yet measured in game.
+
+---
+
+# START HERE — 2026-11-17 17:25 Claude fix11b INSTALLED: far terrain keeps cave entrances
+
+Jack (17:08): leaving out cave entrances is wrong ("fallen into multiple ravines"). LodFarTerrain now keeps
+`minecraft:overworld/caves/entrances`; it still drops the noodles and the deep cave branch (range_choice on sloped_cheese).
+Installed SHA256 05cdc592b4a9f8ea432de805b6cb7198efee7f90b7a13ec17b7f3d98221b0c54 (copy `Imagine metal/imagine-metal-claude-fix11b.jar`);
+rollback to fix11: `Imagine metal/imagine-metal-claude-fix11.jar`.
+FarTerrainCheck (Terralith pack, plain backend), TRUE top solid block by point scan over 2,304 columns: equal 90.8 %, within 2
+blocks 95.4 %, mean 0.53; 4.4 % of columns have an opening in the full router that far lacks (deep caves reaching the surface).
+Cost: 65x49x65 volume full 617 ms -> far 336 ms. Note: the 20 % "height differs" figure of fix10 was mostly an artifact of
+LodSurfaceSearch (it needs two solid 32-block samples, so a cave under a thin roof makes it skip down): the full router through
+that search (Codex's L2+ path) put surfaces ~9 blocks too low in ~20 % of columns, likely part of the "ledges/plateaus".
+Ravines are the `minecraft:canyon` carver (biome carvers), not density: no seed LOD (exact or far) has them; they appear once
+the real chunk is captured. closeCaves (fix11) only fills sealed dark pockets; ravines and cave mouths are lit and stay open.
+
+---
+
+# START HERE — 2026-11-17 17:00 Claude fix11 INSTALLED (one pass everywhere, far L0/L1 upgraded near you, L0 cache moved, caves closed in meshes)
+
+By Claude, on top of fix10 (section below). Same build method (javac + class overlay onto Codex's canopy-priority jar; Gradle
+build of this checkout gives the same code). All CPU fixtures in `ci/metalods/check.sh` pass, plus new `CaveCheck`.
+Installed SHA256 a70d1e21dd6f0bfe0ba8b1c5d27ca6bba94308ddfa9906bc5c98573e397eea41, copy `Imagine metal/imagine-metal-claude-fix11.jar`.
+Rollback: `../backups/2026-11-17-claude-fix11/` (= fix10) or `../backups/2026-11-17-claude-fix10/` (= Codex canopy-priority).
+
+## fix10 session (Jack 16:41-16:52): still slow, still bare grass
+- "trees from 120 of 321" (was 18): the tree detection worked, but the bare fields (16.50.50 at 349,153,300, 16.51.13,
+  16.52.22) are where he'd been before: level-0 columns cached on disk without Terralith's trees were reused.
+- Slow: 0.6-1 tiles/s. Detail pass (Codex's surface-first) refined ~170 tiles: near L0 = exact surface ~600 ms + trees
+  660-1,060 ms per tile, each made twice. Arena still near full at 98,304 pages: ~10-12 pages per drawn column vs 4.5 on Nov
+  16 (5.3M quads drawn, GPU 46-52 ms, 20-25 fps). Codex's removal of the dark-air fill in MetaChunks (curtains under islands)
+  made every cave wall of captured chunks into faces.
+## fix11 changes
+1. New tiles are made in ONE pass: near (exactHere: within max(192, transitionLimit+96) blocks) with the whole router, 3D and
+   game trees; elsewhere generateFar. No more quick surface + detail for new tiles (needsDetail unused). Old stored previews
+   still refine (near: whole router, far: generateFar).
+2. Far L0/L1 columns are stored as kind "far" (`<gen>-far/` folders, MetaStore.isFar): when one is read and its tile is near
+   the camera it is queued and made again from the whole router (refineOne skips far columns not near). So Codex's exact
+   hand-over stays wherever the LODs meet the real terrain.
+3. Level-0 folders are now `gen9-t2`, `gen9-t2-surface`, `gen9-t2-far`: the old gen9 L0 (bare Terralith forests) is left on
+   disk, not read. L1+ unchanged (their canopy is MetaCanopy's estimate at derive time).
+4. MetaMesher.closeCaves (mesh copy only, stored voxels untouched): an air run with sky light 0, <= 24 blocks tall (>> level),
+   solid under AND over it, meshes as the block under it. Island gaps over water, gaps taller than 24 and lit cave mouths stay
+   open (CaveCheck). Applies to old real2 captures too.
+5. Stats line `[MetaLODS] tiles: N near (whole router) X ms each, M far (no caves) Y ms each; refined, to refine` replaces
+   the surface-first line: read it to see which kind costs what.
+
+---
+
+# (superseded by fix11 below/above) 2026-11-17 16:40 Claude fix10 INSTALLED (arena thrash, Terralith trees, cave-free far terrain); Jack to test
+
+Written by Claude (Codex out of usage). Same workflow as Codex: this checkout is the source of truth, changes left uncommitted
+on `screenshot-audit` on top of Codex's staged/unstaged work. Claude can't push to GitHub from its session (add_repo denied), so
+no CI: the jar is the installed canopy-priority jar with 20 class files replaced (javac --release 25 against MC 26.3 client.jar
++ libs in Claude's sandbox; every one of the 408 source files compiled clean). Shaders/native untouched. A full Gradle build of
+this checkout now contains these changes (`../outputs/claude-fix10.patch` is the diff against Codex's tree).
+
+## Evidence (Jack's 16:13-16:18 session, canopy-priority jar, distance 512 / detail 10 / overhangs / exact trees)
+- 16:15:54 "GPU arena is full". From then `meshes` went 5,936 -> 112,139 in 2 min while columns stayed ~3,800 and tiles
+  generated went 280 -> 324: `upload()` set a column with no pages back to state 0, the next frame asked for it again, it was
+  re-meshed (derive + Streams + MetaCanopy each time) and failed again. All workers were busy re-meshing: that is the "very slow,
+  no idea what it does". Columns not wanted were only freed after 600 frames (24 s at 25 fps).
+- Per tile (before the thrash): L0 surface ~750 ms + trees ~340, L1 ~1,200, L2-L4 1,000-2,400 ms, then a detail pass made every
+  tile a second time. The Nov 15/16 sessions (sloped_cheese path) made far tiles in ~250-1,100 ms, 10-11k chunk-equivalents/s.
+- Screenshots 16.17.14 -> 16.17.19 (Dark Forest, 330,157,516): LOD hillside bare grass, dense dark forest once real. Cause:
+  `LodForest.isTree` matched vanilla feature names only; Terralith's `terralith:dark/trees`, `highlands/temperate/dark_oak`,
+  `flower/*/trees`, `forest/flower/*/trees_*` were skipped or run as "plants" ("trees from 18 of 321" in the log), so the exact
+  L0 detail tiles replaced the preview's estimated canopy with nothing.
+
+## Changes (fix10)
+1. Arena (MetaWorld.upload/request/housekeeping, MetaLods): a column that finds no room backs off 90 frames instead of being
+   re-meshed every frame; under pressure (arena full or < 1/8 free) eviction runs every 250 ms, frees columns unwanted for 60
+   frames, and frees parents whose four children are all meshed (not drawn anyway; asked again when the view wants them).
+   Arena 65,536 -> 98,304 pages (~216 MB; M1).
+2. Trees (LodForest.growsTrees): a vegetal feature counts as trees if any feature in its random-selector tree is a TreeFeature
+   or a huge mushroom (FallenTree/CoralTree excluded), besides the old names. Expect "trees from" well above 18 in the log.
+3. Far terrain (new LodFarTerrain, LodNoise.far, MetaGen.far/farForest/generateFar): the world's own final density rewritten
+   with DfRewriteRule: refs to `*caves/*` -> constant 64 (min with it dropped), range_choice on sloped_cheese -> its surface
+   branch. Terralith's extra_terrain_sum (arches, spikes, skylands) and subtract_terrain_sum (cliffs) and both slides stay.
+   Used for levels 2+, and for levels 0-1 tiles further than max(192, transitionLimit + 96) blocks from the camera when made
+   (game trees at L0 via a second LodForest on that ground). Those are made in full at once and stored canonical (no preview,
+   no detail pass). Levels 0-1 near the real terrain keep Codex's exact router + preview/detail. Stored L2+ previews still get
+   refined (now with the cheap function). needsDetail is now level<=1 only.
+   Measured in the sandbox with the installed Terralith pack (ci/metalods/FarTerrainCheck.java, plain backend, seed 923478761):
+   65x49x65 volume full router 607-664 ms -> far 322-338 ms (sloped_cheese alone 193, extra 127, subtract 8, entrances 87);
+   refined surface search 2.4-2.6x faster. Heights equal in 73 %, within 2 blocks in 80 %; the rest are where the router's
+   caves/cave mouths cut the surface (far is never lower, by construction).
+
+## Tell Jack to test
+Same world. Fly over new land for a minute: F3 log lines `[MetaLODS] stats` should keep `meshes` close to `columns meshed`
+(no runaway) and `generation:` tiles/s well above 1.4; Dark Forest/Terralith forests should have trees on the LODs. Check the
+hand-over ring for odd steps/cliffs (L0/L1 far tiles are cave-free) and whether far Terralith arches/spikes look right.
+
+## Rollback
+Game closed, copy `../backups/2026-11-17-claude-fix10/imagine-metal-0.1.0.jar` (canopy-priority, SHA256 ab1ec09a...) over
+`minecraft/mods/imagine-metal-0.1.0.jar`. Installed fix10 SHA256 7f7cd1bdbb357f5e6314fb3d9cd1c739e1721a4cca28a3b26f688e7ba596a16a,
+copy at `Imagine metal/imagine-metal-claude-fix10.jar`.
+
+## Still open
+- Exact L0/L1 near tiles still cost ~1 s each plus the detail pass; real-world rate after fix10 not measured yet.
+- Streams adapter costs 14-45 ms per column per derive; harmless without the thrash, worth caching per column if it shows.
+- Meshes are ~1.8x bigger than on Nov 16 (caves kept as air in captured chunks, submerged faces): watch arena use.
+
+---
+
+# START HERE — 2026-11-17 nearby refinement / canopy corrections INSTALLED; user test pending
+
+Latest user reports continued slow generation, huge temporary ledges that change on approach, “800k loaded” dropping to230k, empty forests / wrong species / foliage towers. Explicitly requested updated handoff for possible Claude continuation. Do not launch Minecraft: user is doing gameplay acceptance. No agent delegation was used. This section supersedes older START HERE sections for current behavior; older evidence retained below.
+
+## Latest live evidence (previous surface-first jar, not this candidate)
+- Inspected instance screenshots 2026-11-17_15.46.09/.21/.36/.54 and15.47.13/.59. Temporary plateaus with tall stone walls, absent forest, estimated foliage pillars; nearby captures reveal different terrain. Screenshots under `/Users/jack/Documents/instances/Imagine metal/minecraft/screenshots/`.
+- Representative F3 positions: (2,137,-61) River; (101,122,-38) Valley Clearing; (-179,122,4) Valley Clearing; (94,149,128) Old Growth Spruce Taiga; (356,129,510) Dark Forest. 15.46.09 shows surfaces ready but1189 detail tiles pending. 15.47.13 shows the empty grass field.
+- Latest run ended15:48:24. Approx1515 surface tiles in258.9s, ~3890 chunk-area-equivalents/sec (previous session~4793); approx227 completed detail tiles versus1288 pending. These area rates are NOT unique Minecraft chunk generation. Often refining=false while moving because the global95% coverage gate starved nearby detail. Meshes approx13.2ms each; arena almost full but no established allocation failure. Native NEON runs; cache0errors. Keep the original log for follow-up; archived to ../outputs/canopy-priority-before-latest.log.
+- Counter drop is because “area ready” represented CURRENT selected view area, not lifetime cumulative loaded/saved terrain. Movement/LOD changes change this number. No evidence of deleting570k saved chunks.
+
+## Current source changes
+- `MetaWorld.refineOne` + `DetailJobs.takeNearest`: every fourth worker-loop opportunity can take the CURRENT camera's nearest eligible detail job inside max(192,transitionLimit+96) blocks even before global coverage95%. Busy coverage limits detail to1owner; idle queue allowsworkers-2owners. Other workers remain available for surfaces. Existing epoch/ownership/publication guards remain. This reduces nearby preview starvation; not proof of restored throughput.
+- HUD shows current-view readiness percentage, mesh/detail queue sizes and cumulative seed tiles this session, avoiding the misleading loaded-area count. The surfaces-ready/detail-pending status remains.
+- `LodTrees.configure(ServerLevel)` inspects actual world's biome generation features for TreeFeature foliage/trunk providers. Previously unknown biome names got NONE. Providers sampled without a world (null LevelAccessor, deterministic RNG); world-dependent providers skipped safely without generating chunks. Dominant observed foliage sets species; profile is still an approximation, not exact per-tree placement. Existing known-biome heights are kept if taller than selected feature height. Cover for unknown tree-bearing biome defaults .55. TreeFeature bushes can also be present; this does NOT reconstruct feature placement frequency or every custom Terralith structure/tree.
+- `CanopyShape` + `MetaGen.cell`: estimated leaves occupy upper crown; only jittered fine-cell centres have wood trunks. Previously estimated foliage spanned ground-to-top, causing leaf towers. Exact feature-generated L0 path unchanged.
+- `MetaCanopy`: weakly cached derivation-time correction for existing seed caches too; strips/rebuilds estimated vegetation above the highest terrain surface using current profiles, skips new trees over water, preserves ground/water. Scans RLE runs to find ground, avoiding per-air-voxel palette work. Applies to L1+ and preview/non-exact L0 BEFORE Streams and captured real overlays. Exact full L0/captured real chunk trees bypass it. No cache deletion/version bump. Old previews can be corrected without forcing all terrain regeneration.
+
+## Remaining work / honesty
+- SPEED IS NOT RESTORED OR LIVE-VERIFIED. No50k/s claim. Latest measured live results above are from previous jar. Main cost remains actual Terralith final-density sampling, feature detail and meshing at distance512/detail10. Earlier documented fast workload was distance256 (~630tiles), current distance512 (~5000columns). User's remembered speed still warrants real profiling; do not explain it away using incomparable counters.
+- Huge ledges are not fully solved: far surface previews still use32-block vertical brackets and solid-fill terrain until full3D refinement; far cave/overhang/silhouette mismatch remains. New scheduler prioritizes nearby resolution, but distant silhouettes can still be wrong. L0/L1 surface heights are exact; distant heights/trees are estimates. Do not present the new jar as complete terrain-accuracy or performance fix.
+- Ready-only Streams adapter unchanged: skips cold/unready drainage, never creates drainage networks from LOD workers. Full bank/lake/material/features behavior still not reproduced. Water/dither shader/native bytes unchanged this turn; previously GPU validated, latest user says water improved.
+- Next useful performance work: real whole-pipeline profiling (generation vs feature detail vs meshing vs queue/arena pressure) and matching cold/warm workload, then reduce unnecessary sampling/remeshing while maintaining installed Terralith semantics. Actual giant trees/custom features and preview vertical accuracy still need work.
+
+## Validation and deployment
+Final Gradle build PASS (`../outputs/canopy-priority-build.log`). Installed actual Terralith registry profiles PASS:112 tree-bearing biomes; Valley Clearing oak bush height4, Old Growth Spruce Taiga spruce height16, Dark Forest dark oak height11. NOTE Valley Clearing has bush features, not a full tree placement rule; default unknown-biome cover remains an approximation. Synthetic unknown-biome spruce and cache repair L0..2/ground+water preservation/idempotence PASS (`canopy-check.log`, `canopy-terralith-check.log`). Existing geometry/ingest/mask/ZIP and expanded nearest eligible detail/six-worker ownership tests PASS (`canopy-priority-regressions.log`). Store reopen/ready-only Streams fixtures PASS (`canopy-priority-store.log`). Dither114688 decisions PASS. Jar integrity PASS; all12 shader/native resources identical to prior installed jar. No new GPU test needed for unchanged resources; no game launch or live benchmark performed.
+
+Installed `/Users/jack/Documents/instances/Imagine metal/minecraft/mods/imagine-metal-0.1.0.jar`, SHA256 `ab1ec09a32ed5eff34d4ff5c42a947fa3d46e0ac8befc7c6f70ab67c1f235ccb`. Candidate `../outputs/imagine-metal-canopy-priority.jar`. Backup `../backups/2026-11-17-canopy-priority/imagine-metal-0.1.0.jar` (previous surface-first SHA3b9a6813d181632d379ff3855c11c172c2edf423cb821d006c562dd030951ed4). `../outputs/installation.json` updated. Confirmed Prism only/no Java process before install. Roll back only with Minecraft closed by copying this backup to installed path; backups remain outside mods. Existing world/cache/config untouched.
+
+Next user test: same world, revisit screenshot locations; stand still30–60s to observe detail count decrease, then approach the old wall/forest. Check if crown/trunk shape and nearby refinement improve. Exit/reopen same location to check cache reuse. Do not delete caches or promise distant terrain exactness. Inspect new logs and screenshots after test; speed and far preview accuracy remain open.
+
+Test sources: `ci/metalods/BiomeCanopyCheck.java`, `CanopyRepairCheck.java`, `canopy_check.py`, expanded `DetailCheck.java`, optional installed-pack canopy mode in `PackRouterCheck.java` / `pack_router_check.py`.
+
+---
+
+# START HERE — 2026-11-17 surface-first coverage INSTALLED; user asks why DH+SeedGen is faster
+
+Latest user: "there loaded in a world ... still very slow ... water way better ... too slow to assessStreams" then "why is dh + seedgen so much faster tho?" Answered in commentary: SeedGen approximates assets and calculates seed surface directly; our previous foreground pipeline blocked on full block/cave/vegetation work. Primary SeedGen description https://modrinth.com/project/distant-horizons-seedgen confirms it realistically fakes assets such as trees rather than generating fullchunks. Do NOT state that DH+SeedGen universally builds fullchunks after preview; configurations differ.
+
+Evidence latest run15:07–15:10:
+- NativeNEON DOES run: logged45noise+1blend,0unsupported, SparseRoot. Cache succeeds0read/write errors. Streams ready-only works: cold skips; readycolumncost averages7–15ms. Fullraw generation~2.7k area/s firstcold session,~4–5k secondworldsession, thousandsqueued. PreviousStreamsfix helped but didnot restore fastcoverage.
+- Current config distance512/detail10/exactTreestrue/overhangstrue,~5000columns. Historical documented fast1/fix2 test distance256 and~630tiles, with~5.5karea/s peak, NOT measured50k uniquechunks/s. Don't dismiss userexperience: current wait stillbad; these workloads and counters differ.
+- Full generation waits for nearblockdensity+3Dcaves+actualfeatures before publication. Main newfix is publicationorder, not another minor primitive tweak.
+
+Newinstalledpipeline:
+- MetaGen.generateSurface publishes terrain at SELECTEDhorizontalvoxelresolution. L0/L1heightsexact fromactualfinaldensity; cavequeriesstoponceeachsurfacefound. FarL2+previews approximateverticalheight from32-blocksamplebrackets, no8-blockrefinement untildetail. Vegetation initiallybiome estimates. This is an intentional previewaccuracy tradeoff, not exactfullfar generation.
+- Original fullgeneration API delegates to unchangedalgorithm with preview=false, preserving final3D/trees/settings. DetailJobs prioritizednearfirst, dedupedtileleases. Normally1backgrounddetailowner once95%mesharea ready; withsurfacequeueempty allowsup toworkers-2detailowners. At least2workers immediatelyavailablefornewcoverage. Detailcompletionupdates4columns+neighborborders; realcaptureoverlayremainsauthoritative. Epochguardsblockclear/close-stalepublication. Failuredetailstopsrefinement, keepvalidsurface/log/HUD instead of retry/OOMstorm.
+- Previewfiles persisted separatelygen9-surface/gen9h-surface withqualitytracked; canonicalfullgen9/gen9h andcompatiblegen8far prefered. PendingIOcache returnslatestdata; fullcannotbedowngradedbystalepreview. CachedGenrechecks memory afterdiskIO toavoidoldpreviewoverwritingnewfullresult. Existingfullcachesunchanged/nocachedeletion/versionbump. Previewreopenqueuesdetailagain, no unnecessarysurface regeneration.
+- NewLodSurfaceSearch hasrefined=true mode reproducingold32->16->8pointsearch throughonebatchedYband; previewmodeomitsrefinement. Testedrefinedmodeheights equalpointreference. OriginalfirstattemptmanymidpointplaneswasSLOWER andwasreplacedbeforeinstallation.
+- NearLodSolidSampler.sampleSurface evaluatesmainterrain, then cavecuts onlyinsurfacebands untilsolidfound; fullmaskpathretainedforfull3D. Exactnearheightsvalidated.
+- MetaGen.NANOS/timings nowpergeneratorinstance; avoids cross-worldstatic stagecounts confusinglogs. HUDsurfacesready/detailtiles distinction.
+
+Benchmarks (be candid):
+../outputs/surface-first-terralith.log: actualinstalledTerrpack full64x64nearheight-only~66.5msL0/134msL1 withfullheightsidentical; fullmaskrawparity preserved. Far cached-positionpreview6–9ms vsrawfull~160ms was misleadingifpresentedcold. Freshcontexts+3newpositions: rawfulldensity171–176ms ->surface61–62ms,2.8–2.9x. This is densitystage only, NOTgameFPS/endtoendtiles/s/live50k. Foregroundalsoavoidswaitingforactualvegetation. Needliveacceptance.
+
+ChecksPASS:
+- FullofflineGradlebuild ../outputs/surface-first-build.log (testsNO-SOURCE).
+- ActualTerrrouternear/fullsign/heightparity; farrawbitparity;1024coarserefinedheightsmatcholdpointsearch;freshcontextbench asabove.
+-96interpolatorcases+40vanillaroutervolumesplain/native,nearheights ../outputs/surface-first-density-final.log.
+- Metastorepreviewclose/reopen/fullprecedence/latepreviewdowngrade/pendingwrite; existinggen8far+realcachefixtures;Streamsreadyfixtures ../outputs/surface-first-cache-check.log.
+- Detailqueue100jobs/6workersownerlimit, priority,retry,oldclearcompletiondoesnoterasefreshkey,close; idle3ownerexpansion/backpressure; geometry/ingest/scheduling/mask/ZIP ../outputs/surface-first-regressions.log.
+- Dithermath/guardsPASS. JARintegrity/diffcheckPASS; NOshader/nativebytechangesvspriorGPUvalidatedbuild.
+
+Install ../outputs/imagine-metal-surface-first.jar ->instance mods/imagine-metal-0.1.0.jar; backup ../backups/2026-11-17-surface-first/imagine-metal-0.1.0.jar. installation.json SHAauthoritative. ConfirmedPrismonly/noMinecraftbeforeinstall. No game launched thisturn; userofferedtestingpreviously. Originallatestlog preserved ../outputs/surface-first-before-latest.log forcomparison.
+
+Next: telluserinstalled, explainwhyDHfast and newpreview/fullqualitydistinction concisely, requestsameworldtest30–60s withoutdeletingcache. Needcheckfreshfarcoverage+detailprogress+warmreopen andwhetherloadingimprovesenoughtomatter. Existingwater/ditherpreserved. Avoidpromise50k orentireviewinsecondsuntilmeasured. Do not launchgamewhileusertests.
+
+---
+
+# START HERE — 2026-11-17 ready-only Streams regression FIX INSTALLED; user offered testing
+
+Latest user: "i can check if u tell me what to test once the jar is in". JAR already installed, SHA087281a845e2a197b6824a4a13e33778862e5a40d5abc0a8d8b80d6df3415a8e. Give concise cold/warm generation + nearby Streams + reopen test. Do not launch again while user tests. No50k claim.
+
+Diagnosis latestrun12:29–12:31:
+- Wrongly added Streams plan calls from prior turn caused LOD workers to construct distant drainage networks. Latest.log SR plate/network build lines on MetaLODSworkers through shutdown; actual rate~225–677 generated chunk-equivalent area/s, L0 vegetation21sinitial, L1density16sinitial. This worsened rather than fixed generation. Acknowledge this regression plainly.
+- Current pipeline generates LOD voxels from density directly, NOT fullMinecraftchunks first; nearby exactdensity, caves/overhangs and realfeaturevegetation can delay publishing a tile. No new surface-first/coarse-placeholder scheme added.
+- Earlier diagnostics printf bypassMinecraft LoggingPrintStream.println, so absence inlatest.log is not evidence native backend was off! Changed root/backend and disk-cache diagnostics to println(String.format), visible on next run. Native defaultsNEON as previous build; do not falsely say newest log proves it ranplain.
+
+Fixes in installedbuild:
+- LodStreams only queries plan after platesTouchingBox + platesReady prove all affected regions ready. Cold requests return cached seed base; never call networkFor or whenPlatesReady (even the latter can triggerwork). Bounded polling observes regions prepared byStreamsitself and dirties only affected columns+4neighbors, no globalremeshstorm. Weak outcome cache includes unchangedreadycolumns, avoiding repeated1024planlookup passes fromneighbor meshing. Closed-world guard, cachehit/stagecost diagnostics.
+- LodSolidSampler for exactnearL0/L1: final MIN sign short-circuit. Evaluate terrain then cavebranch only over Yrows where terrain can be solid, crop tosameYlattice; no signedmask interpolation. Maintains exact solid/air choices and surfaces, rawfar densityunchanged. Keeps currentnearaccuracy/caves. IsolatedTerrpaired3run full64x64 medians100.6->84.2msL0,168.6->147.4msL1 (modest15%; Streamsregressionfix is main win). No live result.
+- No shader/native changes versus previousGPUvalidatedditherbuild; no cacheversionbump or config/world/cachedeletion.
+
+Validation PASS:
+../outputs/ready-streams-sign-build.log (Gradlefullbuild)
+../outputs/streams-ready-check.log (productionadapterfakeenginefixture:32coldattempts0plan/gencalls, readyrevision+1024lookups, repeatreadyunchangedcached, closeguard; existingstore/channeltests)
+../outputs/solid-mask-density-final.log (96bitexactinterpvolumes,40vanillaroutervolumesplain/native, exactnearheights)
+../outputs/solid-mask-terralith.log (installedTerrpack:allnearblocksigns/heights vsoriginalpoint; fullL0/L1paired masks/heights identical3runs; farbitexact)
+../outputs/ready-streams-regressions.log (existinggeometry/scheduling/ingest/mask/lifecycle/ZIPfixtures)
+ci/metalods/dither_check.py PASS, gitdiffcheck PASS.
+
+Install: ../outputs/imagine-metal-ready-streams-solid-mask.jar copied to instance mods/imagine-metal-0.1.0.jar; rollback ../backups/2026-11-17-ready-streams-profile/imagine-metal-0.1.0.jar (previousc7e6b2...). installation.json updated.
+
+Attempted livecheck: Created isolated saves/MetaLODS profile 2026-11-17 by copying NewWorld(8), excludingmetalods/session.lock. Originalworld untouched. Prism CLI --launch 'Imagine metal' --world '<copy>' returned but did NOT start game (latest.log unchangedat12:31; processcheckPrismonly). CUA inventory succeeded; getAppPrism hung and userinterrupted it. No game/JFR/profile actuallyran. CUA namespace subsequentlyremoved; couldn't producecompletion_summary. Userofferedto test; stop launch attempts. Copy remains available for testing. No actualliveperformanceproof.
+
+---
+
+# START HERE — 2026-11-17 Streams/cache/native/dither INSTALLED
+
+User asks: still seed gen? Slow, appears to redo on world relaunch; latest12.02 screenshots show Streams mismatch; explicitly requested DH noise/dither handoff (three supplied DH reference images). All prior edits preserved, no subagents/push/game launch.
+
+Evidence:
+- Latest live run12:01–12:02 using prior block-surface build: ~1.1–1.8k generated chunk-equivalent area/s, L1 nearby surface ~16seconds per tile, trees costly. Previous isolated Terralith benchmark used NEON but live default was PLAIN (no nativeNoise flag). Candidly told user isolated benchmark missed live cost.
+- NewWorld(10) cache already saved464 gen9 columns,3304 gen8 columns and4 real2 region files. Progress tracks mesh area, so remeshing on every join can look like all seed generation repeats. Last accuracy build intentionally bumpedgen8->gen9; that forced a new pass. This build does NOT bumpversion.
+- Viewed latest12.02.27 and12.02.30: missing unfinished far coverage plus actual riverbed/land changes on handoff. Streams applies post-density changes; exact Terralith density alone is not full Streams parity.
+
+Installed changes:
+1. LOD nativeNoise defaults NEON (explicit plain/off preserved); server default unchanged. All previously validated native leaves still bit-exact. Updated sampler handles unaligned requests directly from compact corner volumes, reproducing vanilla volume interpolation order/repeated Y additions. Bounds prevent hidden giant dense volumes; fully inspected small physical volumes also stay bulk. This accelerates accurate nearby sampling without going back to a cheaper router.
+2. MetaStore reads gen8/gen8h L2+ when corresponding gen9/gen9h missing (those far values unchanged). L0/L1 requiregen9 accuracy data. Logs cache hits/misses/errors; HUD now counts cached columns reused, distinguishes mesh-area progress. Region file writes snapshot all chunk references before count+write, fixing concurrent snapshot corruption risk. Gen write failures now logged (first3). No cache/world/config deletion.
+3. Initial optional LodStreams adapter uses public engineIfPresent/plan/inChannel/bedY/waterSurfaceY from installed Streams2.17.1; no second engine is created, no world mutated. Channels reshape predicted seed/cached columns before captured chunks override; neighbor edge samples use same correction. Keeps underlying caves (only a short bed crust filled), clears old canopy/water above planned channels; uses vanilla water/gravel proxies. Changed results weakly cached per world. THIS IS PARTIAL CHANNEL SUPPORT, NOT full bank/lake/material/features reproduction. Java fixtures test voxel transforms and actual installed API signatures were inspected; live engine integration and screenshots NOT tested. Plan calls may add cold planning cost. engineIfPresent null leaves base until later meshing/actual capture, so don't promise complete elimination of all mismatches.
+4. edgeDither config defaults true. 16-block complementary screen hash transition at near edge. Near opaque, cutout depth prepass and translucent use same decision; masked LOD uses complement. LOD selection retains the overlap; fading waits for selected nonempty LOD meshes across every chunk that could hold faded near geometry. MetaLods.frame prepares current-frame pages before near draw; uploads spare ImFrame.lodFog.zw and MLFrame unusedcam components; ABI unchanged944bytes. Disabled in forward/debug/PBR/off states via Deferred.wanted; first-frame deferred-end fallback explicitly uses hard handoff. No noise on unsupported coverage. Visual scene acceptance pending.
+
+Verification:
+- Final offline Gradle :mod:build PASS, ../outputs/streams-cache-dither-build.log. Gradle test NO-SOURCE.
+-96 whole/batched interpolator volumes bit exact across XZsteps1..32,Ysteps1/2/4/8; full coarse under128MiB;40 actual vanilla graph volumes plain/native, nearby exact surface parity. ../outputs/sparse-near-parity.log.
+- Installed Terralith registry loaded through Minecraft loader: L0/L1 block density/sign/height parity against game point sampler, far volumes old/new bit exact. Full64x64 nearby isolated density+surface+3D ~107msL0/~170msL1, earlier198/546ms. This is NOT live rate or50k. ../outputs/streams-near-terralith.log.
+- Production MetaStore fixture: generated/captured save-close-reopen, concurrent region snapshots, compatible old far fallback and invalid oldnear isolation PASS; channel transforms10cases acrosslevels0..4 andnegativeY,biome,caves PASS. ../outputs/cache-streams-check.log. Fake palette only for standalone IO isolation; actual world cache files not modified byfixture.
+- Geometry/scheduling/ingest/336mask/ZIP fixtures PASS, ../outputs/cache-dither-regressions.log;576watercases/944byteABI PASS, ../outputs/cache-dither-water.log.
+-114688complementary noise decisions, shared near/far helper equality, prepass/opaque/translucent calls, readiness/first-frame/deferred guards PASS: ci/metalods/dither_check.py.
+- Actual Metal exact/plain libraries, near own_fs_g/own_fs_alpha/own_fs_tr specialization, deferred features on/off and all4LODpipelines PASS. Production ml_fs GPU dither branch over actual memoryless Gbuffers:146/256far pixels, bed retained elsewhere;12stackedwaterface/mask cases PASS. ../outputs/dither-pipeline-check.log. This does NOT test the full camera/world scene or near rasterization.
+- JAR integrity and git diff --check PASS.
+
+Installed ../outputs/imagine-metal-streams-cache-dither.jar to instance mods; backup ../backups/2026-11-17-streams-cache-dither/imagine-metal-0.1.0.jar. installation.json has hashes/limitations. Verified Prism only/noJava before copy. Ask user to restart/test; no new50k claim. Follow latest logs for native leaf replacement, cache-hit counters, stage costs, Streams API logs/errors, and whether edge transition activates. Main outstanding: actual cold/warm speed, native live parity/behavior, Streams plan semantics/banks/materials and full scene dither acceptance.
+
+---
+
+# START HERE — 2026-11-17 12:00 block-surface accuracy + bulk density INSTALLED
+
+User clarified latest two screenshots (11.47.29, 11.47.34): moved forward; LOD water became solid real ground. This is terrain misprediction, not only water shading. User wants accurate smooth handoff AND earlier ~50k chunks/sec. Do not claim either live acceptance or 50k achieved.
+
+Changes this turn:
+- MetaLODS L0/L1 now samples the actual final density at integer block heights/column centers via LodSurfaceSampler. No interpolation of already squeezed/caved corner values for nearby surface detection. Stripes bound scratch memory. Keeps exact sampled nearby density for the 3D carve; eliminates the second approximate volume and its false solid/air decisions. L2+ retain existing sampling/detail. Actual terrain is still voxelized.
+- Copied inspectable graphs carry SparseRoot lattice alignment metadata. Fully aligned requests use one bulk volume instead of thousands of safety batches. Unaligned/unsupported graphs retain bounded sampling. Mod non-record samplers conservatively disable whole-volume optimization.
+- Per-noise shared atomic diagnostics opt-in via -Dmcopt.lod.nativeNoise.stats=true (or genBench), avoiding contention; normal per-stage timings retained.
+- Generated cache version 9 (gen9/gen9h), preserves gen8 and real2. No cache/world/config deletion. Native and water shader bytes unchanged from the prior installed build.
+
+Validation:
+- Full offline Gradle :mod:build PASS; test NO-SOURCE. Log ../outputs/bulk-surface-build.log.
+- density_check.py PASS: 24 interpolator volumes, four full coarse tiles under 128MiB, aligned layouts; 40 vanilla real-router volumes across plain/native, plus 1024 nearby surface heights match actual block-density point sampling. ../outputs/bulk-surface-final-parity.log.
+- New pack_router_check.py loads this instance's installed Terralith_26.3_v2.6.5+26.3.jar through Minecraft RegistryDataLoader, no server/world opened. Nearby cells 1 and 2: all sampled block densities/signs and 128 heights match the original final-density point sampler. L2/L3/L4 full volumes old bounded vs bulk bit exact. ../outputs/terralith-bulk-surface-check.log.
+- Terralith full L4 final warm timings ~210 ->164ms in isolated first run; final run with concurrent vanilla fixtures median222->174ms. Around20–25% density-stage improvement, NOT10x/live50k. Nearby full64x64 surface+3D sampled once ~198ms L0,546ms L1. More accurate near sampling costs more; no whole-game rate claim.
+- Geometry/ingest/scheduling/mask/ZIP fixtures PASS, ../outputs/bulk-surface-regressions.log. git diff --check PASS. JAR integrity PASS; exactly12 existing Java entries changed,2added,0removed; shaders/native identical to prior installed JAR.
+
+Installed ../outputs/imagine-metal-block-surface-bulk.jar into instance mods/imagine-metal-0.1.0.jar, backup ../backups/2026-11-17-block-surface/imagine-metal-0.1.0.jar. installation.json has hashes. Verified no Java/Minecraft process before copy, Prism only. No game launched, no subagents/push. Keep preexisting staged/unstaged edits.
+
+Outstanding: actual game screenshots and cold/warm rate; 50k not achieved/proven. Streams Reflowing later river edits, structures/features may still differ before captured real chunks. Fixture uses Terralith actual pack but arbitrary fixed seed, NOT exact screenshot world seed or Streams generation hooks. No crossfade added; fixing density prediction is the priority. Follow up on actual next-run logs and screenshots before promising visual smoothness.
+
+---
+
+# START HERE — 2026-11-17 throughput + GPU-tested water INSTALLED
+
+Supersedes the density-only / unverified-water status below. User requested repair of near-zero LOD loading and continued work while asleep. Read the existing handoff; preserved all prior staged/unstaged work, worlds, configs, gen8/real2 caches. No subagents, push, or game launch. Confirmed via permitted process inspection that only Prism Launcher remained (no Java/Minecraft process) before replacement; latest.log ends in shutdown.
+
+## Diagnosed and fixed
+- **Sparse density still doing dense work:** the previous 16-block batching prevented the giant heap allocation, but Minecraft's interpolator still filled every intermediate block when the LOD step was a multiple of its lattice width. `LodLatticeSampler` passes aligned sample volumes directly to the interpolator's input. Nonaligned requests retain the actual game sampler and bounded batching. `LodNativeNoise` now also copies interpolation nodes when native noise is off; no noise leaves are replaced in that mode. Native backend and final world router remain intact. No approximation, cache-version bump, or cache deletion.
+- **Workers parked behind the same tile:** the old stripe index `Long.hashCode(packedKey) & 63` collapses many adjacent x coordinates onto the same lock. Four sibling columns also blocked four workers behind one tile. `TileGate` claims the exact tile key without waiting and holds ownership through publication of all four columns. Busy sibling requests are deferred; the worker continues other work. Gate release is in finally.
+- **Distant coverage starved:** the newest log generated only L0 tiles while about 5,000 jobs waited. `TileJobs` fairly services near detail (two slots), selected distant levels >=2 (one slot), and deferred siblings (one slot), borrowing empty lanes. This does NOT enable coarse-first placeholders or lower detail/distance. Existing per-lane view/distance priorities remain.
+- **Real-chunk ingest could starve all generation:** when >192 snapshots waited, every worker formerly drained ingest exclusively. It now uses at most three of four loop turns for ingest under that pressure, retaining a generation slot.
+- **Unnecessary seed work under captured terrain:** derive now reads real chunks first; fully captured columns skip the seed tile whose every voxel would be overwritten. Partial columns still use the same generated base.
+- **Misleading diagnostics:** generation logs explicitly label chunk-equivalent area, retain actual tiles/s, and now include density / biome / material stage timings.
+- **Water rewrite validated and included:** full solid/lighting/water/lighting sequencing, separately shaded bed transmission, and thickness preservation from the earlier candidate are in the installed build. Found/corrected another issue: `im_defer_fs` preserved water's geometric `m.n` but still set shading `m.N` upward on sides/bottoms. Both normals now reconstruct the actual face axis because g3.ba holds thickness for water.
+
+## Verification completed (all PASS)
+- Full offline `:mod:build --no-daemon`: Java + ARM64 native + final JAR. Ran outside sandbox because Gradle's file-lock socket cannot initialize inside it. `../outputs/throughput-build.log`. Gradle test is NO-SOURCE; the standalone fixtures below are the regression tests.
+- Minecraft's real interpolator: 24 whole/batched volumes including negative/nonaligned origins and steps 1..32; four coarse-volume comparisons under 128 MiB heap; aligned LOD layouts bit-exact. Level-3 inner samples 1,155,200 -> 207,025; level-4 4,291,249 -> 207,025. `density-throughput-check.log`.
+- Actual compiled Overworld, Amplified, floating-island and End final-density graphs, separate cached contexts: 20 volumes plain + 20 native/NEON, including nonaligned origins. Every float bit-exact. `density-router-final.log`. These are vanilla router tests, not this instance's modded world acceptance.
+- Full 65x49x65 L4 Overworld density volume, 3 paired runs, both sides plain backend: median **8238.5 -> 318.6 ms (25.9x)**, all 207,025 values bit-exact each run. `full-tile-density-benchmark.log`. This measures the density stage only, NOT live chunks/sec, total tile time, FPS, or the instance's datapack router.
+- Production gate/queue fixture: eight formerly colliding independent tile keys, 24 simultaneous claims of one tile, ownership/release, distant/deferred fairness through 1,000 fine jobs, priority order, empty-lane lending and all-lane shutdown. Geometry, six submerged solid faces, water edges, capture deduplication, ingest ordering, 336 ownership cases, cooperative ZIP access all pass. `geometry-scheduling-final.log`.
+- 576 shared water math cases + Java/native/MSL 944-byte ABI pass. `water-math-final.log`.
+- Actual Metal libraries compile on this Mac outside sandbox: exact/plain terrain + sky, base terrain, bloom/light, patched entity/item/particle shaders. `other-metal-final.log`.
+- Actual render pipelines: deferred lighting exact/plain with all feature constants on/off (4), LOD ML_MASK false/true x ML_WATER false/true (4), matching RGBA16Float + RGBA8 + RGBA8 + RGBA16Unorm + R32Float + Depth32Float formats. `water-pipeline-check.log`.
+- **Actual offscreen GPU pixel test** of production `ml_fs` with fixture vertices, real memoryless G-buffer attachments and sequential overlapping water draws: all six faces x both mask variants. Verifies accumulated thickness still reaches the opaque bed, water depth/material, and the existing shaded bed colour survives water draws. The final deferred shader normal correction is compiled in both lighting pipelines; this fixture tests G-buffer production, not whole-scene lighting.
+- Final JAR integrity/content checks and `git diff --check` pass. No unexpected removed entries; new classes and updated shader/native resources present.
+
+## Installation and rollback
+- INSTALLED `/Users/jack/Documents/instances/Imagine metal/minecraft/mods/imagine-metal-0.1.0.jar`
+- SHA256 `3ec1e6bd43201ebf603d53a291d0385730764085b9ad95981b63fc7286dd6068`
+- Candidate `../outputs/imagine-metal-throughput-water.jar`, same SHA256.
+- Previous density-only build backed up at `../backups/2026-11-17-throughput/imagine-metal-0.1.0.jar`, SHA256 `477dd3b422fa56820632abefef53447820a4e5627cd5c89c1cd5ae6c0c4bb45a`.
+- `../outputs/installation.json` is authoritative. Older candidates/backups kept. Current full source now matches the installed full build; the old warning that a full build differs from the density-only installation is superseded.
+- Rollback with Minecraft closed: copy that backup over the installed JAR. No config/cache/world changes required.
+
+## Acceptance still not performed
+No game was launched, honoring the handoff. Do not represent the density-stage benchmark as measured whole-game generation speed or the GPU fixture as matched gameplay screenshots. On next user launch, measure cold/warm tiles/s and stage timings; revisit (-1327,113,1752) / (-1338,97,1728) for the near/far sea boundary and coverage. Retest survival -> title -> creative -> survival and above/below water, styles/WaterFx, sunsets and cloud reflections. Source/fixture fixes have passed; complete scene acceptance is unmeasured. Existing seed-generation limitations for structures, features and Streams edits remain (captured chunks are authoritative); cosmetic DH dithering remains deferred under the earlier priority.
+
+## Reproduce
+`JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home GRADLE_USER_HOME=../gradle-home ./gradlew --offline :mod:build --no-daemon`
+`JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home sh ci/metalods/check.sh`
+`python3 ci/metalods/water_check.py`
+`JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home GRADLE_USER_HOME=../gradle-home python3 ci/metalods/density_check.py`
+The density script runs real router parity checks on both backends on ARM64 macOS (plain only on other hosts). RouterCheck's optional argument `bench` runs the three full-volume paired measurements. `ci/metalods/pipeline_check.m` is the reusable Metal pipeline + GPU pixel probe; compile with clang and Foundation/Metal frameworks, run against generated exact/plain terrain and production metalods.metal on an accessible Apple GPU.
+
+---
+
+# START HERE — 2026-11-17 latest screenshots: density fix INSTALLED; water rewrite NOT installed
+
+Supersedes the earlier recovery status below. Active checkout remains this directory. Preserve all staged/unstaged work, worlds, configs and gen8/real2 caches. No subagents, GitHub push or game launch this session.
+
+## Evidence from the three newest instance screenshots
+- `2026-11-17_02.07.25.png`: opaque grey LOD water meets transparent near water at a hard straight boundary; biome alpine_highlands near (-1327,113,1752).
+- `2026-11-17_02.07.32.png`: terrain terminates in vertical cutoffs and missing distant coverage, near (-1338,97,1728).
+- `2026-11-16_18.51.42.png`: magenta/black inventory/player textures. This PRECEDES the installed recovery build; do not present it as a new regression after cooperative shutdown.
+- Latest log is from 02:04–02:07 Nov 17 and ends with shutdown. At **02:06:34** MetaLODS logs `generation from the seed stopped (java.lang.OutOfMemoryError: Java heap space): only real chunks become LODs`. Stack: `DensityBuffer` -> `InterpolatedFunction$Sampler.sampleWithNonBlockStep` -> `LodNoise.generate0:283` -> `MetaGen` -> `MetaWorld.generated`.
+- Coarse L4 surface generation measured ~40–41 seconds per tile. Generation then stops at 52 tiles while thousands of empty/visited meshes finish. The HUD's huge count represents summed mesh area, NOT unique generated Minecraft chunks; missing seed data can also mesh as empty. This explains why the apparent completed area was misleading. No new game throughput benchmark.
+
+## Installed: bounded density sampling and honest HUD
+- `LodDensityBatch` splits horizontal sampling requests into at most 16-block spans. The game's interpolator otherwise expands a sparse 65x65 coarse request across its full physical footprint, allocating/interpolating intermediate cells that were never requested. Same router and sample positions; no terrain approximation or cache-version change.
+- Routed ordinary/fine volume, slide partial volume, terrainVolume and coarseSurface through the helper. Climate/material paths unchanged. Seed generation failures now gate waiting generation calls, and the HUD explicitly reports stopped generation instead of a zero-speed progress display; normal progress is labeled LOD mesh area in chunk-equivalents.
+- Real Minecraft interpolator fixture (`DensityBatchCheck.java`, `density_check.py`): 24 whole/batched cases **bit-exact**, including negative/unaligned coordinates and steps 1,2,4,8,16,32. Four full 65x49x65 coarse volumes match point sampling under **128 MiB** heap; largest observed inner interpolation request **4500 floats**. This is a regression test, not measured whole-game heap use or terrain parity in a live world.
+- Direct JDK25 compile of all changed Java classes PASS. Existing geometry/submerged faces, ingest ordering, ownership/coverage policies, cooperative ZIP checks PASS. Water CPU math + 944-byte ABI PASS. Gradle cannot start: sandbox denies its file-lock listener socket (`SocketException: Operation not permitted`). Used existing resolved game/dependency classpath and direct javac; no Gradle build claim.
+- Packaged by copying the known recovery JAR and overlaying **only 9 density/MetaWorld class entries**. Verified exact changed-entry allowlist and ZIP integrity. Native binary and shader resources in the INSTALLED JAR remain the recovery versions.
+- Installed candidate: `../outputs/imagine-metal-density-bounded.jar`; SHA256 `477dd3b422fa56820632abefef53447820a4e5627cd5c89c1cd5ae6c0c4bb45a`.
+- Installed at instance `minecraft/mods/imagine-metal-0.1.0.jar` after confirming latest log ends in shutdown. Process enumeration is unavailable in the sandbox; no game was launched by this agent.
+- Previous recovery preserved at `../backups/2026-11-17-density/imagine-metal-0.1.0.jar`, SHA256 `3ff8beae7f901a8786063b0ad1da71dba1738564b6598429d355a7cd4eeabe8b`. Older backups remain intact.
+
+## Water rewrite: source and separate candidate only, NOT installed
+- Added solid-only then water-only MetaLODS draws (ML_WATER vertex specialization). All masked/unmasked solids finish before the first lighting flush; their shaded bed stays in colour0 tile memory. Water writes its surface G-buffer/depth next and a second lighting flush touches only water pixels.
+- `ml_fs` reads prior opaque depth to estimate ray thickness; g3.b stores thickness/64 for water (land retains its oct normal). If nearer water replaces farther water, the prior thickness is added so the opaque bed distance survives. Water still uses its geometric face normal.
+- `im_defer_fs` reads colour0 and uses shared `imWaterTransmitted`, volume alpha and Fresnel alpha to composite over the separately shaded bed in linear light. Near `own_fs_tr` uses the same transmission helper; CPU check verifies the near legacy equation is preserved.
+- Added native `mco_im_g_water_phase`, FFM binding, four mask/water PSOs and two water/non-water vertex functions. Java closes the water phase in finally. Frame ABI remains 944 bytes.
+- Java + ARM64 native dynamic-library compilation PASS (`../water-native.log`). Shader/pipeline compilation NOT performed: sandbox has no Metal device, `xcrun metal` unavailable. CPU transmission checks do NOT prove GPU correctness.
+- Candidate: `../outputs/imagine-metal-water-transmission-unverified.jar`; SHA256 `b5d1a3d32c797561e56c002bbcf7c71de7d0748181429e696152edfe882675f1`. Includes new shaders/native/classes. **Do not silently install it as though verified.** It needs actual Metal compilation/specialization/pipeline validation, then matched in-game acceptance.
+- IMPORTANT: rebuilding the entire current source produces the water rewrite too. Installed source subset is density/MetaWorld only. To keep the verified density candidate, use its existing JAR, not an unqualified full rebuild. Source changes are all left unstaged as found/edited; no user changes discarded.
+
+## Next actions
+1. Fresh game with the installed density JAR: revisit the Nov 17 coordinates; compare cold and warm gen8 coverage, actual generation tile throughput, worker stalls and errors. No cache deletion. The 128 MiB fixture is NOT a promise about game RAM/FPS.
+2. On a Metal-capable permitted environment compile generated `../outputs/msl-water/terrain_im.metal`, plain variant, and metalods. Specialize ML_MASK false/true x ML_WATER false/true, both vertex variants; create full matching pipelines (RGBA8/RGBA8/RGBA16Unorm/R32Float G-buffer).
+3. Validate water frame order/attachments, shared depth reads, same-pixel multiple water faces, above/below water, shallow/deep, WaterFx on/off, water styles, sunset, clouds and near/far transition. Depth ratio uses the same reversed-Z approximation as nearby water; LOD refraction remains unshifted. Additional geometry/normal/fog differences can remain.
+4. Only after shader/pipeline validation install the water candidate with a backup. Compare matched screenshots. If rendered validation is unavailable, retain it as an unverified candidate and say so.
+5. Continue world-switch acceptance from older recovery handoff. The old magenta screenshot alone does not establish current behavior. Cosmetic DH dithering stays deferred.
+
+Re-run density fixture after dependencies are present:
+`JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home GRADLE_USER_HOME=../gradle-home python3 ci/metalods/density_check.py`
+
+---
+
+# START HERE — 2026-11-17 recovery candidate INSTALLED
+
+Supersedes the Nov 16 handoff below. User's latest priority: gamebreaking world switches, wrong generated terrain, missing underwater LODs, generation throughput. Cosmetic DH transition dithering was deprioritized. Do not re-audit the original 65 images.
+
+## Completed source changes this session
+- **Submerged geometry:** MetaMesher formerly emitted surfaces only against air; submerged solid seabeds/cliffs/ceilings against water had no faces. Added solid/leaves-to-water faces on all six axes, retaining water-to-water culling. The new production-mesher fixture failed before the change and passes after it. This directly addresses absent underwater terrain; rendered pixels still need comparison.
+- **World-switch resource hazard:** archived `2026-11-16-2.log.gz` shows old MetaLODS workers generating after disconnect, then shared ZipFS `ClosedChannelException` on vanilla structures, followed by failed registry/datapack loading. MetaWorld.close interrupted workers which may read texture resources via LodColors. JDK 25 standalone reproduction confirms an interrupted reader closes the shared ZIP channel for later readers. Shutdown is now cooperative, queues cleared at level detach (OwnSolidExtractorMixin), old-world GPU-height publication blocked, height map reset. No interrupt of resource readers. This is a confirmed hazardous shutdown mechanism; the entire reported purple inventory/black-hand sequence was not reproduced live by this agent. A poisoned running JVM must be restarted; do not remove datapacks to work around it.
+- **Wrong seed terrain:** MetaGen now selects the world's final density router, not the vanilla sloped_cheese replacement and hard-coded top slide. The old stable(OVERWORLD) test checks a registry key, not equivalence of datapack terrain operators. Surface and 3D carve now use the same actual router. Generated cache is gen8/gen8h; gen7 files and real2 remain intact. This remains voxel sampling and cannot reproduce all structures/features/Streams edits before actual chunks are captured. No claim of exact block-for-block parity. Initial gen8 generation may be slower; benchmark required.
+- **Redundant work:** compare captured level-0 RLE including light before publishing/invalidating meshes; identical captures no longer remesh every dependent LOD. Stable striped generation locks prevent the old lock-removal-before-cache-publication race from generating the same tile concurrently. LatestIngest gates publication so older snapshots finishing last cannot overwrite newer ones, including after clear/close. No throughput increase claimed without measurement.
+- **Coverage:** removed distance-only coarse fallback discard (it erased the selected parent before fine or near replacements existed). If the drawn-near mask is unavailable, retain LOD coverage; explicit legacy handoffDrawn=false behavior remains. hideUnderReal=false now also bypasses CPU allMasked column rejection.
+- **Diagnostics:** `-Dmetalods.coverageDebug=1` material/opaque coverage, `=2` mask candidates, `=3` log distance depth, default 0. Near opaque grey, LOD solid orange, LOD water cyan; mode 2 additionally shows normally masked LOD candidates green where depth-visible. Magenta means no opaque depth. Near translucent terrain is suppressed to inspect the opaque buffers, so magenta alone is NOT proof normal translucent water is absent. Requires deferred, HDR, airPass and classic transparency; keep ordinary Imagine debug=0, shaders on, PBR-pack mode off. Mask mode changes selection/coverage and may request extra tiles. Colors can still be affected by later temporal/postprocessing/entity overlays; use static captures with TAA/MetalFX off for diagnosis. Diagnostic code compiled, not viewed in game.
+
+## Verification actually completed
+- Final Java/native/JAR build PASS, `../coverage-build-final.log`. Gradle test NO-SOURCE.
+- CPU production RLE/mesher fixtures PASS including four horizontal water edges and all six submerged solid faces; unchanged/edited capture distinction PASS.
+- Deterministic reversed-ingest completion, stale cleanup, independent chunks, clear/close publication checks PASS.
+- 336 extracted shader ownership-math combinations (four edges, negative coordinates, levels 0–5) PASS. Coarse/fine traversal checks are source guards, NOT a rendered transition test.
+- 576 water math cases + fog/volume/944-byte ABI PASS. `git diff --check` PASS.
+- **Actual runtime Metal compilation now PASSED outside the sandbox** (sandbox cannot enumerate a Metal device): terrain with OWN_EXACT_POS/OWN_QREC and plain IM_SHADE, base terrain, sky, bloom, light, metalods. ml_fs specialized with ML_MASK=false AND true. This supersedes previous "Metal unavailable" notes. No complete render-pipeline draw or screenshot validation. Probe source/binary and generated sources were used locally; evidence summary in `../outputs/recovery-validation.txt`.
+- No Minecraft launched by this agent. User confirmed Minecraft closed before replacement; latest.log also ended with shutdown. No world, config or existing cache deleted/modified by the agent. Normal generation on next run will populate gen8.
+
+## Installation
+- Installed SHA-256: `3ff8beae7f901a8786063b0ad1da71dba1738564b6598429d355a7cd4eeabe8b`.
+- Installed path: `/Users/jack/Documents/instances/Imagine metal/minecraft/mods/imagine-metal-0.1.0.jar`.
+- Previous experimental JAR backed up: `/Users/jack/Documents/instances/Imagine metal/renderer-work/backups/2026-11-17-recovery/imagine-metal-0.1.0.jar`; SHA-256 `ce6999e4110b5dd5b93903b797949ff1def0005a202dacb9a7c0b8fa608011ee`.
+- Candidate: `/Users/jack/Documents/instances/Imagine metal/renderer-work/outputs/imagine-metal-recovery-candidate.jar`. Manifest/rollback: `../outputs/installation.json`. Original pre-audit backup remains preserved too.
+
+## Evidence and immediate acceptance checks
+- `docs/audit-2026-11-16/` contains contact sheets of the 15 newly supplied Nov 16 images (18:39–18:44), inventory and focused findings; only original 01:41:56 was reopened at full size to resolve coverage vs fog. Nov 14 sheet 3/4 consulted. Original audit preserved.
+- Fresh JVM: open survival, quit to title, open creative, then return to survival. Confirm resources, inventory and hands remain valid; inspect logs for ZipFS/registry failures and old-world worker activity.
+- Revisit 18:39:36 underwater and 18:40:39/44 terrain mismatch, plus 18:41:17–49 near/far sea. Underwater should now have actual seabed/cliff geometry. Compare normal and coverage/depth modes only if symptoms persist.
+- Measure cold gen8 and warm cache separately; correct final density is more expensive than the old terrain shortcut. No FPS/chunks-per-second promises. Existing screenshot progress rate counts ready mesh area rather than literal newly generated server chunks.
+- DH-style dither remains deliberately deferred under user's latest gamebreaking-first priority. A safe implementation needs both candidates' pixel coverage (separate near/far depth or equivalent), a complementary stable noise choice only where both exist, and sole-candidate fallback. Current deferred LOD water is opaque; do not independently discard near and far water.
+
+## Continuation prompt for Claude
+Continue in /Users/jack/Documents/instances/Imagine metal/renderer-work/Imagine-Metal. Read HANDOFF.md's newest section, docs/audit-2026-11-16/findings.md and ../outputs/installation.json. Preserve staged/unstaged changes, worlds and caches. Recovery candidate is installed; Java/native build, runtime Metal compilation and CPU checks passed, but no live acceptance test by Codex. Priorities: verify survival→title→creative→survival with no ZIP channel/resource corruption; underwater seabed now emitted against water; final-density world-router gen8 terrain comparison and measured cold/warm throughput. Review cooperative cancellation, duplicate captures, tile locking and latest-ingest publication. User did not notice white bands recently; prioritize terrain/underwater/world switches. Do not redo the full screenshot audit. Cosmetic dither is deferred. Record actual in-game outcomes and fix remaining observed failures rather than treating these source checks as visual proof.
+
+---
+
+# START HERE — 2026-11-16 water/geometry continuation
+
+This section supersedes the Nov 15 status below; older Claude notes are preserved as history.
+
+## Working location / workflow
+- ACTIVE checkout: `/Users/jack/Documents/instances/Imagine metal/renderer-work/Imagine-Metal`
+- GitHub: `swungback/Imagine-Metal`, base `metalods` at `7173d02ae1b9d003aa7d0bbe337737ef83187f3f`; local `screenshot-audit`, changes uncommitted. Some initial changes are staged, newer ones unstaged: inspect both.
+- Old checkout under Documents/Codex is stale. `/Users/jack/minecraft-metal-shaders` is the separate mcopt repository and was not modified.
+- User explicitly authorized continued fixes and replacing the mods JAR when done. Candidate is experimental: successful host build does not validate MSL or visuals.
+- Follow Claude's reproduce → source change → CPU/Metal/build checks → backup/install → screenshot comparison → handoff workflow. GitHub push dry-run failed with 403; no push/CI/release occurred. Do not claim remote validation.
+
+## New fixes beyond the Nov 15 mask/edit/empty-chunk/neighbor changes
+1. Shared near/LOD water body tint, ripple luminance, Fresnel surface alpha and deep-volume alpha in `lighting.metal`; deferred water now uses these in `terrain.metal`. Removed old RGB `(0.42,0.66,0.72)` correction that tinted reflections too.
+2. Water side/bottom normals retain their face orientation in `metalods.metal`; forced full skylight applies only to top water faces.
+3. Extra far-distance haze shared by opaque air pass and near translucent surfaces. Added ImFrame.lodFog; Java/native/MSL frame now **944 bytes**, existing offsets preserved.
+4. Internal water skirts removed in `MetaMesher.facesX/facesZ`; actual exposed sides retained. Targets rectangular opaque/reflection strips, not a proven cure for the white underwater band.
+5. Removed `MetaChunks.build` zero-skylight air fill. Dark open air below an island is not enclosed rock: previous logic could extend water/stone from below to the island. Captured air stays air. Existing cached corrupted captures need recapture; **no cache/world deletion**. Generated tree pillars remain open.
+
+## Checks actually run
+- Final `:mod:build --no-daemon` PASS (Java/native ARM64/JAR); log `../water-build-final.log`. Gradle test has NO-SOURCE.
+- `JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home sh ci/metalods/check.sh` PASS: production RLE/mesher fixtures, including internal-water-face rejection and exposed-face retention.
+- `python3 ci/metalods/water_check.py` PASS: 576 shader-math cases, volume/fog monotonicity and gates, Java/native/MSL 944-byte size. Extracts actual helper bodies into a C++ adapter; **not MSL compilation**.
+- Added both CPU checks to `.github/workflows/build.yml` before existing Metal checks.
+- `git diff --check` PASS. Metal compiler missing locally; no accessible Metal device. GPU specialization / screenshots remain untested.
+- No direct Minecraft snapshot-capture regression test, no performance/memory measurements. Multiple ingest workers can still finish repeated snapshots out of order; reproduce/fix before claiming robust rapid-edit handling.
+
+## Next actions / acceptance
+1. Compile all Metal variants using existing CI workflow on a permitted remote or full Xcode environment; specialize both ML_MASK variants. Runtime failure: restore backup (installation manifest next to outputs).
+2. Capture matched above/below-water shots at 22:30:23 and underwater ~(-54.12,50.45,67.56), facing south; deep/shallow water, elevated lakes, waterfall sides, sunset, WaterFx off and waterStyle variants. LOD lacks a separately shaded seabed: shallow transmission is still approximate. Underwater fallback and pass-order mismatches remain open.
+3. Revisit island at 01:18:11; loaded chunks recapture old dark-air fill. If a curtain persists, inspect generated/real provenance before changing generation or caches. Monitor RLE size/meshing cost now that caves remain air.
+4. Exercise edits and last-block removal near x/z=-16,0,16, repeated rapid edits, unload/reload, dimensions. Event hooks and asynchronous ordering need runtime checks.
+5. Remaining foliage, cloud, motion and performance findings: `docs/audit-2026-11-15/findings.md`. All 65 screenshots indexed with hashes and six contact sheets. Two user attachments are Complementary+DH references, not Imagine failures.
+
+## Installation completed — Nov 16
+- Replaced `Imagine metal/minecraft/mods/imagine-metal-0.1.0.jar` after latest game log ended with shutdown.
+- Installed SHA-256: `082a5b53020910210549a8b7898317db1517c165aaf97dec1816753183536942`.
+- Original preserved outside mods at `Imagine metal/renderer-work/backups/2026-11-16-water-audit/imagine-metal-0.1.0.jar`.
+- Original SHA-256: `ce6999e4110b5dd5b93903b797949ff1def0005a202dacb9a7c0b8fa608011ee`.
+- `../outputs/installation.json` has exact paths/hashes and rollback; candidate and source patch are in that outputs directory.
+- No game launched, configs changed, caches erased, or visual result claimed. First launch must check runtime shader errors.
+
+## Rebuild
+```sh
+cd '/Users/jack/Documents/instances/Imagine metal/renderer-work/Imagine-Metal'
+export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home
+export GRADLE_USER_HOME='/Users/jack/Documents/instances/Imagine metal/renderer-work/gradle-home'
+sh ci/metalods/check.sh
+python3 ci/metalods/water_check.py
+./gradlew :mod:build --no-daemon
+```
+
+---
+
+# Imagine Metal: handoff (2026-11-15 screenshot audit)
+
+## START HERE: 2026-11-15 — local audit candidate BUILT, NOT deployed, NOT visually verified
+
+- User request: inspect **all screenshots** in `~/Documents/instances/Imagine metal/minecraft/screenshots`, especially Nov 13
+  22:29:32 onward; compare with actual renderer, distinguish proof from hypotheses, implement defensible fixes, leave a
+  resumable handoff in Claude's existing style. Two clipboard attachments are **Complementary + DH reference images**.
+- Correct repo: `https://github.com/swungback/Imagine-Metal`, **metalods** branch. Base
+  `7173d02ae1b9d003aa7d0bbe337737ef83187f3f`. Local branch `screenshot-audit` at
+  `/Users/jack/Documents/Codex/2026-11-15/inspect-all-minecraft-screenshots-in-documents/work/Imagine-Metal`.
+  The user-supplied `/Users/jack/minecraft-metal-shaders` is the separate mcopt backend and was NOT edited.
+- Read `docs/audit-2026-11-15/findings.md` first: 12 issue categories, source symbols, evidence, confidence, fixes and retests.
+  `inventory.md` accounts for all 65 PNGs, dimensions and SHA-256; `contact-sheets.html` covers every image. All reviewed at
+  contact-sheet size; major seam/underwater/cloud/geometry examples also full size. Reference images are not our failures.
+- Base `metalods.metal` exactly matches local fix9c JAR; fix9c SHA-1 `77419cf549d379bfcafd0bda26861e3c8854e227`.
+  The Nov 14 01:18+ images cannot be assigned to fix9c just from their date; previous handoff only says built, not deployed.
+  18:18:16 and 18:46:29 explicitly identify Gael's shader. Current Imagine Metal/backend JARs are disabled. No instance
+  config, mods, worlds or caches were changed. No GitHub push, CI run, release or in-game test this session.
+
+### What changed (source defects confirmed; screenshot causality not overclaimed)
+1. `imaginemetal/shaders/metalods.metal:ml_fs`: solid vertical faces test 0.02 blocks inside their owning voxel for the
+   real-terrain mask. Formerly a +X/+Z face at a chunk boundary floored to the next chunk, potentially discarding a needed
+   wall or retaining a duplicate. Water sides retain fix8's deliberate front-cell test. This is NOT a proven cure for the
+   underwater white band.
+2. `MetaLodsClientLevelMixin`: forward actual `sendBlockUpdated` state changes to MetaLODS. `MetaLods`: coalesce per chunk,
+   wait 150ms after its latest edit, capture at most 4 edited chunks per frame, clear edits on world change. Previously the
+   LOD copy only refreshed on load/unload. Relevant to the Nov 14 18:05 broken-block report, but near terrain's own stale
+   section publication remains an alternative cause. Stress-test rapidly repeated edits / worker completion order.
+3. `MetaChunks.capture`: accept an entirely empty chunk, so removing the last block can erase its cached LOD geometry.
+4. `MetaWorld.integrate`: real chunk updates dirty adjacent mesh columns when touching their border, not just the containing
+   column. Neighbors' face culling depends on that edge. Uses floorDiv/floorMod for negative chunk coordinates.
+5. Added `ci/metalods/check.sh` / `GeometryCheck.java`: CPU production RLE/mesher fixtures with a tiny test-only palette and
+   nullable annotation stub. No Minecraft registry boot or GPU required.
+
+### Validation actually run
+- JDK: `/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home`; Gradle wrapper 9.5.1.
+- `GRADLE_USER_HOME=<chat>/work/gradle-home JAVA_HOME=<above> ./gradlew :mod:build --no-daemon`: **PASS**, Java + native ARM64
+  dylib + JAR. Gradle `test NO-SOURCE` is NOT a passed gameplay suite. One FSEvents warning did not prevent compilation.
+- `JAVA_HOME=<above> sh ci/metalods/check.sh`: **PASS** — empty replacement, floating shelf, changed neighbor edge, thin
+  waterfall rejection, half-occupied water preservation. These do not verify event hooks or rendered pixels.
+- `git diff --check`: **PASS**.
+- Metal shader validation **unavailable**: `xcrun -sdk macosx metal --version` cannot find the tool. Runtime library compile
+  could not run; an independent MTLCreateSystemDefaultDevice probe returned no device. No valid shader compilation result.
+- Build artifact: `mod/build/libs/imagine-metal-0.1.0.jar`; exported as `outputs/imagine-metal-audit-unverified.jar` in this
+  chat. `outputs/SHA256SUMS` identifies deliverables. Outputs also include source ZIP, binary patch, full handoff and audit.
+
+### Still open — do not mark these fixed
+- **Water color/reflection mismatch:** real water transmits/absorbs the actual seabed; deferred LOD water applies a deep-water
+  approximation and fixed `(0.42,0.66,0.72)` correction. Needs shared water math/data, not another screenshot-specific tint.
+- **White underwater band** at 01:41:54/56: inspect mask/depth/material views; distinguish missing coverage from fogged water.
+- **Island curtain** at 01:18:11: earlier “coarse stone underside” explanation is inadequate. Dump tile level/provenance/RLE;
+  inspect MetaGen density carving, heightfield mode, MetaChunks zero-skylight air filling and old caches separately.
+- **Tree towers / near-far foliage changes:** generated impostor canopy is a solid vertical leaf interval; biome tint/model
+  differences and binary handoff contribute. Complementary+DH references show dithered overlap; adding discard only to LODs
+  would make holes. Align material/coverage first, then complementary world-stable overlap in both paths.
+- **Water through clouds / leaf blur:** fix9c already has attempted fixes. Verify their build and test before reapplying them.
+- **Ore/diamond glow, cave look, animal trails:** fixes/preferences in older notes preserved; motion needs video/frame series.
+- **FPS/heap:** reported symptoms, not proof of a leak. No performance improvement measured; new edit captures add bounded
+  per-frame work but still need generation/ingest stress testing.
+
+### Next session, in order
+1. Compile Metal / specialize both ML_MASK pipelines on GPU or CI. Build success alone does not validate runtime MSL.
+2. Test edited chunks, last-block removal, neighbor remesh and mask ownership at x/z=-16,0,16. Rapid edits, unload/reload,
+   dimension change; monitor queue/perf. Do this in a copied test world.
+3. Ocean above/below, elevated lake, island; see findings for coordinates and screenshot names. Preserve original caches.
+4. Cloud/water ordering and bushy leaves with native scale vs MetalFX; capture motion clips for temporal artifacts.
+5. Record tested JAR hash, exact settings/camera/time/weather, before/after images and measured frame/pass times here.
+
+The historical handoff below is preserved. Its deployment statements describe past builds, not this audit candidate.
+
+---
+
+# Imagine Metal: handoff (2026-11-14, ~01:10)
+
+## START HERE: 2026-11-14 01:10, fix9c BUILT (440a3f9, CI 43531571576, sha1 77419cf5...), copy in `instances/Imagine metal/imagine-metal-metalods-fix9c.jar`, NOT yet in mods (his game was running): swap it in when latest.log ends with "Stopping!"
+fix9 session (00:43-01:07, his chat): leaves "very blurry", "the waving part looks weird", "see through"; fps in forests 35-43
+(terrain 11-18 ms, shadow maps 2-4 ms, was ~6 and ~1); "making new chunks again" + "lods are slow" (fix9's real2 dropped every
+explored region, regenerated from the seed at ~280 chunks/s, trees 2/3 of an L0 tile); heap 99% and 1-4 fps stalls at 00:49 (GPU
+idle 2.7 s: GC while regenerating); "water through clouds" (00.49.20: water drawn over the clouds-after-land). He LIKES sky light
+reaching into caves/ravines: fix9's steeper sky curve reverted.
+fix9c: leaf faces between two leaf blocks culled when Bushy leaves + Leaf culling are on (OwnFrapi/OwnBlockRenderer, no fill);
+planes marked with pattern 1101 (OwnQuads.Layer.planeMode, set by OwnMesher): stiff sway by the block centre x0.6 (terrain.metal
+own_vs via ownQrecPos), imLod x0.5 (one mip sharper, all three fragment paths), no shadow casting (shadow.metal); imsky.m mode 3
+writes cloud cover into dst alpha, own_fs_tr mixes back toward imDst by it; imSkyCurve back to smoothstep; MetaStore reads old
+real/ when real2 lacks a chunk (levels 1-4 re-mipped by the new rule, saved into real2); OwnFluidEdge: on a section's side a
+neighbour in an unloaded chunk is the same fluid (the dark line/notches at the LOD water hand-over).
+Floating island's grey block (00.54.07, generated, far): that is its stone underside at a coarse level, blocky, not water.
+Test: forest fps and look with Bushy leaves on/off; flying in clouds over water; no regeneration of old areas; caves.
+
+## (older) START HERE: 2026-11-13 ~23:05, fix9 DEPLOYED (fix9a + fix9b), not seen in game yet
+mods = fix9: metalods cd0eb66, CI run 43514922999, jar sha1 2b152b87..., copy `instances/Imagine metal/imagine-metal-metalods-fix9.jar`.
+Fallbacks in `instances/Imagine metal/`: fix8 (30d21a49...), fix7, fx1, fix5. Local Java compile check: JDK 25 + client.jar +
+the 26.3 libraries + fabric-loader/mixin/asm/renderer-api jars, plain javac (see "Local compile" below); Metal only on CI.
+
+### What Jack's fix8 session showed (latest.log 22:27-22:30, screenshots 22.29.30 to 22.30.47)
+- Leaves (22.29.53, 22.30.47): fix8's culling + filled faces looked "horrible" (some see-through, some solid). He attached Way
+  Better Leaves 2.0.0 (26.2 NeoForge, Luc1fer1o; its mods.toml says MIT) and asked for a one to one.
+- 22.29.30/32 "iron still not lighting up properly": only iron's pale speck texels glowed (imOre returned the texel's red^1.5).
+- 22.30.05 floating island (Terralith) far off: a huge blue block under it and a blue slab over the sea = its waterfalls grown
+  by the LOD mip (water outranked air: one falling column -> 2/4/8/16 wide pillars). 22.30.27 dark flat squares at the falls'
+  feet (likely the same data; check they are gone).
+- 22.30.23 LOD water: a pale grey-lavender sheet (134,161,182) next to the real water (95,136,158) at the hand-over, and bright
+  blue lines (water side faces at level seams).
+- Perf (island): 44-51 fps, gpu 19-23 ms: terrain 6-8.8, translucent 2.2-4.2 (sea filling the view), light grid 0.9-1.6
+  (refills while flying), LOD pages up to 3834. No far-shadows A/B and no rejoin (phantom check still not run: no
+  "section table copy" line). exactPos table full (4096) -> coordinates rounded to the 1/2048 grid: harmless (< 1/4000 block).
+
+### fix9a (065a1f3): Way Better Leaves' plus leaves, ported (mcopt/metal/own/BushyLeaves.java, BushyLeafSource.java)
+- Every leaf block with a visible face (WBL's rule) gets 3 crossed double-sided planes 2 blocks wide through its centre, one of
+  32 rotations by the position seed; bushy sprite per leaf texture in the blocks atlas (holes flood-filled, tiled 2x2, WBL's
+  32x32 mask embedded as text). Added to the atlas by imaginemetal/mixin/SpriteSourceListMixin (load RETURN, minecraft:blocks).
+  Tesselated in OwnMesher right after the block's model through the same path (FRAPI / own / vanilla), flat light, no AO.
+  Plane coordinates snapped to 1/2048 (never the exactPos table). BushyLeaves.atlasReady (TextureAtlasMixin) clears the cache.
+- fix8's own leaf face culling and FILL marking are off (OwnFrapi / OwnBlockRenderer leafCull = false); the FILL shader code is
+  left unused. Settings (Surfaces): "Bushy leaves" (imaginemetal.bushyLeaves), "Leaf culling" = WBL's (no planes on buried leaves).
+- Notice: third_party/waybetterleaves/NOTICE, shipped in META-INF/waybetterleaves. (fix8's note said WBL was All Rights
+  Reserved; the 2.0.0 jar Jack gave declares MIT.) WBL's LabPBR leaf maps NOT ported (PbrAtlas would switch every block to the
+  pack path and lose the generated normals).
+
+### fix9b (cd0eb66)
+- LOD water: MetaPalette.kindOf: flowing water/lava = air; Rle.pick: water only if >= 4 of 8 children are water; real chunks now
+  in metalods/.../real2 (old real/ ignored, rebuilt as he plays). ml_fs: every water face shaded as the top (0x80, normal up).
+  terrain.metal im_defer_fs: LOD water x(0.42, 0.66, 0.72) linear (measured against the real water at the hand-over). ASK Jack.
+- Under water: inside the window the surface is a rippling sheet (alpha 0.38-0.62, brighter than the fog) (terrain.metal, bit 64).
+- Iron ore: all speck texels glow alike (imOre case 1: colour to one brightness, 1.3); albedo not multiplied past 1 for it.
+- Items: "soul" glow needs blue >= green: diamond tools/items no longer glow (lighting.metal imShadeEntity).
+- Mobs: MetalFX reactive 0.8 -> 0.4 (bloom.metal im_bloom_motion_r), for "animals jittering". If they smear, go back up.
+- Caves: imSkyCurve ^1.5 (partial sky light falls off faster), ImagineFrame.CAVE floor x1.5. ASK how 19.11-type ravines read.
+- Far shadows: march stops above the highest land written into the height map (MetaArena.maxTop -> ImHeightP.range.y).
+
+### Tell Jack to test
+1. Forests: the bushy look vs his WBL screenshot; fps in a forest (F3) with "Bushy leaves" on/off.
+2. Iron in a dark cave; a diamond pickaxe in hand (no glow); animals walking (jitter/smear).
+3. LOD sea and the hand-over from high up (colour, no blue lines); the floating island (no blue block, no dark squares).
+4. Under water looking up: the surface visible.
+5. A cave/ravine going down: no sudden bright-to-black.
+6. Still open: phantom check (Save and Quit to title + rejoin in ONE session; End and back), far shadows on/off perf A/B, vines.
+- Known, not fixed: a thin dark line along the real water's outer edge (the real water's side faces at the render distance's
+  edge, likely); translucent cost with the sea filling the view (2-4 ms) not reduced.
+
+### Local compile (fast check before CI)
+`tools/jc.sh` in the chat sandbox: javac --release 25 (Adoptium JDK 25) -cp client.jar (piston-meta 26.3) + the version json's
+libraries + fabric-loader 0.20.1, sponge-mixin 0.16.5, mixinextras 0.5.0, asm/asm-tree 9.8, fabric-renderer-api-v1 17.0.15,
+fabric-api-base 2.0.6. Compiles the whole mod's Java in ~10 s. Metal still only on CI.
+
+## (older) START HERE: 2026-11-13 ~21:50, fix8 DEPLOYED (fix7 + fix8 + fix8b), not seen in game yet
+mods = fix8: metalods 9eb9a42, CI run 43503788682, jar sha1 30d21a49..., copy `instances/Imagine metal/imagine-metal-metalods-fix8.jar`.
+Fallbacks in `instances/Imagine metal/`: fix7 (92a4589c...), fx1, fix5. Jack's fix7 sessions: logs 2026-11-13-7 (18:29-18:55) and
+latest (19:07-19:20); screenshots 18.31.26 to 19.20.10 all looked at.
+
+### What the fix7 sessions showed
+- Phantom blocks: NO "section table copy" line in either log: no level reset happened inside a running game (he quit to desktop
+  between sessions; the only "mcopt-own reset" lines are at quit). The fix6 check has still never run. No section-table phantom in
+  the screenshots. 18.53.17 ("back at spawn after being far away"): a grass-topped 8-block LOD box and a floating LOD slab in the
+  near land = a coarse MetaLODS column made while he was far away, standing in for its children (MetaWorld.visit keeps old columns
+  as stand-ins) in chunks the seam mask didn't count as drawn yet. fix8b: ml_fs drops levels >= 2 inside the near distance
+  (masked columns only; at detail >= 4 those levels are never the right level there).
+- Water (18.31.26-18.35.11): (a) bright textured blue strips along the near/LOD edge = LOD water voxels' SIDE faces on the edge
+  facing into the near chunk, seen THROUGH the real water. fix8: ml_fs tests water sides' mask by the block in front of them;
+  MetaWorld draws columns touching the mask (1 block wider test) with the masked pipeline so it runs. (b) 18.31.55 two chunk-sized
+  dark teal squares in the LOD sea (71,135,142 vs the LOD water around 148,170,178): LOD water tops with sky light 0 (columns from
+  real chunks ingested before their light), floor 10/15 dimmed the sky reflection. fix8: LOD water tops get sky 15.
+  Not touched: 18.54.55 under water "still dont feel like i can see where water ends"; 18.51.39 mirror lake (Jack: he'll bring the
+  reflection up again if it bothers him).
+- Perf (both logs, perf lines every 10 s): normal play 58-60 fps at vsync, gpu ~16.5 ms with passes 12-14. Dips:
+  * most 30-40 fps windows line up with resource reloads / options screens ("Reloading ResourceManager", "Changing view distance")
+    and the 10 fps windows are the game paused / unfocused (hand+gui 2.33 flat): not steady-state.
+  * real ones: terrain 8.5-9.7 ms (normal 5-6) at the village at night (18:35:48-18:36:18, "fps in 40s here") and while MetaLODS
+    regenerates after travel (18:48-18:53, 19:08-19:09). Terrain vs LOD pages drawn: ~+0.5 ms per 1000 pages (1000 pages 5.5 ms,
+    2500-3500 pages 7.1-7.3). translucent 4-6 ms 18:49:41-18:51:01 (snowy area with a lake filling the view: water SSR).
+  * far shadows: NOT separable in the perf line (the deferred lighting is in the terrain pass, tile memory: can't be cut). fix8
+    makes them cheaper (see below). A/B: MetaLODS "Far shadows" toggle, watch "terrain" in the perf line.
+- Other chat notes, NOT built (not in his list): 18:33 "animals jittering", 18:36 "all ores dont get the proper shit lit up"
+  (fix7d's ore glow not enough), 18:47 "pick is glowing on tips??", 19:20 "diamond items glow", 19:11 "looks bright"/"looks dark"
+  (cave). Ask which he wants next.
+
+### fix8 (66506ae) + fix8b (9eb9a42)
+- Leaf culling (Jack: like Way Better Leaves' culling; WBL is All Rights Reserved, so our own code from the idea only): setting
+  "Leaf culling" (Surfaces, default on, imaginemetal.leafCulling; toggling rebuilds chunks). OwnFrapi.emitted (his path: Fabric
+  API loaded) and OwnBlockRenderer drop a leaf face whose cull-face neighbour is leaves; a kept face whose OPPOSITE neighbour is
+  leaves is marked (OwnQuads.Layer.fillNext -> mat bit FILL -> material corner pattern 1101 = 13). terrain.metal: wc 13 waves whole
+  like leaves; own_fs_g / own_fs_alpha (pre-pass) / ownFsBody keep its transparent texels, filled from the texel half a sprite over
+  (else a quarter), x0.62 (imLeafFill, derivatives taken outside the branch); shadow.metal: wc 13 is not a plant, casts whole
+  (ImShadowOut.fill). Plain culling looked hollow to Jack; this is meant to look like WBL's solid outer leaves. ASK how it looks.
+- Vines: OwnQuads.writeMaterials gave wave 3 (vines) corners 0 (never swayed on our mesher): now 0101 like storeMaterials.
+  terrain.metal: the vine's sway is in its wall's plane only (normal axis = the one where the vertex sits off the block grid,
+  0.05 out for a wall vine, 0.95 for a ceiling one): d *= (0.8, 1.6, 0.8), the normal component zeroed.
+- LOD water sides / tops: above. Far shadows (imFarSun): no march for faces with dot(n, L) <= 0, 12 steps x1.45 (was 18 x1.3, same
+  ~1,200 block reach), stop once the ray is above y 336.
+- Clouds: Jack 21:19 "clouds stay blocky": nothing to change.
+
+### Tell Jack to test
+1. Forest / jungle with F3: fps vs before; trees from outside (solid, not hollow?) and from inside a canopy; toggle "Leaf culling".
+2. Vines on a wall: sway along the wall, never into it.
+3. Fly over the sea and a lake at the near/LOD edge: no blue strips, no dark squares.
+4. Go far (1000+ blocks), come back to spawn: no big LOD boxes in the near land.
+5. The phantom check still needs a rejoin in ONE game session: Save and Quit to title, rejoin; then End and back
+   (`/execute in minecraft:the_end run tp @s 0 70 0`, `/execute in minecraft:overworld run tp @s ~ ~ ~`). Log: "section table copy".
+6. Far shadows A/B: MetaLODS "Far shadows" off/on while flying, perf line "terrain".
+
 
 Where things stand, for picking the work up in a new conversation.
+
+## (older) 2026-11-13 18:20, fix7 DEPLOYED (fix6 + MetalFX + fix7a-d), NOT seen in game yet
+mods = fix7: metalods 6721afc, CI run 43471074869, jar sha1 92a4589c... (copy `instances/Imagine metal/imagine-metal-metalods-fix7.jar`).
+Fallbacks in `instances/Imagine metal/`: fx1 (2df4bad5..., fix6 + MetalFX only), fix5 (4ce76e04..., before this chat).
+Jack had NOT launched the game during this chat (latest.log still the 17:22-17:26 fix3 session). First thing: read his new log.
+
+### 1. Phantom blocks: REAL CAUSE FOUND AND FIXED (fix6, 0e1d777)
+- OwnTerrain keeps FRAMES (3) GPU copies of the section table; each frame copies only the slots changed in the last FRAMES frames
+  (dirty[f]). setSlot calls made BETWEEN frames (disposeAll: leaving a world, a dimension change, a resource reload, dispatcher
+  dispose) went into dirty[frame % FRAMES], whose table copy had already been made that frame, and that list is reset at the start
+  of its next frame BEFORE the copy: so one of the 3 copies kept the whole old level's table (origins + record ranges that new
+  meshes reuse) and every 3rd frame drew old/garbage geometry at old positions, half-transparent with the TAA: the stretched grass
+  after rejoining (14.06.06), the End slabs near 0,0 after respawning (2026-11-12 13.43.38), the "phantom builds". The C2 level
+  guard never fired in ANY log since Nov 12 (grep "level guard"): it was never the cause. Records also bake the slot (rec +4) and
+  the shader reads the origin through it (terrain.metal ~1730), which is why the garbage lands at old origins.
+- Fix: setSlot with the table closed (tableOpen false) goes into `late[]`, merged into the next frame's dirty list in beginFrame0
+  after its reset. Check: after a reset, each copy is compared with the master right after its update and logged:
+  `[Imagine Metal] section table copy K after a level reset: matches` (3 lines per reset; "N stale slots ... (mended)" = still wrong).
+- 13.54.46 "visual glitch in lod on house": at full size it is the REAL roof (stairs stretched into the next roof), same family; ask.
+- Repro for Jack: join, look around, Save and Quit, rejoin the same world, look at nearby grass; then
+  `/execute in minecraft:the_end run tp @s 0 70 0` and back with `/execute in minecraft:overworld run tp @s ~ ~ ~`, look near 0,0.
+  In the log: the "section table copy" lines, "mcopt-own reset", no "exactPos check ... wrong".
+
+### 2. MetalFX: ON metalods (cee9079), deployed, default on
+- Cherry-picked 4f9e852 (conflicts in Bloom.java / SettingsScreen.java resolved keeping both). Toggle "MetalFX upscaler" in
+  Advanced > Debug (not saved); the 4 flip toggles stay as debug only: signs checked against Apple's WWDC25 sample
+  (jitterOffsetX = pixelJitter.x, jitterOffsetY = -pixelJitter.y for a y-up projection jitter = the content's shift in y-down
+  pixels; ours: the frame holds the scene shifted by +taa in texture uv, so +taa*size = the +1 defaults). Motion = current -> previous
+  in pixels, as Apple's.
+- Whales / cape: no per-entity motion vectors (Minecraft's pipelines). Instead EntityShade marks mob pixels in the frame's alpha
+  (0.96, non-translucent entity pipelines, level pass only; terrain 1, waving plants 0.98) and the motion pass writes MetalFX's
+  reactive mask from it (0.8 on mobs; macOS 14+: `MetalFX temporal scaler on (...), mobs reactive`). Ask Jack if whales/capes
+  still smear. If yes: real motion vectors need the previous frame's entity vertex positions (big).
+
+### 3. Far land vs DH + Gael (fix7a-c)
+- Pale sky: measured (17.26.15) flat colourless (192,193,198) from top of frame to horizon; our sky model gives (122,150,195) at
+  that elevation and no rain (weather.dat raining 0). Cause: he was flying at cloud height; every upward ray met the cloud cell
+  right above the camera within a few blocks. Fix: clouds fade out within 6-40 blocks of the eye (sky.metal imClouds). NOT a sky
+  colour change. (imaginemetal.haze=0.75 in his config is a dead key; bloom fog is 0 by clear day.)
+- LOD water: material 0x80 (class 0 + bit 7, unused) on LOD water tops (ml_fs: the real water's surface colour from the biome's
+  water colour), im_defer_fs shades it with kind 1 (waves, glint, sky reflection by angle) and lays it over the absorbed deep seabed
+  (x a^(1/2.2), a = max(0.72, fresnel)). Was cyan ground next to deep-blue real water.
+- Water seam: a coarser level's water voxel had its top on its own boundary (64 for the sea at level >= 1, real surface 62.89): a
+  1-block step at L0/L1 borders whose side drew the dark line. ml_vs: a water top whose voxel holds the sea level goes to sea - 1/9
+  (MLFrame.params.w = level.getSeaLevel()). Lakes above sea level keep the old rule.
+- AO on LODs: MetaMesher computes 4 corner values per face voxel (vanilla's smooth-light rule from the 3 voxels in front), greedy
+  merges only equal ones, a byte per quad after each page's quads (PAGE_BYTES 2304, AO_AT 2048), ml_fs interpolates per voxel
+  (0.5 / 0.72 / 0.88 / 1). Water and skirts unshaded.
+- Far shadows: MetaArena height map 1024x1024 uints (16-block texels, wrapping, tag in bits 12-31, top+1 in 0-11, finest level
+  wins) written by workers after meshing (MetaArena.heights); MetaLods.drawInG hands it (and ImHeightP at arena.frame+160) to
+  mcown.m (mco_im_heightmap, cleared by mco_im_defer each frame); im_defer_fs imFarSun marches 18 steps from 20 blocks x1.3 toward
+  the light from 0.7 x shadowRange out; ImPre.farSun scales the term the shadow maps don't cover (sun = mix(open*farSun, sm.x, sm.y)).
+  Setting MetaLODS "Far shadows" (farShadows=true). Cost unmeasured: check the perf line (terrain) vs fix5's ~5.2 ms.
+- Colour: LOD albedo eased to 20 % less saturation and 6 % darker over the 384 blocks past the real terrain's edge (no step at the
+  hand-over). Ask Jack if it's enough / too much (he wants to be asked about grading).
+- Clouds blocky vs soft: NOT changed (Jack chose blocky; ask).
+
+### 4. Older items done in fix7d
+- LOD grass side overlay (13.55.21): LodColors.Look gets overUv/overTint (a second tinted quad on the side), palette model 64 bytes
+  (overUv at +48, overlay tint kind in flags bits 18-20), ml_fs lays it on tinted.
+- Ore glow (15.46.12): IM_MAT_ORE by sat / hi (0.1..0.22) instead of sat (0.08..0.2): iron's darker speck texels glow too.
+
+### Still to ask Jack (the handoff's "ask" items; nothing built for them)
+- Jungle fps dip (C2 ideas: leaves solid past ~32 blocks, leaf pre-pass off by default)? Vines on OwnQuads (wave 3 -> 0101)?
+  01.03.44 pale streak? "water reflection" 16.22.13? Blocky vs soft clouds? Water surface from below readable now (fix4)? Haze right?
+- Shadow pop-in case 2 (2026-11-12 23.48.17/22): needs Jack at that spot with Debug view "Shadow maps" and the two toggles.
+- Cold start: read the new log's first `[MetaLODS] generation:` lines before changing anything.
+
+
+## (older) Jack 17:39 (after fix5)
+- The huge grass is the SAME family as the phantom blocks: the End ghost slabs (C2 level guard) and "phantom builds" he has seen
+  for a long time. Treat it as one long-standing bug in the section/mesh lifecycle across level changes (old level's compiles,
+  stores, table entries, slot reuse), not as a one-off. Find the real cause and fix it for good; fix4's checks are diagnostics.
+- MetalFX: APPROVED ("metalfx is good lets go"). Bring branch `metalfx` onto `metalods` (B3 motion vectors / jitter included as
+  far as built), build, deploy, keep the non-MetalFX jar as fallback.
+- He wants the next chat to FIX the open items, not list them as open.
+
+## (older) 2026-11-13 17:40, fix5 DEPLOYED (fix3 + fix4 + fix5), not seen in game yet
+mods = fix5: metalods 9131809, CI run 43463452715, jar sha1 4ce76e04... (copy `instances/Imagine metal/imagine-metal-metalods-fix5.jar`).
+Fallbacks: fix3 (2c39ca2e...), fix2 (eb129083...). Screenshots handled up to 2026-11-13_17.26.23 (+ his DH/Gael refs 16.02-16.04).
+fix4 (618e373):
+- Water surface from below (Jack 17:21, "especially ... looking up from underwater"): cause = C2b painted the surface past the
+  window in exactly the under-water fog colour (imWaterFog), so it melted into the fog. terrain.metal (env.w bit 64,
+  Settings.waterUnderSurface, toggle "Water surface visible from below" in the debug list): that colour x (1.35 + 0.7 ripple),
+  ripple from the water texel's luma and the wave normal. Ask Jack if it reads as a surface now / too bright.
+- Huge grass after rejoin (14.06.06): rows of grass quads floating ~1 block up, stretched along one axis, near the player, real
+  terrain. Fits plant vertices (off-grid: random offsets -> OwnPosTable codes) reading WRONG table entries in the arena's copy.
+  Not proven. fix4 adds: OwnPosTable.verify (arena copy vs VALUES, mends + logs "[Imagine Metal] exactPos check (...): N of M
+  table entries in the arena were wrong") every frame for 600 frames after disposeAll, then every 30; a log line when the old
+  level's dispatcher STORES into the arena after the change ("level guard: a section of the last level stored after the change");
+  the "mcopt-own reset" line now reaches latest.log (println, renewed/kept). Note 14:03 that day: table FULL (4096) before the
+  rejoin. NEXT: Jack leaves + rejoins a world, then read those log lines. If no mismatch is logged and plants still stretch, the
+  cause is elsewhere (stale meshes; check OwnLife / store path).
+fix5 (9131809), after Jack's DH + Gael screenshots (16.02.27, 16.03.00, 16.03.22, 16.04.02, 16.04.19 in the chat) vs ours
+(17.24.36, 17.26.15, 17.26.23, fix3):
+- Distance haze replaces fix3's far fog: air.metal, over near land AND LODs from 24 blocks, 1 - exp(-(d - 24) / 700 x strength x
+  hf), hf = exp2(-(max(y,40) - 64) / 48) clamped 0.35..2.2 (valleys hazier), x (1 - cave), toward imSkyColor at the horizon.
+  Strength = MetaLODS "Far fog" (default 1). Only while MetaLODS is active + air pass.
+- LOD per-block brightness +-7 % (DH's noise texture; 16.04.19 shows DH's per-block speckle), ml_fs, not on water.
+Differences seen in the comparison still NOT addressed (next look work, in this order of how much they show):
+1. Our day sky is a pale flat white-grey even overhead (17.26.15/23, 16.43.12); Gael's is blue overhead with soft volumetric
+   clouds. Check sky colour / haze 0.75 / bloom fog whiteout first.
+2. No shadows on LODs (perf: "shadow maps 0.06-0.10 ms" high up = almost nothing cast; LODs never cast). Gael+DH: far hills and
+   trees have sun/shade sides and cast shadows. Also no AO on LODs (plan: AO byte per quad, PAGE_BYTES 2048 -> 2304).
+3. Our colours: saturated yellow-green flat; Gael's foliage darker/cooler, lower saturation far off. Revisit after 1 and 2.
+4. 17.24.36: the water seam line is STILL there with fix3 (straight dark line, chunk jogs) and LOD water is cyan while the real
+   water next to it is deep blue: LOD water colour = near water (open item) and the seam needs a second look (the 8/9 fix was not
+   enough or not the cause).
+5. Clouds: ours are big flat blocky slabs; Gael's soft. (Jack chose Reimagined blocky clouds earlier; ask before changing.)
+
+## (older) 2026-11-13 17:05, fix3 DEPLOYED, not seen in game yet
+mods = fix3: metalods 96abb9b, CI run 43457899089, jar sha1 2c39ca2e... (copy `instances/Imagine metal/imagine-metal-metalods-fix3.jar`).
+Fallback fix2 (eb129083..., copy kept). From Jack's fix2 session 16:39-16:46 (screenshots 16.42.12 to 16.46.11, all handled):
+- Far fog (Jack 16:43 + chat 16:49: Gael's with DH looks better "cus of fog in distance", hides the "lego bricks"): air.metal, past
+  the real terrain's edge the land mixes toward imSkyColor at the horizon (direction's y raised to >= 0.02), 1 - exp(-x^2) with
+  x = (dist - rd*16) / (fog end - rd*16) * 1.9 * setting. Setting MetaLODS "Far fog" 0-2 (default 1, metalods.properties farFog).
+  Plumbing: Reflections puts start/density after the 16 floats of airM, imssr.m hands them on as ImAirParams.size.zw. Only with
+  the air pass (default on). Look at it first: too thick/thin, colour at night, the sun's glow in it.
+- Dark line across lakes along chunk edges (16.43.12, 16.43.45): near/LOD water seam. LOD water top was a full block, real water
+  8/9: under the LOD sheet's edge the LOD seabed showed. ml_vs lowers water tops (top faces, sides' top edges) by 1/9 block
+  (models buffer now bound to the vertex stage too, metalods.m).
+- LOD water sheet over the real river (16.43.34/16.43.44, cyan + dark blue sheet with a side face, ~6-8 chunks out) and a
+  sky-coloured strip between near land and LODs (16.44.09/16.44.17, flying): both the hand-off mask. OwnSeam.column: a chunk is
+  "drawn" when every section holding one of its 256 WORLD_SURFACE top blocks is compiled (was: every section from the lowest to the
+  highest surface, which never held with sealed sections in ravines / cave mouths); a surface section outside |dy| <= vd counts as
+  not drawn. fix2's "every loaded chunk 2+ inside rd" (addLoaded) is off (it masked loaded-not-compiled chunks: the strip);
+  -Dmetalods.maskLoaded=true brings it back. Check: caves/ravines (13.57.16, 13.58.58 cases) must stay clean.
+- Progress line "keep getting metal making chunks notification" (16:43): once done it comes back only when >= 1/10 of the view is
+  missing for over 1 s (teleport, join), not for the edge trickle while moving (MetaWorld.progressLine, progDone).
+- Lava "doesnt look that hot anymore, no bloom?" / "not hot enough" (16.45.22, 16.46.11): imaginemetal.bloom was false in his config
+  since 10:50 (saved a minute after his jungle "dipped to 28-29 fps" note: most likely switched off while chasing fps). Set back to
+  true in config/imaginemetal.properties (game closed). If lava still isn't hot enough WITH bloom: then the look (ask what he means).
+- fix2 numbers (latest.log 16:39): 240k chunks' worth in view at distance 256 (he has 256 set), 301,744 chunks' worth generated in
+  69 s, 5,548 chunks/s peak at 29 s; real chunks ingested 5,531. GPU ~16.5-17 ms (60 fps vsync).
+- Still open from before: AO on LODs, LOD grass side overlay, LOD water colour = near water, cold start, huge grass after rejoin,
+  under-water top, mob motion vectors, ore glow per sprite.
+
+## (older) 2026-11-13 16:25, fix2 DEPLOYED, bug list from the fast1 session (read this first)
+mods = fix2: metalods 529fecf, CI run 43451128240, jar sha1 eb129083... (copy `instances/Imagine metal/imagine-metal-metalods-fix2.jar`).
+Before it fast1 (57c2807b..., copy kept). Not seen in game yet. Contains, in order:
+- 7e38f81 TAA offset for the pipelines EntityShade skipped (eyes, text, beams, leads): dragon eyes flicker.
+- 68c285c on-screen progress (Jack asked 15:52, DH-style): "MetaLODS: N chunks ready, M left, R chunks/s", top left, gone 2 s after
+  done, setting "Progress on screen". MetaLodsHudMixin -> MetaLods.hud -> MetaWorld.progressLine / count().
+- 525ed8e no coarse stand-ins: a column whose children are wanted is no longer requested (COARSE_FIRST, -Dmetalods.coarseFirst=true
+  = old). Jack: DH "doesn't load in huge blocks"; his 13.52.27 / 13.52.42 "why it look like this?? dh is instant".
+- 529fecf (a) MetaArena frees pages by its own tick: release() used the world's frame, so a closed world's pages came back only
+  when the next world reached the same frame number (log 14:05: 50,000 -> 11,000 free in a minute); (b) LODs hidden in every
+  loaded chunk within rd - 2 on top of OwnSeam's drawn-whole mask (MetaWorld.addLoaded): a chunk with a never-compiled section
+  never counted as drawn, its LOD (stone-filled, no caves) showed through caves/ravines and as trees in near land (13.57.13/16,
+  13.58.58, 14.00.42 white quad in a cave, 14.06.06 "this after rejoining"); (c) sky light floor 10/15 in ml_fs (lq.y): real
+  chunks' air under thick canopies is sky 0 and the mips turn leaf faces toward it: pitch black (15.41.48, 15.42.11, 15.42.23).
+
+### Jack's answers 16:38 (after fix2 was deployed)
+- "color change": the LOD part's colouring/shading differs visibly from the near land (13.56.49). Causes: LODs have no ambient
+  occlusion, no texture normals, textures fade to the average colour past mip 2.5-4.5, no shadows. Next work: AO + keep textures
+  further + match the near land's shading. Ask for his eye on it after.
+- Mist (13.56.08/13): a mod's. Done.
+- Under water: he can't tell where the water's TOP is from below (the surface isn't visible as a surface). Not the fog strength.
+- "huge grass" (14.06.06, after rejoining another world): REAL terrain, not LODs: plant quads stretched over several blocks. Same
+  look as the known stale-section problem after a level change (exactPos indices read against a renewed table; C2's level guard
+  didn't catch this one). NOT fixed. Next: reproduce by leaving and joining a world; check "level guard" lines and the own table.
+- "water way under where the water actually is" (13.58.58 pale water plane down in a ravine, 14.05.33 sheet over land after
+  joining New World (8)): LOD water at sea level drawn inside the near land (chunks not counted as drawn whole). fix2's mask (rd - 2
+  loaded chunks) should hide it; unverified.
+
+### Speed, measured (fast1, logs 2026-11-13-4 and latest)
+- First ~25 s cold: the first tiles took 1-7 s each (surface stage; JIT + the server generating spawn at the same time). Then the
+  whole 128-chunk view (~51,000 chunks of area) was done ~40-65 s after join; ~700 tiles of which L4/L5 were stand-ins only.
+- DH + SeedGen on Jack's screen (16:04): 125 chunks/s. "300,000 chunks in under a minute" was not what his DH showed.
+- With 525ed8e the view needs ~300-400 tiles (L0 ~113, L1 ~85, L2 ~85, L3 ~22 by area) and no L4/L5. L0 cost: trees ~150 ms of
+  ~230 ms a tile (the biggest stage). Cold start is the next thing to look at (warm the generator before the player is in).
+
+### Jack's notes not fixed yet (screenshot: note -> cause as far as known)
+- 13.55.21 "grass color on sides doesnt match": LOD sides use grass_block_side (its baked default green) without the biome-tinted
+  overlay; needs the overlay sprite (MetaPalette Model: a third rect) tinted by kind 1 over the side.
+- 13.56.49 "color change is too obvious": NOT identified (LOD vs real colour at the hand-over? a biome edge?). Ask him to point.
+- 13.54.46 "visual glitch in lod on house": NOT identified at 1100 px; look at the full-size file.
+- 13.56.08 / 13.56.13 "what is this": grey pixelated puff over a cave waterfall; shaders were OFF then (F8 13:55:54-13:56:26), so
+  not our lighting; likely a mod's mist particle (Streams Reflowing?). Ask.
+- 14.01.45 "cant really tell im underwater / when the water turns to air": the under-water look is too close to above-water (C3's
+  wide window + weak water fog). Tune with Jack (toggle "Wide window up from under water").
+- 14.02.01 "whales look blurry/pixelated underwater" and 15.43.56 / 15.44.00 "cape looks blurry / jittery": moving entities have no
+  motion vectors, the TAA's history clamp smears them (B3), plus the 67 % render scale. Brown squares around the whale in
+  14.02.01: unknown (particles?).
+- 14.05.33 / 14.05.36 "uhmm" (another world, New World (8...)): a huge flat purple-blue sheet over the land. Unknown: LOD water at
+  sea level from a generator that doesn't match that world, or LODs inside the near land (fixed by (b)?). Check with fix2.
+- 15.46.12 "only some of the iron is bright": Imagine Metal's ore glow picks pixels by colour; some of iron's pixels miss. Look at
+  the material code (imMaterial) and make it per sprite.
+- DH comparison (16:09, his DH shots): DH far land "fits more" with the near land; DH's own flaw: water colour switches at the
+  hand-over (near shader water vs far water). Ours should match the far water's colour to the near water.
+- Next planned: ambient occlusion on LOD faces (design below, 16:00 section), LOD water colour = near water, grass side overlay.
+
+## START HERE: 2026-11-13 15:40, Jack's questions and THE PLAN
+Jack at 15:34: "does the handoff include the fps and eye flickering? what about the shading on lods? why dont u do the lods like
+voxy + seedgen? that looks way better and runs well. there are also some visual bugs in the latest screenshots."
+
+### 2026-11-13 ~16:00: progress on screen BUILT (Jack asked 15:52), not deployed (link still failing)
+- metalods 68c285c, CI run 43447346699, jar sha1 630ef71d... (includes 7e38f81's eyes fix). Sent to Jack as a file to install
+  himself (imagine-metal-metalods-progress1.jar); keep a copy as instances/Imagine metal/imagine-metal-metalods-progress1.jar.
+- Jack 15:52: "dh + seedgen only properly generates at full speed with shaders off. if ours does that too then maybe something that
+  switches em off till chunks are loaded, and a text on screen showing how many chunks are loaded and how many its loading like
+  in distant horizons ... when done generating no text". Built: the text (MetaLodsHudMixin on Hud.extractRenderState TAIL ->
+  MetaLods.hud -> MetaWorld.progressLine): "MetaLODS: N chunks ready, M left, R chunks/s", area in chunks of the columns the view
+  wants (MetaWorld.count in visit), rate over ~3 s; gone 2 s after nothing is left; top centre with F3 up; not with F1. Setting
+  "Progress on screen" (progress=true in metalods.properties).
+- NOT built: the "shaders off until loaded" switch: he made it conditional ("if ours does that too"). Ours generates on worker
+  threads; per frame only prepare() (requests + 3 ms of uploads) runs, and only inside the G-buffer pass, so with the deferred
+  lighting off MetaLODS does nothing at all. Compare the counter's chunks/s first; if the shader's load slows it, the switch
+  would be Imagine Metal's heavy passes (shadows, shafts, SSR) off while left > 0, not the deferred lighting itself.
+- Started (not committed): LOD ambient occlusion design: quad bits full (x5 z5 y9 face3 w5 h5 | block16 biome8 sky4 block4),
+  face bits unused by the shader (the page header has the face); plan: an AO byte per quad after the 256 quads in each page
+  (PAGE_BYTES 2048 -> 2304, no native change), 4 corners x 2 bits from the front voxel's neighbours, greedy merges only equal
+  AO, bilinear per voxel in ml_fs (fract of the quad's voxel coords), multiplied into the colour.
+
+### 2026-11-13 ~15:50 (new chat): step 6 BUILT, not deployed (Mac link down the whole turn)
+- metalods 7e38f81, CI run 43445278355, jar sha1 48e2b2db...: EntityShade.jitterOnly gives the pipelines it skipped (names with
+  "eyes", "pipeline/text", "beam", "leash", "breeze", "energy_swirl", not "gui") the TAA's sub-pixel offset in the vertex stage
+  only; fragment stays Minecraft's. Same toggle as mobs ("Mobs with TAA offset", entityJitter). Log line: "[Imagine Metal] TAA
+  offset: <pipeline>". Copy in the sandbox at /mnt/user-data/outputs/imagine-metal-metalods-eyes1.jar; deploy it (and keep a copy
+  as instances/Imagine metal/imagine-metal-metalods-eyes1.jar) once the link is back and the game is closed.
+- Step 1 (fast1 session's screenshots + log) still NOT read. Step 2: asked Jack for the Voxy + SeedGen reference shots.
+
+### Not done yet in that chat (the link to his Mac was down at 15:34)
+- His newest screenshots (taken after 11.30.23, in the session with the "fast1" jar) and that session's log were NOT read.
+  First thing in the new chat: `ls -t screenshots/*.png | head` and read only the ones newer than 2026-11-13_11.30.23, plus
+  `logs/latest.log` (and the newest `logs/2026-11-13-*.log.gz` if he restarted): `[MetaLODS] generation: ...` (chunks/s vs his
+  5,000), `stats`, `stopped:`, his `[CHAT] <herningstang>` notes. List every visual bug he shows, with its cause, before fixing.
+
+### Answers given (keep them consistent)
+- fps dip and dragon eyes: yes, both are in this file (section "Jack's other notes in that log" below) and the project doc.
+- Shading on the LODs today: they are drawn into the deferred G-buffer, so they get the sun/sky lighting, haze, fog and TAA
+  like the real terrain, with block textures (fading to the sprite's average colour far away) and biome tints. Missing:
+  they cast no shadows; past the shadow range (256 blocks) nothing shadows them either; no ambient occlusion (flat faces, no
+  corner darkening); no generated normals; water is opaque.
+- Why not Voxy + SeedGen themselves: upstream Voxy needs OpenGL 4.6 and macOS stops at 4.1, and his game renders through
+  mcopt's Metal backend, so Voxy can't run in his instance. (Third-party Mac ports exist: a Metal fork for 1.21.11 and a
+  Zink/KosmicKrisp route, neither for 26.3 on our backend.) Both are All Rights Reserved: methods only, nothing copied.
+  MetaLODS already IS the Voxy method (voxels in runs, mips, greedy faces, block textures) and the SeedGen method (terrain from
+  the seed without chunks). The difference he sees is in what our generator and shader leave out, see the plan.
+
+### THE PLAN (in this order; ask Jack where marked)
+1. Read the fast1 session (above). Fix the visual bugs he shows first (bugs before features). Report the measured chunks/s.
+2. Ask Jack for one or two Voxy + SeedGen reference screenshots (or a video frame) of what "looks way better" means to him,
+   saved in `screenshots/reference/`. Don't guess the look (lesson from the grass "ghost copies").
+3. The LODs' look, closer to Voxy + SeedGen (each item: what it costs, Jack picks):
+   a. Ambient occlusion on LOD faces: per-corner darkening from the 8 neighbours when meshing (stored in the quad, nearly free
+      on the GPU). Probably the biggest single gain: without it far land reads flat.
+   b. LODs cast shadows: the LOD pages drawn into the far shadow cascade within its range, and past it a cheap sun
+      "horizon" test against a coarse LOD heightmap. Costs GPU time: measure.
+   c. Generator detail: surface rules as the game's (Terralith's bands, stone on steep slopes, snow lines), real trees on levels
+      0-1 (impostors only past that), cave mouths and aquifer lakes from the final density only where it shows (level 0
+      near the surface band). Trades some of the speed gained today: measure against the 5,000 chunks/s target.
+   d. Translucent far water with the shader's water colour (today opaque with a sheen).
+   e. The hand-over: real sections fading in from the fog colour over the LODs (OwnSeam.fadeMs only acts for mcopt's own far
+      terrain): make them appear instantly while MetaLODS draws.
+4. Speed, if step 1 shows < 5,000 chunks/s: skip intermediate levels where a finer one is the target (~22 % fewer tiles),
+   band-limit the 3D noise, a QoS setting for the workers.
+5. fps dip in the jungle (10.49.42, 28-29 fps under a canopy): leaves' G-buffer cost. The "C2 performance" ideas (leaves solid
+   past ~32 blocks, leaf pre-pass off by default) were never agreed: ask Jack before building.
+6. Dragon eyes flickering (11.01.17): the eyes render layer gets no TAA sub-pixel offset (EntityShade skips that pipeline). The
+   open B3 item: jitter for the skipped pipelines (eyes, text, beams). Small, can go with step 1's build.
+7. Then the older open items below (shadow pop-in case 2, MetalFX on its branch, etc.).
+- MetaLODS stays on branch `metalods` until Jack is happy with it; then merge to main.
+
+
+## START HERE: 2026-11-13 11:50, MetaLODS "fast1" DEPLOYED (branch `metalods` 917ca15, CI run 43411728436, NOT on main)
+- mods = jar sha1 57c2807b... (copy: `instances/Imagine metal/imagine-metal-metalods-fast1.jar`). Before it: `imagine-metal-metalods-fix1.jar`
+  (883ba593..., only the draw fix, the build Jack's 11:28 test ran). Fallback without MetaLODS: `imagine-metal-c2b-water.jar` (388bef08...).
+- NOT seen in game yet: fast1 (speed, the gap fix). Seen in game: fix1 draws LODs (Jack's 11.30.18 / 11.30.23).
+
+### What was wrong at 10:42-11:09 (Jack: "doesn't seem to be working")
+- Not his setup. `MetaNative.DRAW`'s FunctionDescriptor lacked the `masked` int (16 arguments for a 17-argument `mml_draw`), so the
+  first draw threw WrongMethodTypeException and MetaLODS stopped itself; nothing was ever drawn. Fixed in 15c685b.
+- The one-off "no G-buffer pass this frame" line at world load is harmless (deferred lighting comes on a few seconds later).
+
+### The strip of sky between the real terrain and the LODs (Jack 11:31, screenshots 11.30.18 / 11.30.23)
+- Cause: the mask ("the real terrain draws here": LOD fragments discarded, columns skipped) was every LOADED chunk within
+  rd x 16 blocks. The client holds chunks it doesn't draw (the outer ring, chunks not compiled yet): masked but empty.
+- Fix (917ca15): `MetaWorld.updateMask` takes mcopt's `OwnSeam.mask` (a chunk counts once every section of it that can show
+  holds a compile result in OwnTerrain's table, inside the game's distance rule); `-Dmetalods.handoffDrawn=false` = old rule.
+  metalods.metal pushes the LODs' depth 0.05 % farther so the real faces win in chunks drawn only in part.
+- Not done: the real sections still fade in from the fog colour when they take over (mcopt's `OwnSeam.fadeMs` only acts for
+  mcopt's own far terrain). If Jack sees a pale flash at the hand-over, that is the place.
+
+### Speed (Jack's target: Distant Horizons + SeedGen, ~300,000 chunks in under a minute, ~5,000 chunks/s)
+- Measured on his Mac before (session 10:42, distance 256, 2 workers): the whole view = 630 tiles (L0 138, L1 136, L2 136, L3 136,
+  L4 64, L5 20) in ~104 s: ~263,000 chunks of view in 104 s = ~2,500 chunks/s by area (7,450/s if every level's tiles x chunks are
+  summed, but the levels overlap). A tile is 64 x 64 cells whatever the level, so the work is ~650 tiles at distance 256.
+- Offline bench (sandbox, 26.3 + Fabric + Terralith + Lithostitched headless, x86, Java noise backend, 1 thread), ms a tile:
+  before L0 213 / L1 200 / L2-5 130; after L0 66 / L1 37 / L2-5 ~90. For the 650 tiles: 106 s -> 48 s of CPU.
+- Where the time went: levels 0-1 (and every tree chunk's ground) sampled the router's FINAL density (caves; ~9x a sample with
+  Terralith, whose final density also can't be split, log "final density not split"); levels 2+ sampled two volumes (the surface
+  every 32 blocks + the 3D carve's every 8). Meshing is cheap once warm (0.2-0.7 ms a column; the 4-17 ms in his log is JIT warm-up).
+- Changes (c4df8df): surface from the terrain shape at all levels (`LodNoise.fineLevels = 0`, set by MetaGen), one volume for surface
+  and carve (`LodTile.keepVolume / volume`), no samples at y >= 256 (the top slide's constant), the carve's density per column
+  first; workers `cores - 2` (6 on the M1, was 2), still utility QoS; stored columns now `gen7` (gen6 is stale, 11 MB, can be deleted).
+- 917ca15: workers take real chunks and columns in turn. Real chunks alone went first: joining a world queued ~1000 of them and
+  no tile was generated for 25 s (11:28:07-11:28:32); in flight they kept the workers from the columns.
+- Also seen in his log: while he flew (11:30:17-11:30:57) tiles took ~1.9 s each instead of ~0.3: the utility-class workers get
+  little CPU while the game (c2me, chunk meshing) is busy. By design; more workers help; a QoS setting would be the next lever.
+- NOT measured on the Mac yet. Read the new line (every 10 s while tiles are made):
+  `[MetaLODS] generation: N tiles in T s with W workers = X tiles/s, Y chunks/s (..., levels summed); L0 n tiles: surface a + trees b + 3D c + columns d ms; ...`
+  For the by-area figure: view chunks (pi x distance^2, ~206,000 at 256; the square the columns cover ~263,000) / seconds until
+  "0 asked, 0 jobs queued".
+- SeedGen's methods (public descriptions only, nothing copied): terrain from the seed without chunks, faked trees, and each area
+  written only at the detail it is drawn at, finer on approach. We do the same but ALSO generate every coarser level over the fine
+  areas (parents shown until the children are ready).
+- Next levers, not done: (1) skip the intermediate levels where a finer one is the target (~22 % fewer tiles; needs the column
+  choice in `MetaWorld.visit` reworked); (2) sample the blended 3D noise only in the y band where the rest of the density
+  doesn't already decide the sign (it is ~58 % of a coarse tile); (3) y step 16/32 at levels 4/5; (4) a worker QoS setting.
+
+### The offline bench (not in the repo; rebuild in a new sandbox if needed, ~15 min)
+- JDK 25 (Adoptium), client.jar + libraries from the 26.3 version json, fabric-loader 0.20.1 + asm + sponge-mixin from
+  maven.fabricmc.net; Terralith, Lithostitched, Fabric API jars staged from Jack's mods folder.
+- javac over the mod tree minus OwnFrapi (stubbed), OwnIntLifeTaskMixin, OwnIntLifeSectionMixin, FlatFaceShadeMixin, plus a
+  ModInitializer `mcopt.metal.lod.MetaBench` (ServerLifecycleEvents.SERVER_STARTED -> MetaGen.of(server.overworld()) -> generate
+  tiles per level, hash the Rle output, mesh it); its own fabric.mod.json with only `LodMaterialContextAccess` as mixin.
+- Run: `java -Dfabric.gameJarPath=client.jar -Dmcopt.lod.nativeNoise=java -cp <fabric + libs> net.fabricmc.loader.impl.launch.knot.KnotServer nogui`
+  (the client jar runs the dedicated server's Main; eula=true, online-mode=false). JFR works (exit with System.exit, not halt).
+- Output hashes equal before/after = an exact-output check for changes that should not alter the terrain.
+
+### Jack's other notes in that log (not asked about yet)
+- 10:49:40 "dipped to 28-29 fps here that vrazy" (screenshot 10.49.42, jungle canopy at 87 88 67 facing north, 32 fps). MetaLODS
+  was not drawing then (stopped): terrain cost on leaves (C2 performance item, see below).
+- 11:01:16 "eyes of this dragon flickering.. (taa maybe?)" (11.01.17, Ice and Fire dragon): the eyes layer is one of the
+  pipelines EntityShade skips (no TAA offset): the open B3 item.
+
 
 ## Setup
 - Repo: swungback/Imagine-Metal. Push to main → CI (.github/workflows/build.yml) compiles every Metal shader, builds the jar,
@@ -10,6 +1588,25 @@ Where things stand, for picking the work up in a new conversation.
 - Jack's settings: `config/imaginemetal.properties` in that instance. Screenshots and `logs/latest.log` there too. His notes
   are chat lines in the log (`[CHAT] <herningstang> ...`) just before each screenshot.
 - Reversed-Z depth everywhere (0 = far / sky). ImFrame is 928 bytes (lighting.metal, ImagineFrame.SIZE, mcown.m imFrame[928]).
+
+## 2026-11-13 10:36: DEPLOYED (Jack: "swap jars"): mods = metalods branch head, CI run 43333737024, jar sha1 f03b83e6...
+- Copy kept as `instances/Imagine metal/imagine-metal-metalods.jar`. Fallback: `imagine-metal-c2b-water.jar` (388bef08...).
+  Not yet seen in game; waiting for Jack's first test (plan in docs/METALODS.md).
+
+## START HERE: 2026-11-13 ~01:00, MetaLODS built overnight on branch `metalods` (was NOT deployed then, NOT on main)
+- Jack's ask (11-13 00:00): a Voxy-style LOD system inside our shader, Metal-native, as fast as possible, its own menu next to
+  Imagine Metal's, named MetaLODS; unexplored land from the seed like SeedGen; default 128 chunks. He closed the lid: nothing
+  tested in game. Design, limits and his test plan: docs/METALODS.md.
+- Deploy in the morning only with Jack's OK: the branch's CI artifact (`gh run list -R swungback/Imagine-Metal --branch metalods`,
+  `gh run download <run> -n imagine-metal`), game closed, over `mods/imagine-metal-0.1.0.jar`. Fallback stays
+  `imagine-metal-c2b-water.jar` (= main 0cc9a2e, what's in mods now).
+- Look first in latest.log: `[MetaLODS]` lines (ready / dimension / stats every 10 s / "stopped: ..." with a stack trace).
+- Branch state ~01:15: head = "skirts at column sides" (CI green, run 43333737024: the jar to deploy),
+  includes C3 (merged from branch `underwater-window`: under water the window up through the surface is wide, Debug toggle
+  "Wide window up from under water"). Generated LODs are 3D ("Overhangs", default on). Offline tests (not in the repo):
+  runs/mips/meshing/file round trip and the 3D carve, against the bootstrapped 26.3 jar.
+- Still open from before (Jack 00:00): under water he can only see out through a circle right above him (Snell's window from
+  terrain.metal's faked total internal reflection, the 23:50 fix only recoloured the ring). He said it can wait till tomorrow.
 
 ## START HERE: 2026-11-12 23:40, Build C2b DEPLOYED (main 168bd4a, CI green run 43320786647). NOT tested yet.
 - mods folder = C2b: jar sha1 200f0257..., 1524309 bytes. New fallback `imagine-metal-c2.jar` (C2, 9e558ce5...) next to c1/b2/b1.

@@ -22,7 +22,7 @@ public final class Deferred {
 	private Deferred() {
 	}
 
-	static boolean wanted() {
+	public static boolean wanted() {
 		return Settings.deferred && Engine.TERRAIN && !failed && Settings.debug == 0 && !Live.isOff() && !(PbrAtlas.on && Settings.pbrPack) && Hdr.active();
 	}
 
@@ -57,6 +57,8 @@ public final class Deferred {
 	/** (OwnTerrain.drawOpaque's end) true: the pass was switched back, the caller binds the game's pass state again. */
 	public static boolean end(long enc) {
 		if (!Engine.TERRAIN || enc == 0) return false;
+		// (MetaLODS: the far terrain into the G-buffer while its pass is still open, lit with the rest)
+		imaginemetal.metalods.MetaLods.drawInG(enc);
 		try {
 			return ImNative.deferEnd(enc) == 1;
 		} catch (Throwable t) {

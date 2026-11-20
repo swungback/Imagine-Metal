@@ -15,6 +15,8 @@ public final class CompatMixinPlugin implements IMixinConfigPlugin {
 	@Override
 	public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
 		if (mixinClassName.endsWith(".DhRenderApiMixin")) return FabricLoader.getInstance().isModLoaded("distanthorizons");
+		if (mixinClassName.endsWith(".PolymerPredictMixin")) return FabricLoader.getInstance().isModLoaded("polymer-core");
+		if (mixinClassName.endsWith(".C2mePriorityMixin")) return FabricLoader.getInstance().isModLoaded("c2me-base") && !"off".equalsIgnoreCase(System.getProperty("mcopt.gen.worldgenQos", "default").trim());
 		return false;
 	}
 

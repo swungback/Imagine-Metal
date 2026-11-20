@@ -17,7 +17,21 @@ public final class GenMixinPlugin implements IMixinConfigPlugin {
 		mcopt.metal.Profile.apply(); // before any flag is read
 	}
 
-	private static final boolean WORLDGEN_QOS = System.getProperty("mcopt.gen.worldgenQos") != null;
+	/**
+	 * (18 Nov cold teleport) The integrated server's chunk generation threads now go into the default QoS class by default
+	 * (C2ME's workers included, see compat.C2mePriorityMixin): C2ME had put them at a fixed priority below every default-class
+	 * thread, and on a busy Mac (MetaLODS, Streams, the Metal driver, other apps) the six generation workers stood runnable
+	 * yet got under one core between them while the chunks under the player were missing. User-initiated (the server thread's
+	 * class) was tried: no faster, and 1.2-2.4 s frame stalls while the chunks came in. -Dmcopt.gen.worldgenQos=off: as before
+	 * (the threads' class untouched); =CLASS: that class.
+	 */
+	private static final boolean WORLDGEN_QOS;
+
+	static {
+		String v = System.getProperty("mcopt.gen.worldgenQos");
+		if (v == null) System.setProperty("mcopt.gen.worldgenQos", v = "default");
+		WORLDGEN_QOS = !"off".equalsIgnoreCase(v.trim());
+	}
 	private static final boolean NATIVE_NOISE = !System.getProperty("mcopt.gen.nativeNoise", "").isBlank();
 
 	@Override
@@ -33,6 +47,7 @@ public final class GenMixinPlugin implements IMixinConfigPlugin {
 	public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
 		if (mixinClassName.endsWith(".GenWorldgenQosMixin")) return WORLDGEN_QOS;
 		if (mixinClassName.endsWith(".GenNoiseChunkMixin")) return NATIVE_NOISE;
+		if (mixinClassName.endsWith(".GenBaseHeightCacheMixin")) return mcopt.metal.lod.LodBaseHeights.ENABLED;
 		return false;
 	}
 

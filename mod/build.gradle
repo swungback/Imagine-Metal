@@ -16,13 +16,13 @@ dependencies {
 def nativeOut = layout.buildDirectory.dir('natives/natives')
 
 tasks.register('compileNative', Exec) {
-	def sources = ['mcmetal.m', 'mclod.m', 'lodseam.m', 'lodmesh.c', 'lodnoise.c', 'rec.m', 'mcown.m', 'mccap.m', 'imshadow.m', 'imbloom.m', 'imlight.m', 'imsky.m', 'imssr.m', 'imtime.m'].collect { file("src/main/native/$it") }  // (imshadow.m: Imagine Metal's shadow pass)
+	def sources = ['mcmetal.m', 'mclod.m', 'lodseam.m', 'lodmesh.c', 'lodnoise.c', 'rec.m', 'mcown.m', 'mccap.m', 'imshadow.m', 'imbloom.m', 'imlight.m', 'imsky.m', 'imssr.m', 'imtime.m', 'metalods.m'].collect { file("src/main/native/$it") }  // (imshadow.m: Imagine Metal's shadow pass)
 	def output = nativeOut.get().file('libmcmetal.dylib').asFile
 	inputs.files sources, file('src/main/native/mcmetal.h'), file('src/main/native/lodmesh.h')
 	outputs.file output
 	doFirst { output.parentFile.mkdirs() }
 	commandLine(['clang', '-fno-objc-arc', '-O2', '-Wall', '-arch', 'arm64', '-mmacosx-version-min=15.0', '-dynamiclib', '-install_name', '@rpath/libmcmetal.dylib',
-		'-framework', 'CoreGraphics', '-framework', 'CoreVideo', '-framework', 'Foundation', '-framework', 'Metal', '-framework', 'QuartzCore', '-o', output] + sources)
+		'-framework', 'CoreGraphics', '-framework', 'CoreVideo', '-framework', 'Foundation', '-framework', 'Metal', '-framework', 'MetalFX', '-framework', 'QuartzCore', '-o', output] + sources)
 }
 
 processResources {
@@ -39,6 +39,11 @@ jar {
 	from(rootProject.file('third_party/mcopt')) {
 		include 'LICENSE', 'NOTICE'
 		into 'META-INF/mcopt'
+	}
+	// (fix9) the bushy leaves are Way Better Leaves' (MIT): its notice goes along
+	from(rootProject.file('third_party/waybetterleaves')) {
+		include 'NOTICE'
+		into 'META-INF/waybetterleaves'
 	}
 }
 

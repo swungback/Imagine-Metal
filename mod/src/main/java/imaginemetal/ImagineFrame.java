@@ -14,7 +14,7 @@ import org.joml.Vector4f;
 import org.lwjgl.system.MemoryUtil;
 
 /**
- * The lighting's per-frame values (lighting.metal ImFrame, 928 bytes): where the sun or moon is, the colours of its light, of
+ * The lighting's per-frame values (lighting.metal ImFrame, 944 bytes): where the sun or moon is, the colours of its light, of
  * the sky's light and of torches for this time of day and weather, the cave floor, the tone curve. Made once per frame at
  * LevelRenderer.render's start (LevelRendererMixin) and handed to the backend, which binds it on every terrain draw.
  *
@@ -22,7 +22,7 @@ import org.lwjgl.system.MemoryUtil;
  * a deep orange golden hour, blue-violet nights), tuned for our pipeline.
  */
 public final class ImagineFrame {
-	static final int SIZE = 928;
+	static final int SIZE = 944;
 	private static final ByteBuffer BUF = MemoryUtil.memAlloc(SIZE).order(ByteOrder.LITTLE_ENDIAN);
 	private static final long ADDRESS = MemoryUtil.memAddress(BUF);
 	private static int frame;
@@ -82,6 +82,7 @@ public final class ImagineFrame {
 	static boolean shaftOn, underwater;
 	static float shaftRain, shaftNoon, shaftSunVis, shaftCover;
 	private static float wet;
+	private static final float[] lodFog = new float[2];
 	/** this frame's TAA jitter (Minecraft's clip units, y up; Bloom un-jitters the history lookup with it) */
 	static float jitterX, jitterY;
 	/** this frame's render scale (Hdr.scale: the world's size on each axis as a share of the screen's; 1 = all of it) */
@@ -128,7 +129,7 @@ public final class ImagineFrame {
 	private static final float[] MOON = {0.09f, 0.083f, 0.15f};
 	private static final float[] NIGHT_SKY = {0.027f, 0.029f, 0.064f};
 	private static final float[] TORCH = {1.45f, 0.50f, 0.12f};  // (Reimagined's hue, a little brighter: its torch rooms are lit further)
-	private static final float[] CAVE = {0.0115f, 0.0125f, 0.0175f};  // (twice what it was: deep caves were pitch black, nothing to see by)
+	private static final float[] CAVE = {0.0175f, 0.019f, 0.027f};  // (fix9: half as much again: Jack's 19.11.43 "looks dark", a ravine's floor black but for the lava)  // (twice what it was: deep caves were pitch black, nothing to see by)
 	private static final float[] END_LIGHT = {0.52f, 0.40f, 0.74f};
 	private static final float[] END_SKY = {0.095f, 0.068f, 0.15f};
 	/** where the End's black hole hangs (Settings.endStyle 1): low in the sky, so the islands throw long shadows */
@@ -138,6 +139,12 @@ public final class ImagineFrame {
 
 	private ImagineFrame() {
 	}
+
+	public static void lodTransition(float end) {
+        BUF.putFloat(SIZE - 8, end > 0 ? end - imaginemetal.metalods.MetaLods.EDGE_BAND : 0f);  // (fix21: the band's width, as MLFrame's)
+        BUF.putFloat(SIZE - 4, end);
+        ImNative.frame(ADDRESS, SIZE);
+    }
 
 	static long address() {
 		return ADDRESS;
@@ -495,9 +502,9 @@ public final class ImagineFrame {
 		// and as Build C2 has it (Settings.shaftsFull))
 		// (w, Build C2, bits: 1 the shafts' strong mode only through shadow (C1's whiteout fix, until C2 keyed on z), 2 the plants'
 		// shadow slice is valid, 4 the far shadow map's receivers without the oversized offsets, 8 (benchmark) water and glass
-		// reflect the sky alone, no trace; 16 (C2b) the water's surface seen from below past the window in the water's fog colour)
+		// reflect the sky alone, no trace; 16 (C2b) the water's surface seen from below past the window in the water's fog colour; 32 (C3) that window wide; 64 (fix4) that surface lit and rippling, not the fog's colour)
 		int envBits = (Settings.shaftVeilFix ? 1 : 0) | (Shadows.plantsValid() ? 2 : 0) | (Settings.shadowFarFix ? 4 : 0) | (Settings.waterTrace ? 0 : 8)
-			| (Settings.waterSurfaceFog ? 16 : 0);
+			| (Settings.waterSurfaceFog ? 16 : 0) | (Settings.waterWideWindow ? 32 : 0) | (Settings.waterUnderSurface ? 64 : 0);
 		put(cave, night, Settings.shaftVeilFix && !Settings.shaftsFull ? 0.35f : 0f, envBits);
 		for (int c = 0; c < 2; c++) for (int i = 0; i < 16; i++) BUF.putFloat(Shadows.MATRIX[c][i]);
 		// shadow: near cascade normal offset, valid, far cascade normal offset
@@ -523,7 +530,7 @@ public final class ImagineFrame {
 		put(sunDir[0], sunDir[1], sunDir[2], ourFog ? 1f : 0f);
 		// the air fog (Photon's): Rayleigh by biome (rgb), Mie by time of day and weather (w)
 		put(Haze.rayleigh[0], Haze.rayleigh[1], Haze.rayleigh[2], dim == 0 ? Haze.mie(sunDir[0], sunDir[1], rain) : 0f);
-		put(mc.options.getEffectiveRenderDistance() * 16f, (float) cam.y, 1f - cave, Settings.haze);
+		put(Math.max(mc.options.getEffectiveRenderDistance() * 16f, imaginemetal.metalods.MetaLods.reach()), (float) cam.y, 1f - cave, Settings.haze);
 		// the reflections' history (Reflections): its transform and inverse, and how far the camera has moved since (w 1 = valid)
 		for (int c = 0; c < 4; c++) for (int r = 0; r < 4; r++) BUF.putFloat(Reflections.CLIP.get(c, r));
 		for (int c = 0; c < 4; c++) for (int r = 0; r < 4; r++) BUF.putFloat(Reflections.CLIP_INV.get(c, r));
@@ -615,6 +622,8 @@ public final class ImagineFrame {
 		// (z: the depth before the translucent pass, captured last frame, is bound at texture 26 for the mob shadows' trace)
 		// (w: the air pass draws the haze and the border fade this frame, the opaque terrain's fragments leave them out)
 		put(PbrAtlas.on && Settings.pbrPack ? 1f : 0f, Settings.parallax ? 1f : 0f, Reflections.underDepthReady ? 1f : 0f, Reflections.promiseAir(ourFog) ? 1f : 0f);
+		imaginemetal.metalods.MetaLods.farFog(lodFog);
+		put(lodFog[1], imaginemetal.metalods.MetaSettings.coverageDebug, 0f, 0f);
 		if (BUF.position() != SIZE) throw new IllegalStateException("ImFrame is " + BUF.position() + " bytes, not " + SIZE);
 	}
 

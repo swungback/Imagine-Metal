@@ -597,6 +597,11 @@ static float4 imClouds(float3 d, constant ImFrame &f, texture2d<float> ct, sampl
 		float fogF = ratio * ratio * 0.707;
 		col = mix(imSkyColor(d, f, false), col, fogF * 0.707);
 		float a = sqrt(min(ratio, 0.75) * 1.33333);
+		// (fix7: a cloud a few blocks from the eye fades out. Flying at the clouds' height, every ray upward met the same cell
+		// right above the camera, and the whole sky above the horizon turned one flat pale colour (Jack's 17.24.36, 17.26.15:
+		// "pale white-grey even overhead"; Gael's sky is blue between clouds far above). Gone within 6 blocks, whole from 40)
+		a *= smoothstep(6.0, 40.0, t);
+		if (a <= 0.0) continue;
 		hitT = t;
 		return float4(col, a);
 	}

@@ -31,6 +31,13 @@ public final class Settings {
 	public static volatile float auroraInfluence = Config.number("imaginemetal.auroraInfluence", 1f, 0f, 3f);
 	public static volatile boolean heldLight = Engine.flag("imaginemetal.heldLight", true);
 	public static volatile boolean waving = Engine.flag("imaginemetal.waving", true);
+	/**
+	 * (fix9) Bushy leaves: Way Better Leaves' plus leaves (mcopt.metal.own.BushyLeaves), three crossed bushy planes on every leaf
+	 * block that shows a face. Leaf culling: WBL's culling, no planes on leaves with no visible face. Chunks rebuild. (fix8's own
+	 * culling of the faces between leaves and its filled outer faces are gone: Jack 2026-11-13 "looks horrible".)
+	 */
+	public static volatile boolean bushyLeaves = Engine.flag("imaginemetal.bushyLeaves", true);
+	public static volatile boolean leafCulling = Engine.flag("imaginemetal.leafCulling", true);
 	public static volatile int waterStyle = (int) Config.number("imaginemetal.waterStyle", 1, 0, 2);
 	public static volatile int stars = (int) Config.number("imaginemetal.stars", 1, 0, 1);
 	/** the End's sky: 0 Reimagined's violet with its beams, 1 a black hole (after Iteration's) */
@@ -73,6 +80,16 @@ public final class Settings {
 	public static volatile boolean shadowFarCache = Engine.flag("imaginemetal.shadowFarCache", true);
 	/** The haze and the border fade in one pass over the opaque world (Reflections.promiseAir): not saved. -Dimaginemetal.airPass=false. */
 	public static volatile boolean airPass = Engine.flag("imaginemetal.airPass", true);
+	/**
+	 * The MetalFX build: Apple's temporal scaler does the anti-aliasing and brings the world up to the screen's size, in place of
+	 * our own TAA pass (Bloom, imbloom.m). Not saved. -Dimaginemetal.metalfx=false. The flips: the sign MetalFX is given the
+	 * jitter (J) and the motion (M) with on each axis, debug switches until the right ones are known from a test.
+	 */
+	public static volatile boolean metalfx = Engine.flag("imaginemetal.metalfx", true);
+	public static volatile boolean metalfxFlipJX = Engine.flag("imaginemetal.metalfxFlipJX", false);
+	public static volatile boolean metalfxFlipJY = Engine.flag("imaginemetal.metalfxFlipJY", false);
+	public static volatile boolean metalfxFlipMX = Engine.flag("imaginemetal.metalfxFlipMX", false);
+	public static volatile boolean metalfxFlipMY = Engine.flag("imaginemetal.metalfxFlipMY", false);
 	/** Build B2: the opaque terrain lit once per pixel in tile memory (Deferred): not saved. -Dimaginemetal.deferred=false. */
 	public static volatile boolean deferred = Engine.flag("imaginemetal.deferred", true);
 	/** The near shadow cascade drawn every other frame (Shadows.skipNear): not saved. -Dimaginemetal.shadowNearAlternate=false. */
@@ -157,6 +174,17 @@ public final class Settings {
 	 * water's own fog colour, not that colour at a fifth: it was a dark murky ring around the window. -Dimaginemetal.waterSurfaceFog=false.
 	 */
 	public static volatile boolean waterSurfaceFog = Engine.flag("imaginemetal.waterSurfaceFog", true);
+	/**
+	 * (Build C3) Under water, the window up through the surface wide: the surface only turns into the mirrored deep water at a
+	 * grazing angle (past ~70 degrees from straight up), not past ~45 (a real water surface's window, which is what Jack found
+	 * too small: "can't see out except a circle right above me"). -Dimaginemetal.waterWideWindow=false.
+	 */
+	public static volatile boolean waterWideWindow = Engine.flag("imaginemetal.waterWideWindow", true);
+	/**
+	 * (fix4) Under water, the surface seen from below brighter than the water's fog and rippling, so it reads as the surface (it
+	 * was the fog's own colour and vanished into it). -Dimaginemetal.waterUnderSurface=false.
+	 */
+	public static volatile boolean waterUnderSurface = Engine.flag("imaginemetal.waterUnderSurface", true);
 	/** (benchmark only) Water and glass reflections traced through the screen; false: the sky alone. */
 	public static volatile boolean waterTrace = true;
 	public static volatile boolean ssao = Engine.flag("imaginemetal.ssao", true);
@@ -205,6 +233,8 @@ public final class Settings {
 		v.put("imaginemetal.auroraInfluence", String.format(java.util.Locale.ROOT, "%.2f", auroraInfluence));
 		v.put("imaginemetal.heldLight", String.valueOf(heldLight));
 		v.put("imaginemetal.waving", String.valueOf(waving));
+		v.put("imaginemetal.leafCulling", String.valueOf(leafCulling));
+		v.put("imaginemetal.bushyLeaves", String.valueOf(bushyLeaves));
 		v.put("imaginemetal.waterStyle", String.valueOf(waterStyle));
 		v.put("imaginemetal.glassReflections", String.valueOf(glassReflections));
 		v.put("imaginemetal.shafts", String.valueOf(shafts));

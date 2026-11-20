@@ -419,6 +419,8 @@ public final class OwnTerrain {
 	static final int RUN_INTS = 6;
 	/** exactPos: table entries already in the arena at posTableArena. */
 	private int posTableSynced;
+	/** (fix4) The frame of the last level reset (disposeAll): the exactPos copy is checked every frame for a while after it. */
+	private long posCheckFrom = Long.MIN_VALUE / 2;
 	private long posTableArena;
 	// (qpos=true|all: every coordinate; =small: only coordinates within 0.001 of a 1/16 step (snow's 0.002 insets, lichen);
 	// =large: only the others (random block offsets, fluid heights))
@@ -1060,6 +1062,7 @@ public final class OwnTerrain {
 		if (this.listCap > 1 << 15) this.growLists(1 << 15);
 		this.runDeferredNow();
 		boolean renewed = this.renewArena();
+		this.posCheckFrom = this.frame;
 		long used, cap, recUsed, recCap;
 		synchronized (this.quadAlloc) {
 			used = this.quadAlloc.used();
@@ -1067,10 +1070,10 @@ public final class OwnTerrain {
 		}
 		recUsed = this.recAlloc.used();
 		recCap = this.recAlloc.capacity();
-		System.out.printf("mcopt-own reset: %d meshes released; arena %.1f -> %.1f of %.0f MB used (was %.0f)" + (renewed ? ", pages renewed" : ", kept") + ", records %d of %d, lists %d, sorted copies %.1f MB, orphans swept so far %d; own Metal buffers %d, %.1f MB%n",
+		System.out.println(String.format(java.util.Locale.ROOT, "mcopt-own reset: %d meshes released; arena %.1f -> %.1f of %.0f MB used (was %.0f)" + (renewed ? ", pages renewed" : ", kept") + ", records %d of %d, lists %d, sorted copies %.1f MB, orphans swept so far %d; own Metal buffers %d, %.1f MB",
 			meshesBefore, usedBefore * (double) ARENA_QUAD / 1048576, used * (double) ARENA_QUAD / 1048576, cap * (double) ARENA_QUAD / 1048576,
 			capBefore * (double) ARENA_QUAD / 1048576, recUsed, recCap, this.listCap, TS_SORTED_BYTES.get() / 1048576.0, this.orphansSwept,
-			OwnNative.liveBuffers(), OwnNative.liveBufferBytes() / 1048576.0);
+			OwnNative.liveBuffers(), OwnNative.liveBufferBytes() / 1048576.0));
 	}
 
 	/**
@@ -1169,6 +1172,13 @@ public final class OwnTerrain {
 		while (!this.deferred.isEmpty() && (long) this.deferred.peekFirst()[0] <= this.frame - FRAMES) ((Runnable) this.deferred.pollFirst()[1]).run();
 		int k = (int) (this.frame % FRAMES);
 		this.dirtyCount[k] = 0;
+		if (this.lateCount > 0) {
+			// (the slots changed since the last frame's table copy, by disposeAll: every copy takes them over the next FRAMES frames)
+			if (this.dirty[k].length < this.lateCount) this.dirty[k] = Arrays.copyOf(this.dirty[k], Integer.highestOneBit(this.lateCount) * 2);
+			System.arraycopy(this.late, 0, this.dirty[k], 0, this.lateCount);
+			this.dirtyCount[k] = this.lateCount;
+			this.lateCount = 0;
+		}
 		this.processEvents();
 		this.sweepOrphans();
 		if (OwnPosTable.ON) {
@@ -1178,6 +1188,10 @@ public final class OwnTerrain {
 				if (this.posTableArena != this.arenaAddress) this.posTableSynced = 0;
 				this.posTableSynced = OwnPosTable.sync(this.arenaAddress, this.posTableSynced);
 				this.posTableArena = this.arenaAddress;
+				// (fix4: every 30 frames, and every frame for the first 600 after a level reset, the arena's copy checked against the
+				// table and mended: the stretched plants after a rejoin; the log says whether it was this)
+				if (this.frame % 30 == 0 || this.frame - this.posCheckFrom < 600)
+					OwnPosTable.verify(this.arenaAddress, this.posTableSynced, this.frame - this.posCheckFrom < 600 ? "after a level reset" : "routine");
 			} finally {
 				this.arenaLock.readLock().unlock();
 			}
@@ -1192,6 +1206,21 @@ public final class OwnTerrain {
 			}
 		}
 		this.tableOpen = false;
+		if (this.frame - this.posCheckFrom >= 1 && this.frame - this.posCheckFrom <= FRAMES && this.slotCap > 0) {
+			// (phantom-blocks check: right after its update, this copy must equal the master; once for each copy after a level reset)
+			int bad = 0, n = Math.min(this.slotCap, this.maxSlot + 1);
+			for (int s = 0; s < n; s++) {
+				long a = this.master + (long) s * SECTION_BYTES, b = table + (long) s * SECTION_BYTES;
+				for (int o = 0; o < SECTION_BYTES; o += 4) {
+					if (MemoryUtil.memGetInt(a + o) != MemoryUtil.memGetInt(b + o)) {
+						bad++;
+						MemoryUtil.memCopy(a, b, SECTION_BYTES);
+						break;
+					}
+				}
+			}
+			System.out.println("[Imagine Metal] section table copy " + k + " after a level reset: " + (bad == 0 ? "matches" : bad + " stale slots of " + n + " (mended)"));
+		}
 		int live = (int) this.recAlloc.used();
 		// (-Dmcopt.own.frag.listGrowFault, tieClose test: this growth skipped, so the cull meets a real shortfall, listCap below the
 		// records in use; tieCloseFallback must grow the lists before encoding, counted as 'lists grown at the cull')
@@ -1468,10 +1497,24 @@ public final class OwnTerrain {
 		int cutoutUnits = m == null || m.layers[1] == null ? 0 : m.layers[1].runs.length / RUN_INTS;
 		MemoryUtil.memPutInt(a + 24, solidUnits <= 0xFFFF && cutoutUnits <= 0x7FFF ? 1 << 31 | cutoutUnits << 16 | solidUnits : 0);
 		if (OwnTieGroups.ON && OwnTieGroups.BLOCKS) MemoryUtil.memPutInt(a + 28, m == null ? 0 : m.grpStart);  // (Section.pad1: the tie-group block, 0 = none)
+		// (Imagine Metal, phantom blocks) A change made between frames (disposeAll: leaving a world, a dimension change, a resource
+		// reload) went into the list of a frame whose table copy was already made; that list is emptied before that copy is updated
+		// again, so one of the FRAMES copies kept the whole last level's section table (origins and record ranges that new meshes
+		// reuse) and every FRAMES-th frame drew it: the End's slabs over the Overworld, stretched grass after rejoining, phantom
+		// builds. Such changes now wait in their own list and join the next frame's, which every copy takes.
+		if (!this.tableOpen) {
+			if (this.lateCount == this.late.length) this.late = Arrays.copyOf(this.late, this.late.length * 2);
+			this.late[this.lateCount++] = slot;
+			return;
+		}
 		int k = (int) (this.frame % FRAMES);
 		if (this.dirtyCount[k] == this.dirty[k].length) this.dirty[k] = Arrays.copyOf(this.dirty[k], this.dirty[k].length * 2);
 		this.dirty[k][this.dirtyCount[k]++] = slot;
 	}
+
+	/** Slots changed between frames (setSlot with the table closed): moved into the next frame's dirty list by beginFrame0. */
+	private int[] late = new int[256];
+	private int lateCount;
 
 	private void release(Object mesh) {
 		OwnMesh m = this.meshes.remove(mesh);
@@ -2098,6 +2141,7 @@ public final class OwnTerrain {
 		Matrix4f clip = new Matrix4f(proj).mul(view);
 		imaginemetal.Reflections.noteClip(clip, camera.pos.x, camera.pos.y, camera.pos.z);
 		imaginemetal.Deferred.frame(this.own, clip);  // (Imagine Metal, Build B2: deferred lighting for this frame's opaque draws)
+		imaginemetal.metalods.MetaLods.frame(clip, camera.pos.x, camera.pos.y, camera.pos.z, MetalBridge.viewHandle(atlas), renderDistance);  // (MetaLODS)
 		GpuBufferSlice terrain = RenderSystem.getDynamicUniforms().writeTerrainTransform(new Matrix4f(view), atlas.getWidth(0), atlas.getHeight(0));
 		try (MemoryStack stack = MemoryStack.stackPush()) {
 			long f = stack.ncalloc(16, 1, CULL_FRAME_BYTES);

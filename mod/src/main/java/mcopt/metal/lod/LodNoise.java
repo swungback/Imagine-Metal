@@ -129,6 +129,15 @@ final class LodNoise {
 		return null;
 	}
 	final boolean slideTop;
+	boolean accurateSurface;
+	/** (fix17) Level 0 through LodShellSampler (the far terrain: no per-block cave parts). -Dmetalods.shell=false: off. */
+	boolean shell;
+	static final boolean SHELL = !"false".equals(System.getProperty("metalods.shell"));
+	/**
+	 * Levels below this take their surface from the router's final density (caves and all); MetaLODS sets 0: its surface is the
+	 * terrain shape's at every level (the final density costs ~9x a sample with Terralith, and its 3D carve uses the shape anyway).
+	 */
+	int fineLevels = LodConfig.FINE_LEVELS;
 	final BiomeSource biomes;
 	final @Nullable MultiNoiseBiomeSource multi;
 	final int seaLevel, minY, maxY;
@@ -143,10 +152,11 @@ final class LodNoise {
 			LodGenQos.once(LodGenQos.LOD, "far-terrain generation");
 		}
 
-		final SamplerContext ctx = SamplerContext.builder().enableCaches().build();
+		final SamplerContext ctx = (LodBuffers.ON ? SamplerContext.builder().useBufferArena(LodBuffers.pool()) : SamplerContext.builder()).enableCaches().build();
 		// (-Dmcopt.lod.nativeNoise: copies whose noise leaves are evaluated by LodNativeNoise's backends; off: the game's own)
 		final DensitySamplerSet samplers = LodNativeNoise.wrap(LodNoise.this.random.samplersWithContext(this.ctx), LodNoise.this);
 		final DensitySampler.Bound terrain = this.samplers.get(LodNoise.this.terrain);
+        final DensitySampler.Bound solids = LodSolidSampler.create(LodNoise.this.terrain,this.samplers);
 		final DensitySampler.Bound fine = this.samplers.get(LodNoise.this.fine);
 		final DensitySampler.@Nullable Bound inner = LodNoise.this.split != null ? this.samplers.get(LodNoise.this.split.inner()) : null;
 		final DensitySampler.Bound[] carvers = LodNoise.this.split != null
@@ -195,6 +205,11 @@ final class LodNoise {
 
 	/** A generator for this level, or null when it isn't noise-based (flat, debug) or has a ceiling. */
 	static @Nullable LodNoise of(ServerLevel level) {
+		return of(level, false);
+	}
+
+	/** MetaLODS must follow the world's router, including datapacks' terrain operators. */
+	static @Nullable LodNoise of(ServerLevel level, boolean worldRouter) {
 		if (!(level.getChunkSource().getGenerator() instanceof NoiseBasedChunkGenerator gen)) return null;
 		if (level.dimensionType().hasCeiling()) return null;
 		NoiseGeneratorSettings settings = gen.generatorSettings().value();
@@ -203,12 +218,41 @@ final class LodNoise {
 		boolean slide = false;
 		Optional<? extends Holder<DensityFunction>> cheese = level.registryAccess().lookupOrThrow(Registries.DENSITY_FUNCTION)
 			.get(ResourceKey.create(Registries.DENSITY_FUNCTION, Identifier.withDefaultNamespace("overworld/sloped_cheese")));
-		if (cheese.isPresent() && gen.stable(NoiseGeneratorSettings.OVERWORLD)) {
+		if (!worldRouter && cheese.isPresent() && gen.stable(NoiseGeneratorSettings.OVERWORLD)) {
 			terrain = cheese.get().value();
 			slide = true;
 		}
 		System.out.println("mcopt-lod: terrain from " + (slide ? "overworld/sloped_cheese (+ top slide)" : "the router's final density") + " in " + level.dimension().identifier());
-		return new LodNoise(level, settings, random, terrain, slide);
+		LodNoise result = new LodNoise(level, settings, random, terrain, slide);
+        result.accurateSurface = worldRouter;
+        return result;
+	}
+
+	/**
+	 * The far levels' generator (MetaLODS levels 2+): the router's final density without its caves (LodFarTerrain), or null
+	 * when there are none to leave out (then the router itself serves every level).
+	 */
+	static @Nullable LodNoise far(ServerLevel level) {
+		try {
+			if (!(level.getChunkSource().getGenerator() instanceof NoiseBasedChunkGenerator gen)) return null;
+			if (level.dimensionType().hasCeiling()) return null;
+			NoiseGeneratorSettings settings = gen.generatorSettings().value();
+			int[] count = {0};
+			DensityFunction terrain = LodFarTerrain.withoutCaves(settings.noiseRouter().finalDensity(), count);
+			if (count[0] == 0) return null;
+			System.out.println("mcopt-lod: far terrain (levels 2+): the router's final density without its caves (" + count[0]
+				+ " parts left out) in " + level.dimension().identifier());
+			LodNoise result = new LodNoise(level, settings, level.getChunkSource().randomState(), terrain, false);
+			result.fineLevels = 0;
+			// (fix12: levels 0-1 block-exact as the whole router's: interpolating 4 x 8 corners made blocky ledges and walls
+			// that turned into the real landscape on approach; costs about what the interpolated volume did)
+			result.accurateSurface = true;
+			result.shell = true;
+			return result;
+		} catch (RuntimeException e) {
+			System.out.println("mcopt-lod: no cave-free far terrain (" + e + "): the router at every level");
+			return null;
+		}
 	}
 
 	/** This thread's biome resolver (the climate noise, as the game's chunks are filled). */
@@ -216,8 +260,14 @@ final class LodNoise {
 		return this.workers.get().resolver;
 	}
 
+    int previewGround(int x, int z) {
+        short[] height = new short[1];
+        LodSurfaceSearch.sample(this.workers.get().terrain, height, 1, 1, x, z, this.minY, this.maxY);
+        return height[0];
+    }
+
 	/** Nanoseconds spent per level in each stage (density, biomes, materials), and tiles, for the stats line. */
-	final java.util.concurrent.atomic.AtomicLongArray stageNanos = new java.util.concurrent.atomic.AtomicLongArray(16 * 4);
+	java.util.concurrent.atomic.AtomicLongArray stageNanos = new java.util.concurrent.atomic.AtomicLongArray(16 * 4);
 
 	/** Fills t's columns. Runs on a worker thread (with -Dmcopt.lod.yield, after the server's chunk work: LodYield). */
 	void generate(LodTile t) {
@@ -237,9 +287,19 @@ final class LodNoise {
 		long t0 = System.nanoTime();
 		Worker w = this.workers.get();
 		int c = t.cell(), x0 = t.minX(), z0 = t.minZ(), size = t.size;
+        if (this.accurateSurface && t.level <= 1) {
+            // The 1-block shell preserves exact surfaces. Level 1 only needs the centers of its 2-block voxels.
+            t.blockStepY = t.level == 1 && this.shell ? c : 1;
+            t.blockVolume = this.shell && SHELL && t.level == 0
+                ? LodShellSampler.sample(w.terrain, w.solids, t.height, t.size, c, x0, z0, this.minY, this.maxY, t.keepVolume)
+                : LodSurfaceSampler.sample(w.solids, t.height, t.size, c, x0, z0, this.minY, this.maxY, t.keepVolume, t.blockStepY);
+            t.blockNy = LodSurfaceSampler.samplesY(this.minY, this.maxY, t.blockStepY);
+            this.finish(t, w, t0);
+            return;
+        }
 		// Sample grid: every s blocks (s >= 4, the game's cell width), corners included, so finer levels interpolate.
-		int s = Math.max(c, 4), n = size * c / s, g = n + 1;
-		if (s == c && COARSE) {
+		int s = stride(t.level, c), n = size * c / s, g = n + 1;
+		if (s == c && COARSE && !t.keepVolume) {
 			this.coarseSurface(t, w);
 			this.finish(t, w, t0);
 			return;
@@ -247,14 +307,34 @@ final class LodNoise {
 		int ny = (this.maxY - this.minY) / STEP_Y + 1, y0 = Math.floorDiv(this.minY, STEP_Y) * STEP_Y;
 		DensityVolume volume = new DensityVolume(g, ny, g, x0, y0, z0, s, STEP_Y, s);
 		int vsize = volume.size();
-		if (w.columns.length < vsize) w.columns = new float[vsize];
-		DensityBuffer buffer = DensityBuffer.createUnpooled(vsize);
-		boolean fine = LodConfig.FINE_DENSITY && t.level < LodConfig.FINE_LEVELS;
+		boolean fine = LodConfig.FINE_DENSITY && t.level < this.fineLevels;
 		// with the final density split, the interpolated part at the cell corners (the game interpolates it, then squeezes)
 		boolean exact = fine && w.inner != null && s == 4;
-		(exact ? w.inner : fine ? w.fine : w.terrain).sampleVolume(buffer, volume);
-		float[] d = w.columns;
-		for (int i = 0; i < vsize; i++) d[i] = buffer.get(i);
+		float[] d;
+		if (t.keepVolume && !fine) {
+			d = t.volume = LodBuffers.floats(1, vsize);
+		} else {
+			if (w.columns.length < vsize) w.columns = new float[vsize];
+			d = w.columns;
+		}
+		// the top slide leaves -0.078125 at y 256 and above whatever the terrain's value: those samples aren't taken
+		int nyS = this.slideTop && !fine ? Math.clamp((256 - y0 + STEP_Y - 1) / STEP_Y, 1, ny) : ny;
+		if (nyS < ny) {
+			DensityVolume part = new DensityVolume(g, nyS, g, x0, y0, z0, s, STEP_Y, s);
+			try (var pb = LodBuffers.acquire(part.size())) {
+				LodDensityBatch.sample(w.terrain, pb, part);
+				for (int col = 0; col < g * g; col++) {
+					int from = col * nyS, to = col * ny;
+					for (int k = 0; k < nyS; k++) d[to + k] = pb.get(from + k);
+					for (int k = nyS; k < ny; k++) d[to + k] = -0.078125F;
+				}
+			}
+		} else {
+			try (var buffer = LodBuffers.acquire(vsize)) {
+				LodDensityBatch.sample(exact ? w.inner : fine ? w.fine : w.terrain, buffer, volume);
+				for (int i = 0; i < vsize; i++) d[i] = buffer.get(i);
+			}
+		}
 		if (this.slideTop && !fine) {
 			// the final density's top slide: toward -0.078125 from y 240 to 256
 			for (int k = 0; k < ny; k++) {
@@ -316,6 +396,36 @@ final class LodNoise {
 		this.finish(t, w, t0);
 	}
 
+	/**
+	 * (MetaLODS) The terrain's density (the function the surface is found in, with the final density's top slide) over a volume
+	 * for 3D far terrain: g x ny x g samples from (x0, y0, z0), every s blocks across and STEP_Y up, index k + ny (x + g z).
+	 * y0 / ny as generate0 lays them out (from the dimension's lowest y down to a multiple of 8, to its top). Worker thread.
+	 */
+	float[] terrainVolume(int x0, int z0, int g, int s) {
+		Worker w = this.workers.get();
+		int ny = (this.maxY - this.minY) / STEP_Y + 1, y0 = Math.floorDiv(this.minY, STEP_Y) * STEP_Y;
+		DensityVolume volume = new DensityVolume(g, ny, g, x0, y0, z0, s, STEP_Y, s);
+		int size = volume.size();
+		float[] d = new float[size];
+		try (var buffer = LodBuffers.acquire(size)) {
+			LodDensityBatch.sample(w.terrain, buffer, volume);
+			for (int i = 0; i < size; i++) d[i] = buffer.get(i);
+		}
+		if (this.slideTop) {
+			for (int col = 0; col < g * g; col++) for (int k = 0; k < ny; k++) d[k + col * ny] = this.slide(y0 + k * STEP_Y, d[k + col * ny]);
+		}
+		return d;
+	}
+
+	/** (MetaLODS) terrainVolume's vertical layout: the lowest sample's y and the sample count. */
+	int volumeY0() {
+		return Math.floorDiv(this.minY, STEP_Y) * STEP_Y;
+	}
+
+	int volumeNy() {
+		return (this.maxY - this.minY) / STEP_Y + 1;
+	}
+
 	/** The top face of the water the game's aquifer puts over a column's ground (DRY: none; under sea level only). */
 	private short waterOver(Aquifer aquifer, float[] col, int x, int top, int z, int y0) {
 		if (top >= this.seaLevel) return LodTile.DRY;
@@ -360,17 +470,22 @@ final class LodNoise {
 	 * erosion, ridges) in the sampler's caches from the volume, so only the 3D noise is evaluated again: a quarter of the work.
 	 */
 	private void coarseSurface(LodTile t, Worker w) {
+        if(!this.slideTop) {
+            LodSurfaceSearch.sample(w.terrain,t.height,t.size,t.cell(),t.minX(),t.minZ(),this.minY,this.maxY,!t.surfacePreview);
+            return;
+        }
 		int c = t.cell(), x0 = t.minX(), z0 = t.minZ(), n = t.size;
 		int y0 = Math.floorDiv(this.minY, COARSE_Y) * COARSE_Y, ny = (this.maxY - y0) / COARSE_Y + 1;
 		DensityVolume volume = new DensityVolume(n, ny, n, x0, y0, z0, c, COARSE_Y, c);
 		int size = volume.size();
 		if (w.columns.length < size) w.columns = new float[size];
-		DensityBuffer buffer = DensityBuffer.createUnpooled(size);
-		w.terrain.sampleVolume(buffer, volume);
 		float[] d = w.columns;
-		for (int k = 0; k < ny; k++) {
-			int y = y0 + k * COARSE_Y;
-			for (int col = 0; col < n * n; col++) d[k + col * ny] = this.slide(y, buffer.get(k + col * ny));
+		try (var buffer = LodBuffers.acquire(size)) {
+			LodDensityBatch.sample(w.terrain, buffer, volume);
+			for (int k = 0; k < ny; k++) {
+				int y = y0 + k * COARSE_Y;
+				for (int col = 0; col < n * n; col++) d[k + col * ny] = this.slide(y, buffer.get(k + col * ny));
+			}
 		}
 		for (int z = 0; z < n; z++) {
 			for (int x = 0; x < n; x++) {
@@ -555,6 +670,22 @@ final class LodNoise {
 	}
 
 	/** Top and side colors from the material rules, snow and ice, water over the sea floor, and the canopy. */
+	/**
+	 * (fix21) The density's spacing across for a tile of this level: the game's 4-block cells, or the voxel where coarser; from
+	 * level 2 (past ~770 blocks at the default far detail) every second voxel, the ones between interpolated: CostBench, 16 tiles
+	 * per level, Terralith: 0.30 % of the voxels differ, every height within 2 voxels, 3.7x less CPU (227 -> 61 ms a tile).
+	 * Jack 13:55: "we don't need full detail a kilometer away". -Dmetalods.farHalf=false: every voxel, as before.
+	 */
+	static final boolean FAR_HALF = !"false".equals(System.getProperty("metalods.farHalf"));
+
+	static int stride(int level, int c) {
+		return level >= 2 && FAR_HALF ? 2 * c : Math.max(c, 4);
+	}
+
+	/** (fix21) -Dmetalods.soil=false: level 0's soil a fixed 3 blocks under the surface block, as before. */
+	static final boolean SOIL = !"false".equals(System.getProperty("metalods.soil"));
+	static final int SOIL_MAX = 8;
+
 	private void surfaceMaterials(LodTile t, Worker w) {
 		int c = t.cell(), x0 = t.minX(), z0 = t.minZ(), size = t.size;
 		Holder<Biome>[] biomes = t.biome;
@@ -603,6 +734,26 @@ final class LodNoise {
 				access.mcopt$updateY(2, 64, waterHeight, top - 1);
 				BlockState below = rule.tryApply(bx, top - 1, bz);
 				if (below == null) below = stone;
+				t.under[i] = below;
+				if (c == 1 && SOIL) {
+					// (fix21) down the column as the game's surface pass goes: the soil's own depth and a second layer (sandstone
+					// under sand, stone under a thin skin), up to SOIL_MAX blocks; stone below
+					int n1 = below == stone ? 0 : 1, n2 = 0;
+					BlockState second = null;
+					for (int d = 2; d <= SOIL_MAX && below != stone; d++) {
+						access.mcopt$updateY(d + 1, 64, waterHeight, top - d);
+						BlockState st = rule.tryApply(bx, top - d, bz);
+						if (st == null || st == stone) break;
+						if (second == null && st == below) n1++;
+						else if (second == null || st == second) {
+							second = st;
+							n2++;
+						} else break;
+					}
+					t.underN[i] = (byte) n1;
+					t.under2[i] = second;
+					t.under2N[i] = (byte) n2;
+				}
 				Biome b = biomes[i].value();
 				int topColor = LodColors.top(surface, b, bx, bz);
 				int belowColor = LodColors.top(below, b, bx, bz);

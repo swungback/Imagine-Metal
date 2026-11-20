@@ -163,6 +163,11 @@ public final class LightVolume {
 	private static long state;
 	private static boolean failed, have;
 	private static int catchUp;
+	/** (s1119) Frames in a row with nothing new for the grid (no move, no section rewritten, no light-carrying entity). */
+	private static int quiet;
+	/** (s1119) Steps after the last change before the grid stops stepping: light spreads a block a step and reaches 15, so by
+	 * then a step gives back what it was handed. -Dimaginemetal.lightQuiet=0: always step, as before. */
+	private static final int QUIET_STEPS = Integer.getInteger("imaginemetal.lightQuiet", 32);
 	private static int ox, oy, oz, lastX, lastY, lastZ;
 	private static Object level;
 	private static ByteBuffer seeds, section;
@@ -236,15 +241,27 @@ public final class LightVolume {
 				ImNative.lightUpload(state, 0, 0, 0, SX, SY, SZ, MemoryUtil.memAddress(seeds));
 				DIRTY.clear();
 				catchUp = 8;
-			} else {
+			}
+			boolean changed = moved;
+			if (!moved) {
 				Long k;
 				int budget = 64;  // sections rewritten a frame (a burst of recompiles spreads over a few frames)
 				boolean any = false;
 				while (budget-- > 0 && (k = DIRTY.poll()) != null) any |= rewrite(k);
 				if (any) catchUp = Math.max(catchUp, 5);
+				changed |= any;
 			}
-			dynamicLights(moved);
+			changed |= dynamicLights(moved);
 			boolean reset = !have || Math.abs(dx) >= SX || Math.abs(dy) >= SY || Math.abs(dz) >= SZ;
+			// (s1119: once the light has settled, no step: the result stays bound (mcown.m keeps it) and is what a step would give.
+			// The grid's step was ~0.7 ms a frame at Jack's spot standing still)
+			quiet = changed || reset || catchUp > 0 ? 0 : quiet + 1;
+			if (QUIET_STEPS > 0 && quiet > QUIET_STEPS) {
+				lastX = ox;
+				lastY = oy;
+				lastZ = oz;
+				return;
+			}
 			ImNative.lightStep(MetalBridge.enc(encoder), state, dx, dy, dz, reset);
 			// (the light spreads a block a step: after the grid moves or sections change, a few more steps a frame for a few frames,
 			// so newly reached lights fill their room in a handful of frames instead of creeping in over a second, blotchy)
@@ -275,7 +292,9 @@ public final class LightVolume {
 	 * back): a torch dropped on the floor, a blaze, a burning zombie, a skeleton holding a lantern light the world around them
 	 * in their colour, spreading as any light does.
 	 */
-	private static void dynamicLights(boolean moved) {
+	/** Returns whether any light-carrying entity was or is in the grid (its voxels were rewritten). */
+	private static boolean dynamicLights(boolean moved) {
+		boolean had = dynPrevCount > 0;
 		if (voxel == null) voxel = MemoryUtil.memAlloc(4);
 		long vb = MemoryUtil.memAddress(voxel), full = MemoryUtil.memAddress(seeds);
 		int n = 0;
@@ -340,6 +359,7 @@ public final class LightVolume {
 		}
 		System.arraycopy(dynNow, 0, dynPrev, 0, n);
 		dynPrevCount = n;
+		return had || n > 0;
 	}
 
 	/** The block an item stack places, when that block gives off light (a lava bucket counts as lava). */

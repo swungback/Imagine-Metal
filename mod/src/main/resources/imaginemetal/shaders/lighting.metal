@@ -13,7 +13,7 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// Per-frame values, written by imaginemetal.ImagineFrame (same layout, 848 bytes) and bound at fragment buffer 30 (and at buffer 0
+// Per-frame values, written by imaginemetal.ImagineFrame (same layout, 944 bytes) and bound at fragment buffer 30 (and at buffer 0
 // of the sky pass, sky.metal).
 struct ImFrame {
 	float4 lightDir;     // xyz unit direction toward the light that casts this frame's light (sun by day, moon by night), w 1 = sun
@@ -72,7 +72,67 @@ struct ImFrame {
 	float4 toggles;      // x 1 = coated textures, y 1 = coloured light fog (bloom.metal), z 1 = mob shadows, w 1 = water refraction and foam
 	float4 endFlash;     // the End's flashes: xyz toward the flash, w its strength now (0 none)
 	float4 pbrPack;      // x 1 = a PBR resource pack's maps (PbrAtlas, textures 27 and 28), y 1 = parallax from their height
+	float4 lodFog;       // x MetaLODS distance-fog density (near translucent and opaque/LOD paths share it), y coverage diagnostic (0 off, 1 material, 2 mask, 3 depth), zw reserved
 };
+
+// BEGIN LOD edge dither math
+static float imLodEdgeNoise(float2 pixel) {
+    uint2 p = uint2(floor(pixel));
+    uint h = p.x * 0x9e3779b9u ^ p.y * 0x85ebca6bu;
+    h = (h ^ (h >> 16)) * 0x7feb352du;
+    h = (h ^ (h >> 15)) * 0x846ca68bu;
+    return float((h ^ (h >> 16)) >> 8) / 16777216.0;
+}
+static float imLodEdgeAmount(float2 rel, float start, float end) {
+    return end > start && end > 0.0 ? smoothstep(start, end, max(abs(rel.x), abs(rel.y))) : 0.0;
+}
+
+static float imLodChunkAmount(float2 rel, device const uint *fade) {
+    int width = int(fade[2]);
+    if (width == 0) return 0.0;
+    float2 offset = as_type<float2>(uint2(fade[0], fade[1]));
+    int2 cell = int2(floor((rel + offset) * (1.0 / 16.0)));
+    if (any(cell < 0) || any(cell >= width)) return 0.0;
+    device const uchar *entries = (device const uchar *) (fade + 4);
+    return float(entries[cell.x + cell.y * width]) * (1.0 / 255.0);
+}
+// END LOD edge dither math
+
+static bool imLodNearVisible(float3 rel, float2 pixel, constant ImFrame &f, device const uint *fade) {
+    float amount = max(imLodEdgeAmount(rel.xz, f.lodFog.z, f.lodFog.w), imLodChunkAmount(rel.xz, fade));
+    return amount <= 0.0 || imLodEdgeNoise(pixel) >= amount;
+}
+
+
+// Shared near/LOD water surface math. No frame/texture dependencies, so CPU fixtures can
+// exercise these exact functions as well. Transmission still needs a real seabed on the near path.
+static inline float imWaterRippleLuma(float3 tex) {
+	return mix(0.62, dot(tex, float3(0.299, 0.587, 0.114)), 0.35);
+}
+static inline float3 imWaterBodyColor(float3 biome, float3 tex) {
+	biome.g = max(biome.g, 0.39);
+	float3 tint = biome / max(max(biome.r, max(biome.g, biome.b)), 1e-3);
+	tint = mix(tint, float3(0.3, 0.9, 0.85), 0.5);
+	return tint * (0.34 + 0.3 * imWaterRippleLuma(tex));
+}
+static inline float imWaterSurfaceAlpha(float3 tex, float normalDotView) {
+	float f = 1.0 - saturate(normalDotView);
+	float t = imWaterRippleLuma(tex);
+	return mix(0.05 + 0.1 * t * t, 1.0, f * f * f * f * 0.9);
+}
+static inline float imWaterVolumeAlpha(float thickness) {
+	return (1.0 - exp(-clamp(thickness, 0.0, 64.0) * 0.09)) * 0.72;
+}
+// Display-encoded opaque colour to transmitted linear light, shared by near and LOD water.
+static inline float3 imWaterTransmitted(float3 dst, float3 biome, float thickness, bool depthFx) {
+    if (!depthFx) return pow(max(dst, 0.0), 2.2) * 1.3;
+    biome.g = max(biome.g, 0.39);
+    float3 wn = biome / max(max(biome.r, max(biome.g, biome.b)), 1e-3);
+    wn = mix(wn, float3(0.45, 0.95, 0.85), 0.55);
+    float3 absorb = (1.0 - wn) * 0.26 + 0.02;
+    return pow(max(dst, 0.0), 2.2) * (1.0 + 0.8 * saturate(thickness / 10.0)) * exp(-absorb * thickness);
+}
+// END shared water math
 
 static inline float imSqrt2(float x) { x = 1.0 - x; x *= x; x *= x; return 1.0 - x; }
 static inline float imSqrt3(float x) { x = 1.0 - x; x *= x; x *= x; x *= x; return 1.0 - x; }
@@ -166,6 +226,8 @@ static inline float imBlockCurve(float b) {
 
 // Sky light level 0..1 -> how much of the sky's light reaches the surface.
 static inline float imSkyCurve(float s) {
+	// (fix9b: back as it was: Jack likes the sky's light reaching into caves and down a ravine in the sun (2026-11-14); fix9's
+	// steeper curve took it away)
 	return s * s * (3.0 - 2.0 * s);
 }
 
@@ -448,7 +510,10 @@ static float imEmission(uint cls, float3 tex) {
 		// ores: every pixel with clear colour against the grey stone around it (the whole speck, its coloured edge too; iron's pale
 		// specks count; a speck's near-grey highlights and coal's black specks don't), at a faint glow that keeps the texture's own
 		// light and dark
-		case IM_MAT_ORE: return 1.1 * smoothstep(0.08, 0.2, sat) * (0.5 + 0.5 * hi);
+		// (fix7: by colour against the texel's own brightness, not by the plain spread of its channels: iron's darker brown
+		// texels (about 100, 80, 70: a spread of 0.12) fell under the old 0.08-0.2 ramp, and only the light half of each speck
+		// glowed, Jack's 15.46.12 "only some of the iron is bright". The stone stays grey, coal's black specks still don't glow)
+		case IM_MAT_ORE: return 1.1 * smoothstep(0.1, 0.22, sat / max(hi, 0.05)) * (0.5 + 0.5 * hi);
 		// nether ores sit in red netherrack: their specks are told apart by brightness instead
 		case IM_MAT_NETHER_ORE: return 1.2 * smoothstep(0.5, 0.75, l);
 		// faint lights (sculk sensors and catalysts, magma, glow lichen): only their bright, coloured parts glow, as a flame's
@@ -685,6 +750,15 @@ static float imHighlight(float3 N, float3 V, float3 L, float nl, float smooth) {
 	return min(nl * D * F / max(lh * lh, 1e-3), 32.0);
 }
 
+// A central perspective projection unprojects depth along the camera ray. If the
+// sampled point is clearly farther along that ray, it cannot be an SSR hit.
+// Keep the original reconstruction for near ties, invalid homogeneous W, and
+// projections whose inverse depth column moves the unprojected XYZ.
+static bool imReflectionClearlyInFront(float4 clip, float depth, float inverseDepthW) {
+	float delta = depth * clip.w - clip.z;
+	return delta < -1e-5 * clip.w && 1.0 + inverseDepthW * delta > 1e-4;
+}
+
 // Screen-space reflection through the last frame's picture and depth (Reflections): march from p (camera-relative, now) along
 // R, in the last frame's screen, until the ray passes just behind what was drawn there; then a few halving steps to the surface.
 // rgba: the colour there (linear; blurred by lod) and how much to trust it; a = 0: the ray left the screen or ran out without
@@ -704,6 +778,8 @@ static float4 imReflect(float3 p, float3 n, float3 R, float lod, float dither, c
 	// of the frame)
 	int steps = thinTest ? 18 : 11;
 	float grow = thinTest ? 1.4 : 1.75;
+	float4 invDepth = f.histClipInv[2];
+	bool centralPerspective = all(invDepth.xyz == float3(0.0)) && invDepth.w > 0.0;
 	for (int i = 0; i < steps; i++) {
 		float3 r = q + R * t;
 		float4 c = f.histClip * float4(r, 1.0);
@@ -711,11 +787,18 @@ static float4 imReflect(float3 p, float3 n, float3 R, float lod, float dither, c
 		float2 ndc = c.xy / c.w;
 		if (any(abs(ndc) > 1.0)) break;
 		float d = hd.read(uint2(clamp(ndc * 0.5 + 0.5, 0.0, 0.9999) * size));
+		if (centralPerspective && imReflectionClearlyInFront(c, d, invDepth.w)) {
+			tPrev = t;
+			t += stepLen;
+			stepLen *= grow;
+			continue;
+		}
 		float4 sp = f.histClipInv * float4(ndc, d, 1.0);
-		float diff = length(r) - length(sp.xyz / sp.w);
+		float rayDistance = length(r);
+		float diff = rayDistance - length(sp.xyz / sp.w);
 		// (a little past the surface before it counts: far away the depth's precision alone puts the ray "behind" whatever
 		// surface it started from, in bands)
-		if (diff > 0.02 + length(r) * 0.004) {
+		if (diff > 0.02 + rayDistance * 0.004) {
 			// (only just behind a surface counts as reaching it: far behind is passing behind something thin in front, a torch, a
 			// fence, whose back the screen doesn't show)
 			// (water and glass skip this: their rays run long and flat toward hills, and passing well behind one in a single step
@@ -762,6 +845,19 @@ static inline float imHg(float nu, float g) {
 	float gg = g * g;
 	float d = 1.0 + gg - 2.0 * g * nu;
 	return (0.0795775 - 0.0795775 * gg) / (d * sqrt(d));
+}
+
+static float imLodFogAmount(float3 p, constant ImFrame &f) {
+	float dist = length(p);
+	if (f.lodFog.x <= 0.0 || dist <= 24.0 || f.sunDir.w < 0.5 || f.flags.y != 0 || f.flags.z == 0) return 0.0;
+	float yw = f.fogParams.y + p.y;
+	float hf = clamp(exp2(-(max(yw, 40.0) - 64.0) / 48.0), 0.35, 2.2);
+	return (1.0 - exp(-(dist - 24.0) / 700.0 * f.lodFog.x * hf)) * saturate(f.fogParams.z);
+}
+static float3 imLodFogColor(float3 p, constant ImFrame &f) {
+	float dist = length(p);
+	float3 hd = normalize(float3(p.x, max(p.y, 0.02 * dist), p.z));
+	return pow(imPresent(imSkyColor(hd, f, false), f), 1.0 / 2.2);
 }
 
 static float3 imAirFog(float3 p, float skyLight, constant ImFrame &f, thread float3 &trans) {
@@ -964,7 +1060,14 @@ static float imOre(uint t, float3 c, thread float3 &cm, bool nether) {
 	switch (t) {
 		case 1u:  // iron
 			// (softer than Reimagined's: in a dark cave its pale peach specks blew out to white blobs, the texture gone)
-			if (c.r != c.g && c.r - c.b > 0.15) { cm = pow(max(c, 0.0), 0.75); return pow(c.r, 1.5) * 1.2; }
+			// (fix9: every speck texel lit alike, the dark ones too: its colour brought to one brightness (some of the texture's
+			// shading kept) and a steady glow, softer than diamond's. By the texel's own red it was 0.2-0.9: the pale ones glowed,
+			// the darker ones hardly, Jack's 22.29.30 "iron still not lighting up properly")
+			if (c.r != c.g && c.r - c.b > 0.12) {
+				float mx = max(c.r, max(c.g, c.b));
+				cm = mix(float3(0.78) / max(mx, 0.2), float3(1.0), 0.3);
+				return 1.3;
+			}
 			break;
 		case 2u:  // copper
 			if (max(c.r * 0.5, c.g) - c.b > 0.05 && (c.r + c.g > 1.9 || c.r + c.g + c.b < 1.9)) { cm = c; return c.r * 2.0 + 0.7; }
@@ -1062,6 +1165,8 @@ struct ImPre {
 	float3 N;      // with the generated normal
 	float3 Lt;     // toward the torch light (the face's normal leaned up the block light's slope)
 	float2 texel;  // the atlas texel (the coated textures' and the sculk's per-texel numbers)
+	float farSun;  // (fix7) past the shadow maps, how much of the sun reaches it by MetaLODS' height map (1: all; the deferred pass)
+	bool lod;      // (s1119) a MetaLODS pixel (the deferred pass): the shadow maps hold no LOD casters, so their open-air test is skipped
 };
 
 static inline ImPre imNoPre() {
@@ -1072,6 +1177,8 @@ static inline ImPre imNoPre() {
 	m.N = float3(0.0, 1.0, 0.0);
 	m.Lt = float3(0.0, 1.0, 0.0);
 	m.texel = float2(0.0);
+	m.farSun = 1.0;
+	m.lod = false;
 	return m;
 }
 
@@ -1079,6 +1186,8 @@ static ImPre imMaterial(float3 p, float2 light, uint mat, float3 tex, float2 uv,
 	constant ImFrame &f) {
 	ImPre m;
 	m.on = true;
+	m.farSun = 1.0;
+	m.lod = false;
 	bool slanted;
 	float3 n = imFaceNormal(p, slanted);
 	// the texture's tangent frame from the screen derivatives (Schüler 2013), taken before any branch
@@ -1222,7 +1331,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			}
 		}
 	}
-	if (oreE > 0.0) albedo *= oreCm;
+	if (oreE > 0.0) albedo *= (oreT == 1u && cls == IM_MAT_ORE) ? min(oreCm, float3(1.0)) : oreCm;  // (fix9: iron's evened glow colour isn't its albedo)
 	// (sand and sandstone a little richer and less bright: in full sun they washed out to a flat white)
 	if (cls == IM_MAT_SAND && kind == 0u) {
 		float al = imLuma(albedo);
@@ -1296,12 +1405,16 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// blocks off or more), and by that much the sky's light and the sun are let back in. Not while the player is underground:
 	// caves stay as dark as they were)
 	float oa = 0.0;
-	bool wantOpen = IM_FC_SHADOWS && f.ambientUp.w > 0.5 && f.flags.x == 0 && sky < 0.45 && f.env.x < 0.99 && f.water.z < 0.5;
+	// (s1119: not for MetaLODS pixels: the maps hold no LOD casters, so under a LOD overhang the air read as open and the
+	// overhang's underside and the ground below were lit as daylight, where the real chunks are dark: Jack's "underpass".
+	// A LOD face's own sky light says it instead: the mesher works it out over the voxels, open water counting as open sky)
+	bool wantOpen = IM_FC_SHADOWS && !m.lod && f.ambientUp.w > 0.5 && f.flags.x == 0 && sky < 0.45 && f.env.x < 0.99 && f.water.z < 0.5;
 	float2 sm = IM_FC_SHADOWS ? imShadowX(p, n, pixel, f, smap, cmp, wantOpen, oa) : float2(1.0, 0.0);
 	oa *= 1.0 - f.env.x;
 	if (oa > 0.0) skyF = max(skyF, 0.8 * oa);
 	float open = max(smoothstep(0.45, 0.9, sky), oa);
-	float sun = mix(open, sm.x, sm.y);
+	// (fix7: past the maps, where they fade out, MetaLODS' far shadows, m.farSun)
+	float sun = mix(open * m.farSun, sm.x, sm.y);
 	// (under water the light is scattered: shadows there are soft and shallow, not the hard dark shapes cast on dry land)
 	if (f.water.z > 0.5 && f.flags.x == 0) sun = (0.45 + 0.55 * sun) * (0.3 + 0.7 * smoothstep(0.0, 0.6, sky));
 	else sun *= max(smoothstep(0.0, 0.07, sky), oa);
@@ -1591,29 +1704,32 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		}
 	}
 	// light given off: on top of the tone-mapped light, unclamped (the picture is HDR: Bloom's resolve maps it to the screen)
-	float3 ecol = pow(max(tex, 0.0), 2.2);
-	// (lava: its darker crust a deep red-orange, only its hot spots running to yellow-white, as Reimagined's)
-	// (a ramp by brightness instead of the texture's own colour: its red crust under the bloom's white haze read pink)
-	if (cls == IM_MAT_LAVA) {
-		float ll = imLuma(tex);
-		// (more orange-red, the hottest a deep yellow-orange that never reaches white even past the screen's top)
-		// (a little redder again: "too orange")
-		float3 crust = float3(0.78, 0.075, 0.01), mid = float3(1.0, 0.22, 0.02), hot = float3(1.0, 0.42, 0.06);
-		// (the texture's light and dark kept strongly: dark crust much darker than the hot veins)
-		ecol = mix(mix(crust, mid, smoothstep(0.2, 0.5, ll)), hot, smoothstep(0.55, 0.95, ll)) * (0.15 + 0.85 * ll * ll);
+	c = max(c, 0.0);
+	if (emit > 0.0) {
+		float3 ecol = pow(max(tex, 0.0), 2.2);
+		// (lava: its darker crust a deep red-orange, only its hot spots running to yellow-white, as Reimagined's)
+		// (a ramp by brightness instead of the texture's own colour: its red crust under the bloom's white haze read pink)
+		if (cls == IM_MAT_LAVA) {
+			float ll = imLuma(tex);
+			// (more orange-red, the hottest a deep yellow-orange that never reaches white even past the screen's top)
+			// (a little redder again: "too orange")
+			float3 crust = float3(0.78, 0.075, 0.01), mid = float3(1.0, 0.22, 0.02), hot = float3(1.0, 0.42, 0.06);
+			// (the texture's light and dark kept strongly: dark crust much darker than the hot veins)
+			ecol = mix(mix(crust, mid, smoothstep(0.2, 0.5, ll)), hot, smoothstep(0.55, 0.95, ll)) * (0.15 + 0.85 * ll * ll);
+		}
+		if (cls == IM_MAT_EMITTER) {
+			// (a light's colour kept: deepened a little, so its brightest parts glow in their own colour instead of washing to white)
+			float em = max(max(ecol.r, ecol.g), ecol.b);
+			ecol = ecol * pow(ecol / max(em, 1e-3), 0.4);
+		}
+		if (cls == IM_MAT_ORE || cls == IM_MAT_NETHER_ORE) {
+			// (Reimagined's glowing ores: each speck's own colour made deeper (colour x colour^k: redstone's red pure, diamond's
+			// cyan, emerald's green), then glowing well past white so the bloom gives every speck a halo; the stone stays dark)
+			float em = max(max(ecol.r, ecol.g), ecol.b);
+			ecol = ecol * pow(ecol / max(em, 1e-3), 0.35);
+		}
+		c += ecol * emit * airT;  // (the texture's colour: light given off isn't darkened by corner shading)
 	}
-	if (cls == IM_MAT_EMITTER) {
-		// (a light's colour kept: deepened a little, so its brightest parts glow in their own colour instead of washing to white)
-		float em = max(max(ecol.r, ecol.g), ecol.b);
-		ecol = ecol * pow(ecol / max(em, 1e-3), 0.4);
-	}
-	if (cls == IM_MAT_ORE || cls == IM_MAT_NETHER_ORE) {
-		// (Reimagined's glowing ores: each speck's own colour made deeper (colour x colour^k: redstone's red pure, diamond's
-		// cyan, emerald's green), then glowing well past white so the bloom gives every speck a halo; the stone stays dark)
-		float em = max(max(ecol.r, ecol.g), ecol.b);
-		ecol = ecol * pow(ecol / max(em, 1e-3), 0.35);
-	}
-	c = max(c, 0.0) + ecol * emit * airT;  // (the texture's colour: light given off isn't darkened by corner shading)
 	if (oreE > 0.0) {
 		// (Reimagined's light given off, linear, a quarter less in full daylight; through the tone curve (its own goes through
 		// Reimagined's), then doubled so the brightest specks pass white and the bloom haloes them)
@@ -1764,7 +1880,9 @@ static float3 imShadeEntity(float3 col, float3 p, float3 nrm, float2 light, cons
 		// (warm, or the soul flame's cyan: green and blue well over red, and bright)
 		// (a flame's yellow-orange only, and bright: a red mushroom's cap and other warm items lit up as if they glowed)
 		float warm = step(base.b, base.g) * step(base.g, base.r) * smoothstep(0.3, 0.5, base.g / max(base.r, 1e-3));
-		float soul = step(base.r * 1.6, base.g) * step(base.r * 1.6, base.b) * smoothstep(0.7, 0.9, hi);
+		// (fix9: and blue at least as high as green: soul fire's cyan is, a diamond's (its pickaxe's tips, a diamond, a diamond
+		// block in the hand) is greener, and those glowed as if they gave off light, Jack's 18.47.29 and 19.20.05)
+		float soul = step(base.r * 1.6, base.g) * step(base.r * 1.6, base.b) * step(base.g - 0.012, base.b) * smoothstep(0.7, 0.9, hi);
 		float e = max(warm, soul) * smoothstep(0.75, 0.92, hi) * smoothstep(0.45, 0.75, (hi - lo) / max(hi, 1e-3));
 		c += base * (1.6 * e);
 	}

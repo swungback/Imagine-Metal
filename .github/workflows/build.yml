@@ -27,6 +27,11 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Check LOD geometry and shared water math
+        run: |
+          sh ci/metalods/check.sh
+          python3 ci/metalods/water_check.py
+
       # The game compiles its Metal shaders at runtime: compile them here too, so a shader error fails the build instead of the game
       - name: Check the Metal shaders
         run: |
@@ -43,6 +48,8 @@ jobs:
           xcrun -sdk macosx metal -std=metal3.1 -c $R/mcopt/own/terrain.metal -o build/msl/terrain.air
           xcrun -sdk macosx metal -std=metal3.0 -c $R/imaginemetal/shaders/bloom.metal -o build/msl/bloom.air
           xcrun -sdk macosx metal -std=metal3.0 -c $R/imaginemetal/shaders/light.metal -o build/msl/light.air
+          # MetaLODS (the far terrain's voxel LODs, built at runtime with Metal 3.1 as metalods.m does)
+          xcrun -sdk macosx metal -std=metal3.1 -c $R/imaginemetal/shaders/metalods.metal -o build/msl/metalods.air
           { cat $R/imaginemetal/shaders/lighting.metal; echo; cat $R/imaginemetal/shaders/sky.metal; } > build/msl/sky.metal
           xcrun -sdk macosx metal -std=metal3.0 -c build/msl/sky.metal -o build/msl/sky.air
           # Minecraft's entity, item and particle shaders with our lighting patched in (imaginemetal.EntityShade)
@@ -52,6 +59,9 @@ jobs:
 
       - name: Build the mod
         run: ./gradlew :mod:build --stacktrace
+
+      - name: Check bounded density against Minecraft interpolator
+        run: python3 ci/metalods/density_check.py
 
       - name: Find the jar
         id: jar

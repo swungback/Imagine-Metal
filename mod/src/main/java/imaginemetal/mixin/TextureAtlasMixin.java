@@ -14,6 +14,9 @@ abstract class TextureAtlasMixin {
 	@Inject(method = "upload", at = @At("TAIL"))
 	private void imaginemetal$pbr(SpriteLoader.Preparations prep, CallbackInfo ci) {
 		TextureAtlas self = (TextureAtlas) (Object) this;
-		if (TextureAtlas.LOCATION_BLOCKS.equals(self.location())) PbrAtlas.build(prep.width(), prep.height(), prep.regions());
+		if (TextureAtlas.LOCATION_BLOCKS.equals(self.location())) {
+			mcopt.metal.own.BushyLeaves.atlasReady(self);  // (fix9: the bushy leaf planes are made again with the new sprites)
+			PbrAtlas.build(prep.width(), prep.height(), prep.regions());
+		}
 	}
 }

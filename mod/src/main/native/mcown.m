@@ -8,7 +8,7 @@
 // (Imagine Metal) the shader engine's per-frame values (imaginemetal.ImagineFrame, terrain.metal / lighting.metal ImFrame,
 // 240 bytes), bound at fragment buffer 30 on every terrain draw. All zero until the engine's first frame: imShade then falls
 // back to a plain light-level look (ImFrame.flags.z == 0).
-static uint8_t imFrame[928];
+static uint8_t imFrame[944];
 // (Imagine Metal) the shadow map and its compare sampler (imshadow.m), bound at fragment texture 20 / sampler 13 once it exists;
 // own_fs only samples it when ImFrame.shadow.y says this frame's map is valid
 static id<MTLTexture> imLightTex;
@@ -924,6 +924,33 @@ static int imGEnter(Own *w, Enc *enc) {
 // im_defer_fs lighting every pixel the G-buffer's draws left visible. Everything it reads was bound by those draws (the shading's
 // textures, ImFrame at 30, the fog block at 24); only its own parameters are added. Nothing to do when none drew.
 static Own *imGOwn;
+
+// (fix7, MetaLODS far shadows) the far land's height map (MetaArena: 1024 x 1024 uints, 16 blocks a texel, wrapping around the
+// world) and its parameters (ImHeightP in terrain.metal, 48 bytes), for im_defer_fs at buffers 28 and 27. Set by MetaLODS each
+// frame it draws (mco_im_heightmap, after mco_im_defer has cleared it): used by that frame's lighting draws only.
+static id<MTLBuffer> imHeightBuf;
+static uint8_t imHeightParams[48];
+static int imHeightOn;
+
+void mco_im_heightmap(void *buffer, const void *params) {
+	imHeightBuf = (id<MTLBuffer>) buffer;
+	if (params) memcpy(imHeightParams, params, sizeof imHeightParams);
+	imHeightOn = buffer != NULL && params != NULL;
+}
+
+// The frame's chunk fade table lives in the Java-owned render ring.
+static id<MTLBuffer> imLodFade;
+void mco_im_lod_fade(id<MTLBuffer> buffer) { imLodFade = buffer; }
+
+void mco_im_bind_lod_fade(id<MTLRenderCommandEncoder> r, NSUInteger index) {
+	if (imLodFade) {
+		[r setFragmentBuffer:imLodFade offset:0 atIndex:index];
+	} else {
+		static const uint32_t inactive[4] = {0};
+		[r setFragmentBytes:inactive length:sizeof inactive atIndex:index];
+	}
+}
+
 static void imGFlush(Enc *enc) {
 	id<MTLRenderCommandEncoder> r = enc->render;
 	if (!r || !imGDrawn || !imGOwn || enc->colorCount != 5 || !enc->colors[0]) return;
@@ -940,17 +967,34 @@ static void imGFlush(Enc *enc) {
 	[r setDepthBias:0 slopeScale:0 clamp:0];
 	[r setFragmentBytes:imFrame length:sizeof imFrame atIndex:30];
 	[r setFragmentBytes:imDeferParams length:sizeof imDeferParams atIndex:29];
+	if (imHeightOn && imHeightBuf) {
+		[r setFragmentBuffer:imHeightBuf offset:0 atIndex:28];
+		[r setFragmentBytes:imHeightParams length:sizeof imHeightParams atIndex:27];
+	} else {
+		static const uint8_t none[48] = {0};  // (ImHeightP.cam.w 0: off; buffer 28 bound to something, never read)
+		[r setFragmentBytes:none length:sizeof none atIndex:28];
+		[r setFragmentBytes:none length:sizeof none atIndex:27];
+	}
 	[r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 	[r popDebugGroup];
 	imGOwn->lastPso = nil;
 	imDeferFlushes++;
 }
 
+// Keep opaque colour in tile memory while the LOD water replaces only G-buffer water pixels.
+// Java calls begin once after BOTH masked/unmasked solid draws, and end after both water draws.
+void mco_im_g_water_phase(Enc *enc, int begin) {
+    imGFlush(enc);
+    imDeferParams[18] = begin ? 1.0f : 0.0f;
+}
+
 // (Build B2, from Java each frame the opaque terrain is drawn: imaginemetal.Deferred) on: this frame's opaque terrain through the
 // G-buffer; clipInv: 16 floats, the terrain's clip inverted. Returns 1 if the lighting can't be made (forward from now on).
 int mco_im_defer(Own *w, int on, const float *clipInv) {
 	imGOwn = w;
+	imDeferParams[18] = 0.0f;
 	mc_im_g_flush = imGFlush;
+	imHeightOn = 0;  // (MetaLODS sets it again when it draws this frame, after this)
 	imDeferOn = on && clipInv && w;
 	if (clipInv) memcpy(imDeferParams, clipInv, 64);
 	return imDeferFailed;
@@ -1116,6 +1160,7 @@ int mco_draw(Own *w, Enc *enc, int cutout, const void *frame, int frameLength, i
 	[r setFragmentTexture:atlas atIndex:16];
 	[r setFragmentSamplerState:atlasSampler atIndex:14];
 drawCall:
+	mco_im_bind_lod_fade(r, 25);
 	// (Imagine Metal) the shader engine's per-frame values for own_fs (terrain.metal IM_SHADE, buffer 30)
 	[r setFragmentBytes:imFrame length:sizeof imFrame atIndex:30];
 	if (!mesh) [r setVertexBytes:imFrame + 816 length:16 atIndex:30];  // (TAA's jitter, ImFrame.taa, for own_vs)
@@ -2455,4 +2500,20 @@ void mc_im_entity_bind(Enc *enc, int on) {
 		[r setFragmentTexture:imShadowTex atIndex:20];
 		[r setFragmentSamplerState:imShadowCmp atIndex:13];
 	}
+}
+
+// ---- (Imagine Metal, MetaLODS: metalods.m) the far terrain draws into the G-buffer before it is lit ----
+// Whether the open encoder is the G-buffer's pass (the opaque terrain drew into it this frame and its lighting hasn't run).
+int mco_im_g_open(Enc *enc) {
+	return enc && enc->render && enc->imG && enc->colorCount == 5 && enc->colors[0] && !imDeferFailed;
+}
+
+// Something was drawn into the G-buffer (its lighting must run).
+void mco_im_g_mark(void) {
+	imGDrawn = 1;
+}
+
+// This frame's ImFrame as the terrain got it (the TAA's offset is at 816).
+const uint8_t *mco_im_frame(void) {
+	return imFrame;
 }
