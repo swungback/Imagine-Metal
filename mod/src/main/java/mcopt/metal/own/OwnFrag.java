@@ -1123,7 +1123,11 @@ final class OwnFrag {
 	static final long[] LEAF_DRAWS = new long[3];
 	private static long leafLogAt;
 
+	/** -Dmcopt.own.leafDrawLog=true: log the leaf draw counts (s1120, measuring only) */
+	private static final boolean LEAF_LOG = Boolean.getBoolean("mcopt.own.leafDrawLog");
+
 	static void leafDrawLog() {
+		if (!LEAF_LOG) return;
 		long now = System.nanoTime();
 		if (now - leafLogAt < 10_000_000_000L) return;
 		leafLogAt = now;

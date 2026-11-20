@@ -1,3 +1,56 @@
+# START HERE — 2026-11-20 22:25 Claude s1120: Jack's four fixes (structures, MetalFX passes, leaves, LOD shadows)
+
+## Installed: imagine-metal-s1120-final.jar (claude-scratch/s1120/; SHA256 39a4e9fd8678f12b...). Rollback: s1119-perf1.jar.
+Java built from this working tree (overlay on perf1) + libmcmetal.dylib from CI run 44818075425 (branch s1120 on origin =
+this working tree as of tonight + the s1120 native edits; CI green). Edited files' originals: claude-scratch/s1120/orig/.
+Jack allowed attaching the repo to Claude's session (21:42) for CI. options.txt back to renderDistance 6, ColdTp enabled=false,
+test saves moved to claude-scratch/s1120/saves. Tools this session: ~/tools/build.sh LABEL (DYLIB=... to put a CI dylib in),
+~/tools/setrun.sh LABEL JAR k=v... (jar into mods, fresh save from s1118-fix24/saves/IM-coldtp-g24, ColdTp at -192 94 836).
+
+## Jack's 16:37-16:38 shots (read): LOD mountain without the shadows the real chunks next to it have; "looks off in caves"
+(16.38.25/26, LOD lush cave from above: black speckle, teal glow); "village looks broken" (16.38.53, LOD village at -505 123
+1335 facing west, pieces overlapping/floating). Cave and village are NOT done: compare with real chunks there first.
+
+## 1 Structure placement cost: DONE, exact
+Cause (JFR at his spot): ~30 % of all LOD job CPU in NoiseBasedChunkGenerator.getBaseHeight (26.3: NoiseChunk over 1 x 384 x 1,
+final density sampled, walked down through the aquifer; ~80 % Perlin noise at cell corners). Structures ask neighbouring columns:
+same column again 5 %, same 4x4 noise cell 38-45 %, 8x8 ~62 %.
+Fix: LodBaseHeights.fill (GenBaseHeightCacheMixin on a miss): the whole 4x4 cell (same corners as one column) in 64-block slabs
+from the top until both world-gen heightmaps are met; cache shared by the workers (striped). Verified in game: 3000/3000 heights
+identical to the game's walk at batch 4 and at batch 8 (-Dmcopt.gen.baseHeightVerify=N). Batch 8 was slower per height (fill
+2.9x a walk vs 1.2x): default 4. Result (s1a vs s1d): structure-height CPU -31 %, ~10 % of LOD job CPU.
+Gotcha: GenMixinPlugin reads LodBaseHeights.ENABLED while mixins are prepared: no Minecraft class in its static init (a
+Heightmap field there crashed startup: "BlockStateBase was loaded too early", Lithium).
+Left: meshing 30 %, terrain noise 13 %, Streams rivers 12 %, other structure work 10 % of LOD CPU.
+
+## 2 MetalFX extra passes: motion folded in; screen copy kept (why)
+imbloom.m: MetalFX's set-up moved before the resolve; the resolve writes the motion (and the mobs' reactive mask) as attachments
+1/2 (bloom.metal im_bloom_resolve_fx/_fxr, same imbMotion, same alpha test on the 16-bit value); the separate motion pass is the
+fallback. Shots s2a vs s3a (same spot/time): mean difference 0.8/255, below run-to-run noise (1.1-1.3): no visible change.
+Saves only ~0.1 ms (taa 1.84-2.01 -> 1.80-1.86 ms). MetalFX straight to the screen: NOT done: the screen is 8-bit and the copy
+(im_bloom_fxcopy) adds the 8-bit dither; writing MetalFX's output there directly would band the sky (visible loss). MetalFX's own
+encoders (~2.5 ms, "idle" in the perf line) are Apple's.
+
+## 3 Real leaves: the 4.3 ms was mismeasured
+bench split booked MetaLODS' G-buffer draws AND the deferred lighting under "terrain leaves (cutout colour)" (both run after the
+leaves in Deferred.end, the last part the timing step cut). Measured with new keys at his spot (s2a): bushy planes cost 0.2 ms,
+leaf depth pre-pass 0.1 ms (no benefit, but the pre-pass does run: 8-14k depth + EQUAL draws per 10 s, -Dmcopt.own.leafDrawLog),
+leaf culling ~0. MetaLODS not drawn: -5.4 ms (s3a). So no leaf change was made (nothing worth changing the look for).
+Added: Benchmark keys bushy_off, leafcull_off, lodshadows_off; Deferred.end tags MetaLODS / lighting for the split step (the
+native cut didn't take there: still shows under leaves; mc_render_split inside the G pass, not looked into).
+
+## 4 LOD shadows at the hand-over: DONE (native), cost ~0.2 ms
+MetaLods.drawShadow (Shadows, after the far cascade's terrain casters) -> MetaWorld.shadowList (last frame's selected columns
+in the cascade's orthographic box, light-facing faces, land only, columns the real terrain draws whole left out, partly drawn
+masked per pixel) -> metalods.m mml_shadow (Load the slice, depth only; ml_shadow_vs/fs in metalods.metal). Toggle:
+MetaSettings.lodShadows (-Dmetalods.lodShadows=false). Shots (same spot/time, 40 s): real chunks rd12 s4c / before s3a / after
+s4a: LOD slopes now get the stepped self-shadow the real ones have; the LOD pillar is a little darker than the real one.
+
+## Next
+Jack to test: shadow pop-in at the hand-over, LOD look in shadow. Then his cave and village notes. LOD CPU: meshing.
+
+---
+
 # START HERE — 2026-11-20 15:45 Claude s1119d: hitches (GC), light grid, LOD loading profiled (structures, not trees)
 
 ## Installed: imagine-metal-s1119-perf1.jar (claude-scratch/s1119/) = light3 + the items below. Rollback: s1119-light3.jar.
