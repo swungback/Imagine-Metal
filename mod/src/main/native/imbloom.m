@@ -54,6 +54,10 @@ typedef struct {
 	id<MTLFXTemporalScaler> fx;
 	id<MTLTexture> fxMotion, fxOut, fxReactive;  // (fxReactive: mobs' pixels, from the frame's alpha mark; nil before macOS 14)
 	id<MTLRenderPipelineState> fxMotionPso, fxCopyPso;
+	// (s1120) the resolve that also writes the motion (and the reactive mask): the separate motion pass folded into it; nil:
+	// not made (yet), fxFoldFailed: couldn't be, the separate pass as before
+	id<MTLRenderPipelineState> fxResolvePso;
+	int fxFoldFailed;
 	MTLPixelFormat fxCopyFormat, fxDepthFormat;
 	int fxOn, fxFailed, fxSaid;
 	float fxSign[4];
@@ -298,6 +302,8 @@ static int imbFxReady(ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst, id<MTL
 			}
 			[b->fxMotionPso release];
 			b->fxMotionPso = nil;
+			[b->fxResolvePso release];
+			b->fxResolvePso = nil;
 			b->taaValid = 0;
 		}
 		if (!b->fxMotionPso) b->fxMotionPso = imbFxPipeline(b, b->fxReactive ? @"im_bloom_motion_r" : @"im_bloom_motion", MTLPixelFormatRG16Float,
@@ -321,6 +327,70 @@ static int imbFxReady(ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst, id<MTL
 				(unsigned long) dst.width, (unsigned long) dst.height, b->fxReactive ? ", mobs reactive" : ", no reactive mask (macOS < 14)");
 		}
 	}
+	return 1;
+}
+
+// (s1120) The HDR resolve into TAA's frame that also writes MetalFX's motion (attachment 1) and, from macOS 14, its reactive mask
+// (2), as the separate motion pass wrote them: the same full-screen triangle over the world's frame, the same depth and transforms.
+// One pass less: the frame and the depth aren't read a second time. Its textures bound as imbPass3 binds the resolve's.
+static int imbResolveFx(ImBloom *b, id<MTLCommandBuffer> cmd, id<MTLTexture> target, const ImBloomParams *p, id<MTLTexture> src,
+	id<MTLTexture> shafts, id<MTLTexture> aoT, id<MTLTexture> hc, id<MTLTexture> depth, id<MTLSamplerState> hs, const void *frame, int frameLen) {
+	if (b->fxFoldFailed) return 0;
+	if (!b->fxResolvePso) {
+		@autoreleasepool {
+			NSString *fn = b->fxReactive ? @"im_bloom_resolve_fxr" : @"im_bloom_resolve_fx";
+			id<MTLFunction> vs = [[b->lib newFunctionWithName:@"im_bloom_vs"] autorelease];
+			id<MTLFunction> fs = [[b->lib newFunctionWithName:fn] autorelease];
+			if (vs && fs) {
+				MTLRenderPipelineDescriptor *pd = [[MTLRenderPipelineDescriptor new] autorelease];
+				pd.label = fn;
+				pd.vertexFunction = vs;
+				pd.fragmentFunction = fs;
+				pd.colorAttachments[0].pixelFormat = MTLPixelFormatRGBA16Float;
+				pd.colorAttachments[1].pixelFormat = MTLPixelFormatRG16Float;
+				if (b->fxReactive) pd.colorAttachments[2].pixelFormat = MTLPixelFormatR8Unorm;
+				b->fxResolvePso = [b->device newRenderPipelineStateWithDescriptor:pd error:nil];
+			}
+		}
+		if (!b->fxResolvePso) {
+			b->fxFoldFailed = 1;
+			fprintf(stderr, "[Imagine Metal] MetalFX: the resolve couldn't write the motion itself (the separate motion pass instead)\n");
+			return 0;
+		}
+	}
+	if (target.pixelFormat != MTLPixelFormatRGBA16Float || target.width != b->fxMotion.width || target.height != b->fxMotion.height) return 0;
+	MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+	rp.colorAttachments[0].texture = target;
+	rp.colorAttachments[0].loadAction = MTLLoadActionDontCare;
+	rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+	rp.colorAttachments[1].texture = b->fxMotion;
+	rp.colorAttachments[1].loadAction = MTLLoadActionDontCare;
+	rp.colorAttachments[1].storeAction = MTLStoreActionStore;
+	if (b->fxReactive) {
+		rp.colorAttachments[2].texture = b->fxReactive;
+		rp.colorAttachments[2].loadAction = MTLLoadActionDontCare;
+		rp.colorAttachments[2].storeAction = MTLStoreActionStore;
+	}
+	imt_rp(rp, IMT_RESOLVE);
+	id<MTLRenderCommandEncoder> r = [cmd renderCommandEncoderWithDescriptor:rp];
+	r.label = @"Imagine Metal HDR resolve (+ MetalFX motion)";
+	[r setViewport:(MTLViewport) {0, 0, (double) target.width, (double) target.height, 0, 1}];
+	[r setRenderPipelineState:b->fxResolvePso];
+	[r setCullMode:MTLCullModeNone];
+	[r setFragmentTexture:b->views[0] atIndex:0];
+	[r setFragmentTexture:src atIndex:1];
+	[r setFragmentTexture:(shafts ? shafts : b->views[0]) atIndex:2];
+	[r setFragmentTexture:(aoT ? aoT : b->views[0]) atIndex:3];
+	[r setFragmentTexture:(hc ? hc : b->views[0]) atIndex:4];
+	[r setFragmentTexture:depth atIndex:5];
+	[r setFragmentSamplerState:(hs ? hs : b->linear) atIndex:1];
+	[r setFragmentSamplerState:b->linear atIndex:0];
+	[r setFragmentBytes:p length:sizeof *p atIndex:0];
+	if (frame && frameLen > 0) [r setFragmentBytes:frame length:(NSUInteger) frameLen atIndex:1];
+	id<MTLTexture> lt = mc_im_light_tex();
+	if (lt) [r setFragmentTexture:lt atIndex:7];
+	[r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+	[r endEncoding];
 	return 1;
 }
 
@@ -618,17 +688,30 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 			if (!taaOn) b->taaValid = 0;
 			// (without the second pass and with a render scale, the resolve writes the screen itself from the smaller picture: it
 			// reads it by the screen's uv)
-			imbPass3(cmd, post ? b->taaCur : dst, MTLLoadActionDontCare, post ? b->resolve16 : b->resolve, b->views[0], b->linear, &p, @"Imagine Metal HDR resolve", src,
+			// (s1120: MetalFX's set-up first, so the resolve can write its motion and reactive mask in the same pass)
+			BOOL fxNow = post && taaOn && b->fxOn && imbFxReady(b, b->taaCur, dst, depth);
+			BOOL folded = NO;
+			if (fxNow) {
+				// (the motion's jitter in taa.xy: the resolve itself reads only taa.w)
+				ImBloomParams q = p;
+				q.taa[0] = b->taaJitter[0];
+				q.taa[1] = b->taaJitter[1];
+				folded = imbResolveFx(b, cmd, b->taaCur, &q, src, shafts, aoT, fogOk ? hc : nil, depth, fogOk ? hs : nil, frame, frameLen) == 1;
+			}
+			if (!folded) imbPass3(cmd, post ? b->taaCur : dst, MTLLoadActionDontCare, post ? b->resolve16 : b->resolve, b->views[0], b->linear, &p, @"Imagine Metal HDR resolve", src,
 				shafts ? shafts : b->views[0], aoT ? aoT : b->views[0], fogOk ? hc : b->views[0], depthOk ? depth : nil, fogOk ? hs : nil,
 				frame, frameLen);
-			if (post && taaOn && b->fxOn && imbFxReady(b, b->taaCur, dst, depth)) {
+			if (fxNow) {
 				// (the MetalFX build) the motion of every pixel since the last frame, from its depth and the two frames' transforms (the
 				// world as it stands: what moves by itself, mobs, isn't followed yet); Apple's scaler; its picture onto the screen
 				p.taa[0] = b->taaJitter[0];
 				p.taa[1] = b->taaJitter[1];
 				p.taa[2] = 0.0f;
 				p.taa[3] = (float) src.width / (float) dst.width;
-				MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+				MTLRenderPassDescriptor *rp;
+				id<MTLRenderCommandEncoder> r;
+				if (!folded) {
+				rp = [MTLRenderPassDescriptor renderPassDescriptor];
 				rp.colorAttachments[0].texture = b->fxMotion;
 				rp.colorAttachments[0].loadAction = MTLLoadActionDontCare;
 				rp.colorAttachments[0].storeAction = MTLStoreActionStore;
@@ -638,7 +721,7 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 					rp.colorAttachments[1].storeAction = MTLStoreActionStore;
 				}
 				imt_rp(rp, IMT_TAA);
-				id<MTLRenderCommandEncoder> r = [cmd renderCommandEncoderWithDescriptor:rp];
+				r = [cmd renderCommandEncoderWithDescriptor:rp];
 				r.label = @"Imagine Metal MetalFX motion";
 				[r setRenderPipelineState:b->fxMotionPso];
 				[r setCullMode:MTLCullModeNone];
@@ -647,6 +730,7 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 				[r setFragmentBytes:&p length:sizeof p atIndex:0];
 				[r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 				[r endEncoding];
+				}
 				b->fx.colorTexture = b->taaCur;
 				b->fx.depthTexture = depth;
 				b->fx.motionTexture = b->fxMotion;

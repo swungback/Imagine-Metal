@@ -598,10 +598,9 @@ static float3 imbEndPortalRays(float3 dir, float4 pp) {
 	return col * max(tr, 0.0);
 }
 
-fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> src [[texture(0)]], sampler s [[sampler(0)]],
-	texture2d<float> hdr [[texture(1)]], texture2d<float> shafts [[texture(2)]], texture2d<float> aoT [[texture(3)]],
-	texture2d<float> pic [[texture(4)]], depth2d<float> depth [[texture(5)]], sampler ms [[sampler(1)]],
-	constant ImBloomParams &p [[buffer(0)]], constant ImVlFrame &f [[buffer(1)]], texture3d<float> lvol [[texture(7)]]) {
+// (s1120: the resolve's body, shared by im_bloom_resolve and the MetalFX variants that also write the motion, below)
+static float4 imbResolve(ImBloomOut in, texture2d<float> src, sampler s, texture2d<float> hdr, texture2d<float> shafts, texture2d<float> aoT,
+	texture2d<float> pic, depth2d<float> depth, sampler ms, constant ImBloomParams &p, constant ImVlFrame &f, texture3d<float> lvol) {
 	float4 pp = ((constant float4 *) &f)[54];  // (ImFrame.endPortal, byte 864: w the time)
 	float4 fx = ((constant float4 *) &f)[53];  // (ImFrame.extra)
 	// (the picture's own pixel under this one: the same pixel when the target is the picture's size, as it is whenever the TAA
@@ -808,6 +807,15 @@ fragment float4 im_bloom_resolve(ImBloomOut in [[stage_in]], texture2d<float> sr
 	return float4(o, h.a);
 }
 
+#define IMB_RESOLVE_ARGS ImBloomOut in [[stage_in]], texture2d<float> src [[texture(0)]], sampler s [[sampler(0)]], \
+	texture2d<float> hdr [[texture(1)]], texture2d<float> shafts [[texture(2)]], texture2d<float> aoT [[texture(3)]], \
+	texture2d<float> pic [[texture(4)]], depth2d<float> depth [[texture(5)]], sampler ms [[sampler(1)]], \
+	constant ImBloomParams &p [[buffer(0)]], constant ImVlFrame &f [[buffer(1)]], texture3d<float> lvol [[texture(7)]]
+
+fragment float4 im_bloom_resolve(IMB_RESOLVE_ARGS) {
+	return imbResolve(in, src, s, hdr, shafts, aoT, pic, depth, ms, p, f, lvol);
+}
+
 // ---- the MetalFX build: Apple's temporal scaler in place of im_bloom_taa (imbloom.m) ----
 // Where each pixel of the world's frame was a frame ago, in that frame's pixels (toward the earlier place): its depth gives its
 // place in the world (the terrain's sub-pixel offset taken out), the last frame's transform where that was on screen. Only the
@@ -841,6 +849,37 @@ fragment ImFxMotionOut im_bloom_motion_r(ImBloomOut in [[stage_in]], texture2d<f
 	float a = frame.read(uint2(clamp(in.uv, 0.0, 0.9999) * float2(frame.get_width(), frame.get_height()))).a;
 	// (fix9: 0.4, was 0.8: with the history nearly ignored, each frame's own sub-pixel offset showed on mobs as a shimmer, Jack's
 	// "animals jittering" (18:33); at 0.4 MetalFX still lets most of a moving mob's history go, so it doesn't smear)
+	o.reactive = a > 0.95 && a < 0.97 ? 0.4 : 0.0;
+	return o;
+}
+
+// (s1120) The resolve into TAA's frame writing MetalFX's motion too (and its reactive mask from macOS 14): what im_bloom_motion
+// and im_bloom_motion_r wrote in a pass of their own, from the same pixel's depth and the same frame. p.taa.xy: the jitter, as the
+// motion pass had it (the resolve reads only taa.w). The mask from the alpha as the frame stores it (16-bit float), as the motion
+// pass read it back.
+struct ImResolveFxOut {
+	float4 color [[color(0)]];
+	float4 motion [[color(1)]];
+};
+
+fragment ImResolveFxOut im_bloom_resolve_fx(IMB_RESOLVE_ARGS) {
+	ImResolveFxOut o;
+	o.color = imbResolve(in, src, s, hdr, shafts, aoT, pic, depth, ms, p, f, lvol);
+	o.motion = imbMotion(in.uv, depth, p);
+	return o;
+}
+
+struct ImResolveFxrOut {
+	float4 color [[color(0)]];
+	float4 motion [[color(1)]];
+	float reactive [[color(2)]];
+};
+
+fragment ImResolveFxrOut im_bloom_resolve_fxr(IMB_RESOLVE_ARGS) {
+	ImResolveFxrOut o;
+	o.color = imbResolve(in, src, s, hdr, shafts, aoT, pic, depth, ms, p, f, lvol);
+	o.motion = imbMotion(in.uv, depth, p);
+	float a = float(half(o.color.a));
 	o.reactive = a > 0.95 && a < 0.97 ? 0.4 : 0.0;
 	return o;
 }
