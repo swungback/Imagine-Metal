@@ -949,7 +949,7 @@ final class MetaWorld {
 			if (px - ex > 1f || px + ex < -1f || py - ey > 1f || py + ey < -1f) continue;
 			boolean masked = false;
 			if (hide && this.anyMasked(bx, bz, w)) {
-				if (this.allMasked(bx, bz, w)) continue;
+				if (MetaSettings.hideUnderReal && MetaSettings.coverageDebug != 2 && this.allMasked(bx, bz, w)) continue;
 				masked = true;
 			}
 			for (int f = 0; f < 6; f++) {
