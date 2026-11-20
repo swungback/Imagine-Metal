@@ -436,6 +436,8 @@ public final class Shadows {
 					// (reserved.x, which casters: 0 as C1; with the plants' own slice (Build C2) 1, everything but the plants)
 					MemoryUtil.memPutFloat(f + 96, plants ? 1f : 0f);
 					ImNative.shadowRender(enc, state, f, FRAME_BYTES, b[0], b[1], b[2], b[3], b[4], (int) b[5], atlas, 2.0f, c);
+					// (s1120: the far cascade also gets MetaLODS' land around the real terrain: no shadow pop-in at the hand-over)
+					if (c == 1) imaginemetal.metalods.MetaLods.drawShadow(enc, state, 1, MATRIX[1], cam.x, cam.y, cam.z, 2.0f);
 					if (c == 0) {
 						// (Build C2: the near map's plants alone into slice 2: the same casters' list, the same light clip)
 						if (plants) {

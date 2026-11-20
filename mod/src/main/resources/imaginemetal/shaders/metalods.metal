@@ -328,3 +328,63 @@ fragment MLGOut ml_fs(MLOut in [[stage_in]], float4 oldG2 [[color(2)]], float4 o
 	o.g4 = in.pos.z;
 	return o;
 }
+
+// ---- (s1120) the LODs as sun/moon shadow casters (imaginemetal.Shadows' far cascade; metalods.m mml_shadow) ----
+// Jack: shadows popped in where real chunks replaced the LODs (the real chunks cast, the LODs didn't). The far cascade now also
+// holds the LOD land around the real terrain: the same pages and quads as ml_vs, through the cascade's light clip (f.clip:
+// camera-relative world -> light clip, orthographic, standard depth as shadow.metal's casters: no row flip, no TAA offset).
+// Where the real terrain is drawn its own casters are in the map: the masked variant drops the LOD there (ml_fs's mask test).
+// Water doesn't cast (the real water doesn't either). Keep the corner decoding in step with ml_vs.
+struct MLShadowOut {
+	float4 pos [[position]];
+	float3 rel;
+	uint face [[flat]];
+};
+
+vertex MLShadowOut ml_shadow_vs(uint vid [[vertex_id]], uint iid [[instance_id]], constant MLFrame &f [[buffer(0)]],
+	device const uint *visible [[buffer(1)]], device const PageInfo *pages [[buffer(2)]], device const uchar *quads [[buffer(3)]]) {
+	MLShadowOut o;
+	uint page = visible[iid] & 0x1FFFFu;
+	PageInfo pi = pages[page];
+	uint count = (pi.packed >> 8) & 511u;
+	uint q = vid >> 2, c = vid & 3u;
+	o.face = 0u;
+	o.rel = float3(0.0);
+	if (q >= count) {
+		o.pos = float4(0.0, 0.0, 2.0, 1.0);  // (past the page's quads: outside the clip volume)
+		return o;
+	}
+	uint level = pi.packed & 15u, face = (pi.packed >> 4) & 7u;
+	device const uchar *pg = quads + page * 2304u;
+	uint2 qd = ((device const uint2 *) pg)[q];
+	float x = float(qd.x & 31u), z = float((qd.x >> 5) & 31u), y = float((qd.x >> 10) & 511u);
+	float w = float(((qd.x >> 22) & 31u) + 1u), h = float(((qd.x >> 27) & 31u) + 1u);
+	float u = float(c & 1u), v = float(c >> 1);
+	float3 p;
+	switch (face) {
+		case 0u: p = float3(x + 1.0, y + v * h, z + u * w); break;
+		case 1u: p = float3(x, y + v * h, z + u * w); break;
+		case 2u: p = float3(x + u * w, y + 1.0, z + v * h); break;
+		case 3u: p = float3(x + u * w, y, z + v * h); break;
+		case 4u: p = float3(x + u * w, y + v * h, z + 1.0); break;
+		default: p = float3(x + u * w, y + v * h, z); break;
+	}
+	float s = float(1u << level);
+	int3 org = int3(pi.ox, pi.oy, pi.oz);
+	float3 rel = float3(org - f.camBlock.xyz) + p * s - f.camFrac.xyz;
+	o.pos = f.clip * float4(rel, 1.0);
+	o.rel = rel;
+	o.face = face;
+	return o;
+}
+
+fragment void ml_shadow_fs(MLShadowOut in [[stage_in]], constant MLFrame &f [[buffer(0)]], constant uint *mask [[buffer(6)]]) {
+	if (f.params.x > 0.5 && f.mask.z > 0) {
+		int2 wb = f.camBlock.xz + int2(floor(in.rel.xz + f.camFrac.xz + mlMaskOffset(in.face, false)));
+		int2 ch = (wb - (wb & int2(15))) / 16 - f.mask.xy;
+		if (ch.x >= 0 && ch.y >= 0 && ch.x < f.mask.z && ch.y < f.mask.z) {
+			uint bit = uint(ch.y) * uint(f.mask.w) * 32u + uint(ch.x);
+			if (((mask[bit >> 5] >> (bit & 31u)) & 1u) != 0u) discard_fragment();
+		}
+	}
+}

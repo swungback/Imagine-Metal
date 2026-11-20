@@ -9,6 +9,8 @@ int mco_im_g_open(Enc *enc);
 void mco_im_g_mark(void);
 const uint8_t *mco_im_frame(void);
 void mco_im_bind_lod_fade(id<MTLRenderCommandEncoder> r, NSUInteger index);
+id<MTLTexture> im_shadow_map_texture(void *s);  // imshadow.m
+int im_shadow_resolution(void *s);
 
 typedef struct {
 	Ctx *ctx;
@@ -19,6 +21,11 @@ typedef struct {
 	id<MTLDepthStencilState> ds;
 	id<MTLSamplerState> smp;
 	id<MTLBuffer> idx;  // {0 1 2 2 1 3} + 4q for a page's 256 quads
+	// (s1120) the LODs as shadow casters: depth only (plain) and with the real terrain's mask (masked); made on first use
+	id<MTLRenderPipelineState> shadowPso[2];
+	id<MTLDepthStencilState> shadowDs;
+	int shadowFailed;
+	uint64_t shadowDraws;
 	uint64_t draws, instances;
 } MetaLods;
 
@@ -181,4 +188,83 @@ int mml_draw(MetaLods *m, Enc *enc, const void *frame, int frameLength, id<MTLBu
 	m->draws++;
 	m->instances += (uint64_t) count;
 	return 1;
+}
+
+// (s1120) MetaLODS' land as casters into one cascade of the sun/moon shadow map, after the terrain's own casters (imshadow.m
+// im_shadow_render cleared and drew it; this loads it): Jack's pop-in, real chunks casting where the LODs they replaced didn't.
+// groups: n entries of 4 ints (offset into visible, page count, quads per page, masked: 1 = the real terrain's mask applies);
+// frame: MLFrame with the cascade's light clip. Depth state and bias as the terrain's casters. 1 drawn, 0 nothing, -1 err set.
+int mml_shadow(MetaLods *m, Enc *enc, void *shadow, int cascade, const void *frame, int frameLength, id<MTLBuffer> visible,
+	const int32_t *groups, int n, id<MTLBuffer> pages, id<MTLBuffer> quads, const void *mask, int maskLength, float slopeScale,
+	char *err, int cap) {
+	if (!m || !shadow || n <= 0 || m->shadowFailed) return 0;
+	id<MTLTexture> map = im_shadow_map_texture(shadow);
+	int res = im_shadow_resolution(shadow);
+	if (!map || res <= 0 || cascade < 0 || cascade >= (int) map.arrayLength) return 0;
+	@autoreleasepool {
+		if (!m->shadowPso[0]) {
+			id<MTLFunction> vs = [[m->lib newFunctionWithName:@"ml_shadow_vs"] autorelease];
+			id<MTLFunction> fs = [[m->lib newFunctionWithName:@"ml_shadow_fs"] autorelease];
+			if (!vs || !fs) {
+				m->shadowFailed = 1;
+				if (err && cap > 0) snprintf(err, cap, "metalods.metal: missing ml_shadow_vs / ml_shadow_fs");
+				return -1;
+			}
+			MTLRenderPipelineDescriptor *pd = [[MTLRenderPipelineDescriptor new] autorelease];
+			pd.label = @"MetaLODS shadow casters";
+			pd.vertexFunction = vs;
+			pd.depthAttachmentPixelFormat = map.pixelFormat;
+			pd.inputPrimitiveTopology = MTLPrimitiveTopologyClassTriangle;
+			NSError *e = nil;
+			m->shadowPso[0] = [m->ctx->device newRenderPipelineStateWithDescriptor:pd error:&e];
+			pd.label = @"MetaLODS shadow casters (masked)";
+			pd.fragmentFunction = fs;
+			if (m->shadowPso[0]) m->shadowPso[1] = [m->ctx->device newRenderPipelineStateWithDescriptor:pd error:&e];
+			MTLDepthStencilDescriptor *dd = [[MTLDepthStencilDescriptor new] autorelease];
+			dd.depthCompareFunction = MTLCompareFunctionLess;  // (standard depth, as imshadow.m)
+			dd.depthWriteEnabled = YES;
+			m->shadowDs = [m->ctx->device newDepthStencilStateWithDescriptor:dd];
+			if (!m->shadowPso[0] || !m->shadowPso[1] || !m->shadowDs) {
+				m->shadowFailed = 1;
+				mlErr(err, cap, "MetaLODS shadow pipeline", e);
+				return -1;
+			}
+		}
+		uint8_t f[256];
+		if (frameLength > (int) sizeof f) frameLength = (int) sizeof f;
+		memcpy(f, frame, (size_t) frameLength);
+		MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+		rp.depthAttachment.texture = map;
+		rp.depthAttachment.slice = (NSUInteger) cascade;
+		rp.depthAttachment.loadAction = MTLLoadActionLoad;
+		rp.depthAttachment.storeAction = MTLStoreActionStore;
+		rp.renderTargetWidth = (NSUInteger) res;
+		rp.renderTargetHeight = (NSUInteger) res;
+		imt_rp(rp, IMT_SHADOW);
+		id<MTLRenderCommandEncoder> r = [mc_frame_cmd(enc) renderCommandEncoderWithDescriptor:rp];
+		r.label = @"MetaLODS shadow casters";
+		[r setViewport:(MTLViewport) {0, 0, (double) res, (double) res, 0, 1}];
+		[r setDepthStencilState:m->shadowDs];
+		[r setCullMode:MTLCullModeNone];
+		[r setDepthClipMode:MTLDepthClipModeClamp];
+		[r setDepthBias:0 slopeScale:slopeScale clamp:0.01f];
+		[r setVertexBytes:f length:(NSUInteger) frameLength atIndex:0];
+		[r setVertexBuffer:pages offset:0 atIndex:2];
+		[r setVertexBuffer:quads offset:0 atIndex:3];
+		[r setFragmentBytes:f length:(NSUInteger) frameLength atIndex:0];
+		[r setFragmentBytes:mask length:(NSUInteger) (maskLength > 0 ? maskLength : 4) atIndex:6];
+		int drawn = 0;
+		for (int i = 0; i < n; i++) {
+			int off = groups[i * 4], count = groups[i * 4 + 1], cap4 = groups[i * 4 + 2], masked = groups[i * 4 + 3] != 0;
+			if (count <= 0 || cap4 <= 0 || cap4 > 256) continue;
+			[r setRenderPipelineState:m->shadowPso[masked ? 1 : 0]];
+			[r setVertexBuffer:visible offset:(NSUInteger) off * 4 atIndex:1];
+			[r drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:(NSUInteger) cap4 * 6 indexType:MTLIndexTypeUInt16 indexBuffer:m->idx
+				indexBufferOffset:0 instanceCount:(NSUInteger) count];
+			drawn = 1;
+		}
+		[r endEncoding];
+		m->shadowDraws++;
+		return drawn;
+	}
 }

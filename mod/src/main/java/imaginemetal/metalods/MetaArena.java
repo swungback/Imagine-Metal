@@ -30,6 +30,10 @@ final class MetaArena {
 	final long[] visBuf = new long[RING], vis = new long[RING];
 	final long[] fadeBuf = new long[RING], fade = new long[RING];
 	final long frame = MemoryUtil.nmemCalloc(1, 256), mask = MemoryUtil.nmemCalloc(1, MASK_BYTES);
+	/** (s1120) the shadow casters' page lists (made on first use, RING of them), their frame and groups (MetaWorld.shadowList) */
+	final long[] shadowVisBuf = new long[RING], shadowVis = new long[RING];
+	final long shadowFrame = MemoryUtil.nmemCalloc(1, 256), shadowGroups = MemoryUtil.nmemCalloc(1, 16L * MetaWorld.SHADOW_GROUPS);
+	int shadowSlot;
 	private final int[] free;
 	private int freeCount;
 	private final ArrayDeque<long[]> held = new ArrayDeque<>();
@@ -159,6 +163,7 @@ final class MetaArena {
 		MetaNative.release(this.quadBuf);
 		MetaNative.release(this.infoBuf);
 		for (long b : this.visBuf) MetaNative.release(b);
+		for (long b : this.shadowVisBuf) if (b != 0) MetaNative.release(b);
 		for (long b : this.fadeBuf) MetaNative.release(b);
 		// (the block and biome tables stay: MetaPalette keeps writing into them for the session)
 	}

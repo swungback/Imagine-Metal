@@ -39,6 +39,11 @@ public final class MetaSettings {
 	public static volatile int threads = 0;
 	/** Hide the LODs inside the real terrain (where real chunks are drawn). Debug: off shows both. */
 	public static volatile boolean hideUnderReal = true;
+	/**
+	 * (s1120) The LOD land casts sun/moon shadows (the far shadow cascade, around the real terrain): real chunks replacing LODs no
+	 * longer bring their shadows in with them (Jack, 20 Nov). Not saved; -Dmetalods.lodShadows=false starts with it off.
+	 */
+	public static volatile boolean lodShadows = !"false".equals(System.getProperty("metalods.lodShadows"));
     /** Complementary screen-noise transition, enabled only over ready LOD coverage. */
     public static volatile boolean edgeDither = true;
 	/** Debug, not saved: each level drawn in its own colour. */

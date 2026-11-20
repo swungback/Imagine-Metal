@@ -21,11 +21,11 @@ public final class PassTimes {
 	// (the order of imtime's IMT_* tags, mcmetal.h)
 	public static final int MISC = 0, SHADOW = 1, LIGHT = 2, SKY = 3, TERRAIN = 4, ENTITIES = 5, TRANSLUCENT = 6, OVERLAY = 7, WEATHER = 8,
 		CAPTURE = 9, SHAFTS = 10, AO = 11, BLOOM = 12, RESOLVE = 13, TAA = 14, HUD = 15, PRESENT = 16, CULL = 17, CLOUDS = 18,
-		TERRAIN_LEAF_DEPTH = 19, TERRAIN_LEAVES = 20;
+		TERRAIN_LEAF_DEPTH = 19, TERRAIN_LEAVES = 20, TERRAIN_LODS = 21, TERRAIN_LIGHTING = 22;
 	static final int TAGS = 24;
 	static final String[] NAMES = {"uploads/lightmap", "shadow maps", "light grid", "sky", "terrain", "entities", "translucent", "outline/overlay",
 		"weather/particles", "reflection copies", "shafts", "ao", "bloom", "resolve", "taa", "hand+gui", "present", "culling", "clouds",
-		"terrain leaf depth", "terrain leaves (cutout colour)", "?", "?", "?"};
+		"terrain leaf depth", "terrain leaves (cutout colour)", "terrain: MetaLODS into the G-buffer", "terrain: deferred lighting", "?"};
 	/**
 	 * The benchmark's timing step: on a sampled frame the terrain's render encoder is also cut between its parts (OwnFrag.layer: the
 	 * leaf depth pre-pass, the solid, the cutout colour) so they are timed apart; terrain is then the solid and the rest. Each cut

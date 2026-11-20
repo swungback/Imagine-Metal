@@ -32,7 +32,7 @@ import org.jspecify.annotations.Nullable;
  * same corners as one column of it: one fill answers all 16 columns of the cell (both world-gen heightmaps) for little more than
  * one walk. Same code path as the game's (same NoiseChunk, samplers, aquifer, predicate, the volume's minY and height), so the
  * answers are the game's: -Dmcopt.gen.baseHeightVerify=N also runs the game's walk for the first N misses and logs any difference.
- * -Dmcopt.gen.baseHeightBatch=1: column by column (s1119), 4 (default) or 8 / 16 (more columns, more corners).
+ * -Dmcopt.gen.baseHeightBatch=1: column by column (s1119), 4 (default), 8 or 16 (more columns, more corners).
  */
 public final class LodBaseHeights {
 	public static final boolean ENABLED = !"false".equals(System.getProperty("mcopt.gen.baseHeightCache"));
@@ -54,16 +54,32 @@ public final class LodBaseHeights {
 		static final Heightmap.Types[] WG = {Heightmap.Types.WORLD_SURFACE_WG, Heightmap.Types.OCEAN_FLOOR_WG};
 	}
 
-	private final Long2IntOpenHashMap map = new Long2IntOpenHashMap(1 << 14);
+	/**
+	 * (s1120) Shared by the workers (striped): neighbouring tiles' structures ask the same columns from different workers. One per
+	 * thread kept 43 % in Jack's run; the would-keep counts below are per thread.
+	 */
+	private static final int STRIPES = 64;
+	private static final Long2IntOpenHashMap[] MAPS = new Long2IntOpenHashMap[STRIPES];
+	static {
+		for (int i = 0; i < STRIPES; i++) {
+			MAPS[i] = new Long2IntOpenHashMap(1 << 10);
+			MAPS[i].defaultReturnValue(Integer.MIN_VALUE);
+		}
+	}
+	private static volatile @Nullable Object worldRandom;
+	private static volatile int worldMinY, worldHeight;
 	private final LongOpenHashSet[] sim = {new LongOpenHashSet(), new LongOpenHashSet(), new LongOpenHashSet(), new LongOpenHashSet()};
 	private @Nullable Object random;
-	private int minY, height;
 	/** Verify: the batch's answer for the game's walk now running on this thread, and when it started. */
 	public int expected = Integer.MIN_VALUE;
 	public long walkStart;
 
 	private LodBaseHeights() {
-		this.map.defaultReturnValue(Integer.MIN_VALUE);
+	}
+
+	private static Long2IntOpenHashMap stripe(int x, int z) {
+		int h = (x >> 2) * 0x9E3779B9 ^ (z >> 2) * 0x85EBCA6B;
+		return MAPS[(h ^ h >>> 16) & (STRIPES - 1)];
 	}
 
 	/** Around LodForest.starts' work: the cache answers on this thread while inside. */
@@ -86,12 +102,21 @@ public final class LodBaseHeights {
 
 	/** The kept height, or Integer.MIN_VALUE. A different world (random state) or height range empties it first. */
 	public int get(int x, int z, int type, Object random, int minY, int height) {
-		if (random != this.random || minY != this.minY || height != this.height) {
-			this.map.clear();
+		if (random != worldRandom || minY != worldMinY || height != worldHeight) {
+			synchronized (MAPS) {
+				if (random != worldRandom || minY != worldMinY || height != worldHeight) {
+					for (Long2IntOpenHashMap m : MAPS) synchronized (m) {
+						m.clear();
+					}
+					worldMinY = minY;
+					worldHeight = height;
+					worldRandom = random;
+				}
+			}
+		}
+		if (random != this.random) {
 			for (LongOpenHashSet s : this.sim) s.clear();
 			this.random = random;
-			this.minY = minY;
-			this.height = height;
 		}
 		ASKED.incrementAndGet();
 		for (int i = 0; i < SIM_B.length; i++) {
@@ -99,7 +124,11 @@ public final class LodBaseHeights {
 			if (!this.sim[i].add(key(Math.floorDiv(x, b), Math.floorDiv(z, b), type))) SIM[i].incrementAndGet();
 			if (this.sim[i].size() > MAX) this.sim[i].clear();
 		}
-		int v = this.map.get(key(x, z, type));
+		Long2IntOpenHashMap map = stripe(x, z);
+		int v;
+		synchronized (map) {
+			v = map.get(key(x, z, type));
+		}
 		if (v == Integer.MIN_VALUE) {
 			long m = MISSES.incrementAndGet();
 			if ((m & ((1 << 10) - 1)) == 0) report();
@@ -120,8 +149,11 @@ public final class LodBaseHeights {
 	}
 
 	public void put(int x, int z, int type, int value) {
-		if (this.map.size() >= MAX) this.map.clear();
-		this.map.put(key(x, z, type), value);
+		Long2IntOpenHashMap map = stripe(x, z);
+		synchronized (map) {
+			if (map.size() >= MAX / STRIPES) map.clear();
+			map.put(key(x, z, type), value);
+		}
 	}
 
 	/** Verify the next miss on this thread against the game's walk (first N misses), else answer from a batch fill. */

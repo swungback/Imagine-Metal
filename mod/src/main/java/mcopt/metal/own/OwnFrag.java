@@ -939,6 +939,7 @@ final class OwnFrag {
 			if (OwnTerrain.STATS) this.stats(c);
 			return false;
 		}
+		leafDrawLog();
 		if (c.uocc) {
 			// phase A: the units visible at the last test (this frame's cull listed only those); the split, the pyramid and every unit's
 			// test; phase B: the visible units phase A did not draw
@@ -1118,6 +1119,18 @@ final class OwnFrag {
 
 	/** (Imagine Metal) the cutout depth pre-pass's state for layer(): 0 off, 1 drawing the pre-pass, 2 the colour after it. */
 	private int preMode;
+	/** (s1120) cutout draws issued: depth pre-pass, EQUAL colour, plain colour; logged by leafDrawLog every 10 s. */
+	static final long[] LEAF_DRAWS = new long[3];
+	private static long leafLogAt;
+
+	static void leafDrawLog() {
+		long now = System.nanoTime();
+		if (now - leafLogAt < 10_000_000_000L) return;
+		leafLogAt = now;
+		System.out.println("mcopt-own-frag leaf draws (10 s): depth pre-pass " + LEAF_DRAWS[0] + ", colour EQUAL " + LEAF_DRAWS[1] + ", colour plain " + LEAF_DRAWS[2]
+			+ " (leafPrepass " + OwnTerrain.leafPrepass + ")");
+		java.util.Arrays.fill(LEAF_DRAWS, 0);
+	}
 	/** (Imagine Metal) the benchmark's timing step cut the render encoder this frame (PassTimes.terrainPart). */
 	private boolean timeCut;
 
@@ -1166,6 +1179,8 @@ final class OwnFrag {
 				// whose pre-pass couldn't be made is drawn as before, or it would be invisible)
 				if (this.preMode == 1) k = (k & ~15) | 6 | K_BIAS;
 				else if (this.preMode == 2 && !this.failed.contains((k & ~15) | 6 | K_BIAS)) k |= K_EQUAL | K_BIAS;
+				// (s1120: how many cutout draws go as depth pre-pass / EQUAL colour / plain colour, logged every 10 s)
+				if (layer == 1) LEAF_DRAWS[this.preMode == 1 ? 0 : this.preMode == 2 ? 1 : 2]++;
 				if (this.failed.contains(k)) continue;
 				try {
 					long ar = args;

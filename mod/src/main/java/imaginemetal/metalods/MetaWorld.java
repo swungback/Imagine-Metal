@@ -919,6 +919,88 @@ final class MetaWorld {
 		return b.toString();
 	}
 
+	/** (s1120) shadow caster groups: the land buckets, unmasked then masked */
+	static final int SHADOW_GROUPS = MetaArena.LAND_BUCKETS * 2;
+	private final int[][] shadowLists = new int[SHADOW_GROUPS][];
+	private final int[] shadowCount = new int[SHADOW_GROUPS];
+	long shadowPages;
+
+	/**
+	 * (s1120) The land pages of the columns last drawn (prepare's selection) that a shadow cascade sees, as casters: m the
+	 * cascade's camera-relative world -> light clip (column-major, orthographic), the camera. Only faces turned toward the light
+	 * (closed voxel land: the first surface the light meets), water left out (the real water casts none). Columns the real terrain
+	 * draws whole are left out; partly drawn ones go in the masked groups (ml_shadow_fs drops their LOD where the real one is).
+	 * Writes arena.shadowVis[slot], arena.shadowGroups and arena.shadowFrame; the number of groups (0: nothing to draw).
+	 */
+	int shadowList(long enc, float[] m, double camX, double camY, double camZ, int slot) {
+		java.util.Arrays.fill(this.shadowCount, 0);
+		float lx = -m[2], ly = -m[6], lz = -m[10];  // (toward the light: depth grows away from it)
+		boolean[] facing = {lx > 0f, lx < 0f, ly > 0f, ly < 0f, lz > 0f, lz < 0f};
+		boolean hide = MetaSettings.hideUnderReal;
+		for (Col c : this.draw) {
+			int w = 32 << c.level;
+			int bx = c.cx * w, bz = c.cz * w;
+			float x0 = (float) (bx - camX), z0 = (float) (bz - camZ), y0 = (float) (c.minYb - camY), y1 = (float) (c.maxYb - camY);
+			// (orthographic: the box's x and y on the map, from its centre and half size; the depth isn't tested, casters between the
+			// light and the near plane still cast, the encoder clamps them)
+			float cx = x0 + w * 0.5f, cy = (y0 + y1) * 0.5f, cz = z0 + w * 0.5f, hx = w * 0.5f, hy = (y1 - y0) * 0.5f, hz = hx;
+			float px = m[0] * cx + m[4] * cy + m[8] * cz + m[12], ex = Math.abs(m[0]) * hx + Math.abs(m[4]) * hy + Math.abs(m[8]) * hz;
+			float py = m[1] * cx + m[5] * cy + m[9] * cz + m[13], ey = Math.abs(m[1]) * hx + Math.abs(m[5]) * hy + Math.abs(m[9]) * hz;
+			if (px - ex > 1f || px + ex < -1f || py - ey > 1f || py + ey < -1f) continue;
+			boolean masked = false;
+			if (hide && this.anyMasked(bx, bz, w)) {
+				if (this.allMasked(bx, bz, w)) continue;
+				masked = true;
+			}
+			for (int f = 0; f < 6; f++) {
+				if (!facing[f]) continue;
+				for (int i = c.faceFirst[f]; i < c.faceWater[f]; i++) {
+					int page = c.pages[i];
+					int g = this.arena.pageBucket[page] + (masked ? MetaArena.LAND_BUCKETS : 0);
+					int n = this.shadowCount[g];
+					int[] list = this.shadowLists[g];
+					if (list == null) list = this.shadowLists[g] = new int[256];
+					else if (n == list.length) list = this.shadowLists[g] = java.util.Arrays.copyOf(list, n * 2);
+					list[n] = page;
+					this.shadowCount[g] = n + 1;
+				}
+			}
+		}
+		MetaArena a = this.arena;
+		if (a.shadowVisBuf[slot] == 0) {
+			a.shadowVisBuf[slot] = MetaNative.buffer(enc, (long) a.pages * 4);
+			if (a.shadowVisBuf[slot] == 0) return 0;
+			a.shadowVis[slot] = MetaNative.contents(a.shadowVisBuf[slot]);
+		}
+		long vis = a.shadowVis[slot];
+		int groups = 0, off = 0;
+		for (int g = 0; g < SHADOW_GROUPS; g++) {
+			int n = this.shadowCount[g];
+			if (n == 0) continue;
+			if (off + n > a.pages) break;
+			MemoryUtil.memIntBuffer(vis + 4L * off, n).put(this.shadowLists[g], 0, n);
+			long e = a.shadowGroups + 16L * groups;
+			MemoryUtil.memPutInt(e, off);
+			MemoryUtil.memPutInt(e + 4, n);
+			MemoryUtil.memPutInt(e + 8, quadCapacity(g % MetaArena.LAND_BUCKETS));
+			MemoryUtil.memPutInt(e + 12, g >= MetaArena.LAND_BUCKETS ? 1 : 0);
+			off += n;
+			groups++;
+		}
+		this.shadowPages = off;
+		// the frame: the drawn frame's (its mask), the cascade's matrix and this camera
+		MemoryUtil.memCopy(a.frame, a.shadowFrame, MetaArena.FRAME_BYTES);
+		for (int i = 0; i < 16; i++) MemoryUtil.memPutFloat(a.shadowFrame + i * 4L, m[i]);
+		int ibx = (int) Math.floor(camX), iby = (int) Math.floor(camY), ibz = (int) Math.floor(camZ);
+		MemoryUtil.memPutInt(a.shadowFrame + 64, ibx);
+		MemoryUtil.memPutInt(a.shadowFrame + 68, iby);
+		MemoryUtil.memPutInt(a.shadowFrame + 72, ibz);
+		MemoryUtil.memPutFloat(a.shadowFrame + 80, (float) (camX - ibx));
+		MemoryUtil.memPutFloat(a.shadowFrame + 84, (float) (camY - iby));
+		MemoryUtil.memPutFloat(a.shadowFrame + 88, (float) (camZ - ibz));
+		return groups;
+	}
+
 	private void addPage(int group, int page, int fade) {
 		int count = this.drawCount[group];
 		int[] list = this.pageLists[group];

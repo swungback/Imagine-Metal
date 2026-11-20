@@ -47,6 +47,11 @@ public final class Benchmark {
 	/** The render distance step: Minecraft's own setting before it (-1: untouched). */
 	private static int savedDistance = -1;
 	private static final String DISTANCE = "render distance 8";
+	private static final String BUSHY = "bushy leaf planes off (chunks rebuilt)", LEAFCULL = "leaf culling off (chunks rebuilt)";
+	/** (s1120) bushy leaves and leaf culling before a step changed them (null: untouched); put back with a rebuild */
+	private static boolean[] savedLeaves;
+	/** (s1120) MetaLODS' shadow casters before a step changed them (null: untouched) */
+	private static Boolean savedLodShadows;
 	private static final double[] refPass = new double[PassTimes.TAGS];
 	private static double refPassFrame, refPassIdle;
 	private static int refPassN;
@@ -56,7 +61,7 @@ public final class Benchmark {
 
 	/** steps after which the land takes a while to come back as it was (the reference after them waits longer, and isn't used) */
 	private static boolean slow(String name) {
-		return name.equals(DISTANCE) || name.startsWith("MetaLODS far detail") || name.startsWith("MetaLODS detail 3");
+		return name.equals(DISTANCE) || name.equals(BUSHY) || name.equals(LEAFCULL) || name.startsWith("MetaLODS far detail") || name.startsWith("MetaLODS detail 3");
 	}
 
 	public static boolean running() {
@@ -120,6 +125,21 @@ public final class Benchmark {
 			case "parallax_off" -> new Step("parallax off", () -> Settings.parallax = false);
 			case "watertrace_off" -> new Step("water and glass reflect only the sky (no screen trace)", () -> Settings.waterTrace = false);
 			case "leafprepass_off" -> new Step("leaf depth pre-pass off", () -> Settings.leafPrepass = false);
+			case "lodshadows_off" -> new Step("MetaLODS shadow casters off (s1120)", () -> {
+				savedLodShadows = imaginemetal.metalods.MetaSettings.lodShadows;
+				imaginemetal.metalods.MetaSettings.lodShadows = false;
+			}, 3.0);
+			// (s1120: what the real leaves' geometry costs: the chunks are rebuilt, so these wait longer and the reference after them too)
+			case "bushy_off" -> new Step(BUSHY, () -> {
+				savedLeaves = new boolean[] {Settings.bushyLeaves, Settings.leafCulling};
+				Settings.bushyLeaves = false;
+				SettingsScreen.rebuildChunks();
+			}, 15.0);
+			case "leafcull_off" -> new Step(LEAFCULL, () -> {
+				savedLeaves = new boolean[] {Settings.bushyLeaves, Settings.leafCulling};
+				Settings.leafCulling = false;
+				SettingsScreen.rebuildChunks();
+			}, 15.0);
 			case "plantshadows_off" -> new Step("plant shadows off (C2: their own map slice, a second near pass)", () -> Settings.plantShadows = false);
 			case "sky_off" -> new Step("our sky and air off", () -> Settings.sky = false);
 			case "colouredlight_off" -> new Step("coloured light off", () -> Settings.coloredLight = false);
@@ -356,12 +376,22 @@ public final class Benchmark {
 			imaginemetal.metalods.MetaSettings.farDetail = savedDetail[1];
 			savedDetail = null;
 		}
+		if (savedLodShadows != null) {
+			imaginemetal.metalods.MetaSettings.lodShadows = savedLodShadows;
+			savedLodShadows = null;
+		}
 		if (savedFarShadows != null) {
 			imaginemetal.metalods.MetaSettings.farShadows = savedFarShadows;
 			savedFarShadows = null;
 		}
 		if (Live.isOff()) Live.setOff(false);
 		Live.restore(saved);
+		if (savedLeaves != null) {
+			Settings.bushyLeaves = savedLeaves[0];
+			Settings.leafCulling = savedLeaves[1];
+			savedLeaves = null;
+			SettingsScreen.rebuildChunks();
+		}
 	}
 
 	private static void say(String s, boolean chat) {

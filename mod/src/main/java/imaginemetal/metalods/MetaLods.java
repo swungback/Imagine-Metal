@@ -126,6 +126,34 @@ public final class MetaLods {
         }
 	}
 
+	private static boolean saidShadow;
+
+	/**
+	 * (s1120, Shadows after drawing a cascade's terrain casters) the LOD land around the real terrain into that cascade too, so the
+	 * real chunks replacing LODs don't bring their shadows in with them. shadow: Shadows' native map state; m: the cascade's
+	 * camera-relative world -> light clip (column-major); the columns of the last frame's selection. Off: MetaSettings.lodShadows.
+	 */
+	public static void drawShadow(long enc, long shadow, int cascade, float[] m, double camX, double camY, double camZ, float slope) {
+		if (failed || !MetaSettings.enabled || !MetaSettings.lodShadows || lib == 0 || shadow == 0 || probe == 3 || !MetaNative.canShadow()) return;
+		MetaArena a = arena;
+		MetaWorld w = world;
+		if (a == null || w == null) return;
+		try {
+			int slot = a.shadowSlot = (a.shadowSlot + 1) % MetaArena.RING;
+			int groups = w.shadowList(enc, m, camX, camY, camZ, slot);
+			if (groups <= 0) return;
+			int r = MetaNative.shadow(lib, enc, shadow, cascade, a.shadowFrame, MetaArena.FRAME_BYTES, a.shadowVisBuf[slot], a.shadowGroups, groups, a.infoBuf,
+				a.quadBuf, a.mask, MetaArena.MASK_BYTES, slope);
+			if (r == 1 && !saidShadow) {
+				saidShadow = true;
+				System.out.println("[MetaLODS] LOD shadow casters drawn (cascade " + cascade + ", " + w.shadowPages + " pages)");
+			}
+		} catch (Throwable t) {
+			MetaSettings.lodShadows = false;
+			System.out.println("[MetaLODS] LOD shadow casters off: " + t);
+		}
+	}
+
 	/** (Deferred.end, before the G-buffer is lit) the LODs into the G-buffer. */
 	public static void drawInG(long enc) {
 		if (!haveFrame || failed || !MetaSettings.enabled) return;

@@ -1,5 +1,6 @@
 package imaginemetal.metalods;
 
+import static java.lang.foreign.ValueLayout.JAVA_FLOAT;
 import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
@@ -21,6 +22,37 @@ final class MetaNative {
 	private static final MethodHandle G_OPEN = fn("mml_g_open", JAVA_INT, JAVA_LONG);
 	private static final MethodHandle DRAW = fn("mml_draw", JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_LONG,
 		JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_INT);  // (..., atlas, masked, err, cap)
+
+	/** (s1120) MetaLODS' land into a shadow cascade (metalods.m mml_shadow); null with a library that hasn't it (the casters stay off). */
+	private static final MethodHandle SHADOW = optional("mml_shadow", JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_INT, JAVA_LONG,
+		JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_FLOAT, JAVA_LONG, JAVA_INT);
+
+	private static MethodHandle optional(String name, MemoryLayout result, MemoryLayout... args) {
+		try {
+			return fn(name, result, args);
+		} catch (RuntimeException e) {
+			System.out.println("[MetaLODS] " + name + " missing from the native library: LODs cast no shadows");
+			return null;
+		}
+	}
+
+	static boolean canShadow() {
+		return SHADOW != null;
+	}
+
+	/** 1 drawn, 0 nothing; throws with the native error on -1. groups: n x {offset, pages, quads per page, masked}. */
+	static int shadow(long m, long enc, long shadow, int cascade, long frame, int frameLength, long visible, long groups, int n, long pages, long quads,
+		long mask, int maskLength, float slope) {
+		if (SHADOW == null) return 0;
+		try (MemoryStack stack = MemoryStack.stackPush()) {
+			long err = stack.ncalloc(1, 2048, 1);
+			int r = (int) SHADOW.invokeExact(m, enc, shadow, cascade, frame, frameLength, visible, groups, n, pages, quads, mask, maskLength, slope, err, 2048);
+			if (r < 0) throw new IllegalStateException(MemoryUtil.memUTF8(err));
+			return r;
+		} catch (Throwable t) {
+			throw rethrow(t);
+		}
+	}
 
 	private static final MethodHandle WATER_PHASE = fn("mco_im_g_water_phase", null, JAVA_LONG, JAVA_INT);
 

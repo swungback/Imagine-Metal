@@ -163,3 +163,12 @@ void im_shadow_render(Enc *enc, ImShadow *s, const void *frame, int frameBytes, 
 	}
 	mc_im_shadow_bind(s->map, s->compare);
 }
+
+// (s1120, metalods.m mml_shadow) the map and its size, for MetaLODS' casters drawn into a cascade after the terrain's.
+id<MTLTexture> im_shadow_map_texture(ImShadow *s) {
+	return s ? s->map : nil;
+}
+
+int im_shadow_resolution(ImShadow *s) {
+	return s ? s->resolution : 0;
+}

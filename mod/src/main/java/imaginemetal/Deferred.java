@@ -57,12 +57,16 @@ public final class Deferred {
 	/** (OwnTerrain.drawOpaque's end) true: the pass was switched back, the caller binds the game's pass state again. */
 	public static boolean end(long enc) {
 		if (!Engine.TERRAIN || enc == 0) return false;
+		// (s1120: the benchmark's timing step books MetaLODS' G-buffer draws and the lighting apart too: before, both landed under
+		// "terrain leaves (cutout colour)", the last part cut, and read as 4.3 ms of leaves)
+		boolean cut = PassTimes.splitTerrain && PassTimes.terrainPart(PassTimes.TERRAIN_LODS);
 		// (MetaLODS: the far terrain into the G-buffer while its pass is still open, lit with the rest)
 		imaginemetal.metalods.MetaLods.drawInG(enc);
+		if (PassTimes.splitTerrain && PassTimes.terrainPart(PassTimes.TERRAIN_LIGHTING)) cut = true;
 		try {
-			return ImNative.deferEnd(enc) == 1;
+			return ImNative.deferEnd(enc) == 1 || cut;
 		} catch (Throwable t) {
-			return false;
+			return cut;
 		}
 	}
 }
