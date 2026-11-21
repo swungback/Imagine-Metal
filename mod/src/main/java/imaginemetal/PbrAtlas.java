@@ -10,6 +10,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.ResourceManager;
+import net.minecraft.util.ARGB;
 import org.lwjgl.system.MemoryUtil;
 
 /**
@@ -18,6 +19,9 @@ import org.lwjgl.system.MemoryUtil;
  * (lighting.metal imShade, ImFrame.pbrPack). Built when the atlas is; nothing when no pack has such maps.
  */
 public final class PbrAtlas {
+	// RGBA texture bytes in a little-endian int. Invalid unit normal, and a metal's reserved blue channel.
+	private static final int MISSING_NORMAL = 0xFFFFFFFF;
+	private static final int MISSING_SPECULAR = 0xFFFFE600;
 	static volatile boolean on;
 	/**
 	 * (Build B1) The generated normals' bevels are baked and bound at texture 27 (no pack's maps there): ImFrame.grade.z. The
@@ -46,20 +50,24 @@ public final class PbrAtlas {
 							if (nBuf == 0) {
 								nBuf = MemoryUtil.nmemCalloc((long) width * height, 4);
 								sBuf = MemoryUtil.nmemCalloc((long) width * height, 4);
-								// (no normal map: flat, full ambient occlusion, full height)
-								for (long i = 0; i < (long) width * height; i++) MemoryUtil.memPutInt(nBuf + i * 4, 0xFFFF8080);
+								MemoryUtil.memSet(nBuf, 0xFF, (long) width * height * 4);
+								for (long i = 0; i < (long) width * height; i++) MemoryUtil.memPutInt(sBuf + i * 4, MISSING_SPECULAR);
 							}
 							long dst = k == 0 ? nBuf : sBuf;
-							int w = Math.min(sp.contents().width(), img.getWidth()), h = Math.min(sp.contents().height(), img.getHeight());
 							// (a map at another resolution than its texture: sampled to the texture's size)
-							float sx = img.getWidth() / (float) sp.contents().width(), sy = img.getWidth() / (float) sp.contents().width();
+							float sx = img.getWidth() / (float) sp.contents().width(), sy = img.getHeight() / (float) sp.contents().height();
 							int tw = sp.contents().width(), th = sp.contents().height();
+							// The sprite's stitch coordinates include its mip padding. The terrain samples from U0/V0, inside that padding.
+							int startX = Math.round(sp.getU0() * width), startY = Math.round(sp.getV0() * height);
 							for (int y = 0; y < th; y++)
 								for (int x = 0; x < tw; x++) {
 									int ix = Math.min((int) (x * sx), img.getWidth() - 1), iy = Math.min((int) (y * sy), img.getHeight() - 1);
-									int ax = sp.getX() + x, ay = sp.getY() + y;
+									int ax = startX + x, ay = startY + y;
 									if (ax >= width || ay >= height) continue;
-									MemoryUtil.memPutInt(dst + ((long) ay * width + ax) * 4, img.getPixel(ix, iy));
+									int rgba = ARGB.toABGR(img.getPixel(ix, iy));
+									if (k == 0 && rgba == MISSING_NORMAL) rgba = 0xFFFF8080;
+									if (k == 1 && rgba == MISSING_SPECULAR) rgba &= 0xFF00FFFF;
+									MemoryUtil.memPutInt(dst + ((long) ay * width + ax) * 4, rgba);
 								}
 							found++;
 						} catch (Throwable ignored) {

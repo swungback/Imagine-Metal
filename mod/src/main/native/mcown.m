@@ -75,12 +75,12 @@ void mc_im_frame(const void *bytes, int length) {
 
 // ---- (Imagine Metal, Build B2) deferred lighting in tile memory (terrain.metal own_fs_g / im_defer_fs) ----
 // imDeferOn: this frame's opaque terrain goes through the G-buffer (set by Java each frame, mco_im_defer); imDeferParams: the
-// lighting draw's ImDeferParams (the inverse clip; the size is filled in at the draw). imGTex: the four memoryless attachments,
+// lighting draw's ImDeferParams (the inverse clip; the size is filled in at the draw). imGTex: the five memoryless attachments,
 // the size of the pass they were last used with. imGDrawn: the open encoder has G-buffer draws to light. imDeferFailed: the
 // lighting pipeline couldn't be made (said once): forward shading from then on.
 static int imDeferOn, imDeferFailed, imGDrawn;
 static float imDeferParams[20];
-static id<MTLTexture> imGTex[4];
+static id<MTLTexture> imGTex[IM_G_ATTACHMENTS];
 static uint64_t imDeferEnters, imDeferFlushes;
 
 #define OWN_MAX_LAYOUTS 160  // (Imagine Metal: kept per shading feature set too)
@@ -732,7 +732,7 @@ static id<MTLRenderPipelineState> ownPipeline(Own *w, Enc *enc, int cutout, char
 			: frag ? w->fsCutout : w->fsSolid;
 		// (bit 12, a1Exact / a2Exact's table draw: its vertex stage must be the F_QFLAT variant; a plain one would read the table as a list)
 		// (Build B2: a pass with the G-buffer: the colour kinds through ownStage as own_fs_g; the pre-pass, kind 6, as it is)
-		int gbuf = enc->imG && enc->colorCount == 5;
+		int gbuf = enc->imG && enc->colorCount == 1 + IM_G_ATTACHMENTS;
 		ownGStage = gbuf;
 		if ((cutout & ((0x1f << 18) | (0x3f << 25) | (7 << 13) | (1 << 12) | (1 << 11))) || frag >= 8 || (gbuf && frag != 6)) {  // (kinds 8-10: own_fs_tex / _nofade / _nofog, made only as variants)
 			// frag variants: both stages specialized alike (the vertex outputs and fragment inputs must match)
@@ -843,7 +843,7 @@ static id<MTLRenderPipelineState> imDeferPso;
 static uint32_t imDeferFeat;
 static MTLPixelFormat imDeferColor, imDeferDepth;
 static id<MTLDepthStencilState> imDeferDepthState;
-static const MTLPixelFormat imGFormats[4] = {MTLPixelFormatRGBA8Unorm, MTLPixelFormatRGBA8Unorm, MTLPixelFormatRGBA16Unorm, MTLPixelFormatR32Float};
+static const MTLPixelFormat imGFormats[IM_G_ATTACHMENTS] = {MTLPixelFormatRGBA8Unorm, MTLPixelFormatRGBA8Unorm, MTLPixelFormatRGBA16Unorm, MTLPixelFormatR32Float, MTLPixelFormatRGBA8Unorm};
 
 static id<MTLRenderPipelineState> imDeferPipeline(Own *w, MTLPixelFormat color, MTLPixelFormat depth) {
 	if (imDeferPso && imDeferFeat == ownFeat && imDeferColor == color && imDeferDepth == depth) return imDeferPso;
@@ -861,7 +861,7 @@ static id<MTLRenderPipelineState> imDeferPipeline(Own *w, MTLPixelFormat color, 
 			pd.vertexFunction = vs;
 			pd.fragmentFunction = fs;
 			pd.colorAttachments[0].pixelFormat = color;
-			for (int i = 0; i < 4; i++) {
+			for (int i = 0; i < IM_G_ATTACHMENTS; i++) {
 				pd.colorAttachments[1 + i].pixelFormat = imGFormats[i];
 				pd.colorAttachments[1 + i].writeMask = MTLColorWriteMaskNone;
 			}
@@ -898,7 +898,7 @@ static int imGEnter(Own *w, Enc *enc) {
 	if (!imDeferPipeline(w, c0.pixelFormat, enc->depth.pixelFormat)) return 0;
 	if (!imGTex[0] || imGTex[0].width != c0.width || imGTex[0].height != c0.height) {
 		@autoreleasepool {
-			for (int i = 0; i < 4; i++) {
+			for (int i = 0; i < IM_G_ATTACHMENTS; i++) {
 				[imGTex[i] release];
 				MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:imGFormats[i] width:c0.width height:c0.height mipmapped:NO];
 				td.storageMode = MTLStorageModeMemoryless;
@@ -907,7 +907,7 @@ static int imGEnter(Own *w, Enc *enc) {
 				imGTex[i].label = [NSString stringWithFormat:@"Imagine Metal G-buffer %d", i + 1];
 			}
 		}
-		if (!imGTex[0] || !imGTex[1] || !imGTex[2] || !imGTex[3]) {
+		if (!imGTex[0] || !imGTex[1] || !imGTex[2] || !imGTex[3] || !imGTex[4]) {
 			imDeferFailed = 1;
 			fprintf(stderr, "[Imagine Metal] deferred lighting off (forward shading as before): no memoryless attachments\n");
 			return 0;
@@ -953,7 +953,7 @@ void mco_im_bind_lod_fade(id<MTLRenderCommandEncoder> r, NSUInteger index) {
 
 static void imGFlush(Enc *enc) {
 	id<MTLRenderCommandEncoder> r = enc->render;
-	if (!r || !imGDrawn || !imGOwn || enc->colorCount != 5 || !enc->colors[0]) return;
+	if (!r || !imGDrawn || !imGOwn || enc->colorCount != 1 + IM_G_ATTACHMENTS || !enc->colors[0]) return;
 	imGDrawn = 0;
 	id<MTLRenderPipelineState> pso = imDeferPipeline(imGOwn, enc->colors[0].pixelFormat, enc->depth ? enc->depth.pixelFormat : MTLPixelFormatInvalid);
 	if (!pso) return;
@@ -2505,7 +2505,7 @@ void mc_im_entity_bind(Enc *enc, int on) {
 // ---- (Imagine Metal, MetaLODS: metalods.m) the far terrain draws into the G-buffer before it is lit ----
 // Whether the open encoder is the G-buffer's pass (the opaque terrain drew into it this frame and its lighting hasn't run).
 int mco_im_g_open(Enc *enc) {
-	return enc && enc->render && enc->imG && enc->colorCount == 5 && enc->colors[0] && !imDeferFailed;
+	return enc && enc->render && enc->imG && enc->colorCount == 1 + IM_G_ATTACHMENTS && enc->colors[0] && !imDeferFailed;
 }
 
 // Something was drawn into the G-buffer (its lighting must run).

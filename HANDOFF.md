@@ -1,3 +1,40 @@
+# 2026-11-21 — LabPBR materials and Nether smoke test
+
+The LabPBR loader found all three test maps, but matched screenshots showed no material response. A shader probe
+confirmed that pack mode and textures were bound while all four test blocks sampled the missing-map markers.
+Minecraft 26.3's sprite stitch coordinates include mip padding. Copying maps at those coordinates missed the
+16×16 texture interior. PBR maps now start at the same padded U0/V0 used by the terrain. The loader also converts
+`NativeImage.getPixel` ARGB to the GPU texture's RGBA byte order and resamples each axis independently.
+
+Under Imagine Metal → Surfaces, `PBR source` selects `Generated` or `Pack + fallback`. Each of the LabPBR
+`_n` and `_s` maps takes precedence independently. Missing maps use generated materials on vanilla and modded
+blocks. `Voxel parallax` traces the height map on nearby terrain. `Normals from height` derives normals from that
+map while parallax is active. `Generated glow and SSS` controls the built-in surface effects. A supplied specular map
+sets the surface emission and scattering, including zero. Minecraft block lights and the colored-light grid keep
+their own inputs. The renderer uses screen-space reflections, with no PT or SSPT lighting pass.
+
+Pack materials no longer turn off deferred terrain lighting. The G-buffer carries the real chunk's specular map
+to lighting and keeps the far LOD pass available. At the same Overworld position in ColdTp, 373,161 LOD quads were
+drawn in both modes. Two in-game Nether cavern views at (0.5, 53, 0.5) and (25.5, 56, 45.5), at rd 6,
+showed real terrain, lava, fog and natural ceilings. The dimension guard logged that Nether LODs were off.
+The smoke-test pictures and logs are in `claude-scratch/codex-s1121-pbr`.
+
+Matched material captures at (-192, 95.5, 836), yaw/pitch 0, world time 5000, 1728×1080, render scale 67%.
+The copper ore's authored emission patch measured 143.4 → 227.9 and the zero-emission glowstone measured
+179.0 → 154.2 (mean image luma, 0–255). In pack mode, turning off generated glow lowered the uncovered diamond
+patch from 145.2 to 129.0. The copper emission and glowstone patches changed by at most 0.1 in that switch.
+Turning on height-derived normals changed the stone crop by a mean absolute 9.7 luma, against 0.5 in the adjacent
+diamond crop. The rd 6 and rd 12 material crops differ by at most 0.4 mean absolute luma. ColdTp restored rd 6.
+The renderer checks passed and the final terrain shader compiled on Metal. The two first-time specialization
+switches had frames of 1133 ms (PBR source) and 968 ms (parallax). Five-second windows between switches had
+16.7–17.1 ms median frame times in pack mode. The log and `labpbr-material-comparison.jpg` are in the session folder.
+
+Installed `claude-scratch/codex-s1121-pbr/imagine-metal-s1121-labpbr-release.jar` (SHA256
+`a2184f8407db8058f987a19ae5e8f496337a85a058fd74506f021c913e8dbee1`). The original settings were restored:
+Generated materials, rd 6, 67% render scale, ColdTp disabled. The fixture pack was removed from the instance.
+Select `Generated` to switch off pack maps. The prior release is
+`claude-scratch/codex-s1121-end-detail/imagine-metal-s1121-end-lit-detail.jar`. The final7 rollback is preserved.
+
 # 2026-11-21 — Brighter Black hole lighting and finer End islands
 
 Installed `claude-scratch/codex-s1121-end-detail/imagine-metal-s1121-end-lit-detail.jar`

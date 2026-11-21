@@ -530,7 +530,7 @@ public final class ImagineFrame {
 		// 128 (s1121) the far shadow map holds the LOD casters: LOD pixels take the open-air test too)
 		int envBits = (Settings.shaftVeilFix ? 1 : 0) | (Shadows.plantsValid() ? 2 : 0) | (Settings.shadowFarFix ? 4 : 0) | (Settings.waterTrace ? 0 : 8)
 			| (Settings.waterSurfaceFog ? 16 : 0) | (Settings.waterWideWindow ? 32 : 0) | (Settings.waterUnderSurface ? 64 : 0)
-			| (imaginemetal.metalods.MetaLods.lodOpenAir() ? 128 : 0);
+			| (imaginemetal.metalods.MetaLods.lodOpenAir() ? 128 : 0) | (Settings.generatedEmissionSss ? 0 : 256);
 		put(cave, night, Settings.shaftVeilFix && !Settings.shaftsFull ? 0.35f : 0f, envBits);
 		for (int c = 0; c < 2; c++) for (int i = 0; i < 16; i++) BUF.putFloat(Shadows.MATRIX[c][i]);
 		// shadow: near cascade normal offset, valid, far cascade normal offset
@@ -650,7 +650,9 @@ public final class ImagineFrame {
 		put(endFlashDir[0], endFlashDir[1], endFlashDir[2], dim == 2 ? endFlash : 0f);
 		// (z: the depth before the translucent pass, captured last frame, is bound at texture 26 for the mob shadows' trace)
 		// (w: the air pass draws the haze and the border fade this frame, the opaque terrain's fragments leave them out)
-		put(PbrAtlas.on && Settings.pbrPack ? 1f : 0f, Settings.parallax ? 1f : 0f, Reflections.underDepthReady ? 1f : 0f, Reflections.promiseAir(ourFog) ? 1f : 0f);
+		put(PbrAtlas.on && Settings.pbrPack && Settings.pbr ? 1f : 0f,
+			(Settings.parallax ? 1f : 0f) + (Settings.parallaxNormals ? 2f : 0f),
+			Reflections.underDepthReady ? 1f : 0f, Reflections.promiseAir(ourFog) ? 1f : 0f);
 		imaginemetal.metalods.MetaLods.farFog(lodFog);
 		put(lodFog[1], imaginemetal.metalods.MetaSettings.coverageDebug, 0f, 0f);
 		if (BUF.position() != SIZE) throw new IllegalStateException("ImFrame is " + BUF.position() + " bytes, not " + SIZE);

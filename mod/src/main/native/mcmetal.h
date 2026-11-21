@@ -13,6 +13,7 @@ typedef struct {
 } Ctx;
 
 #define MAX_COLORS 8
+#define IM_G_ATTACHMENTS 5
 
 typedef struct {
 	Ctx *ctx;

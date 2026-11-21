@@ -17,7 +17,7 @@ typedef struct {
 	id<MTLLibrary> lib;
 	id<MTLFunction> vs[2], fs[4];  // fs[1]: with the real terrain's mask (ML_MASK), fs[0]: without
 	id<MTLRenderPipelineState> pso[4];
-	MTLPixelFormat formats[5], depth;
+	MTLPixelFormat formats[1 + IM_G_ATTACHMENTS], depth;
 	id<MTLDepthStencilState> ds;
 	id<MTLSamplerState> smp;
 	id<MTLBuffer> idx;  // {0 1 2 2 1 3} + 4q for a page's 256 quads
@@ -114,8 +114,8 @@ int mml_g_open(Enc *enc) {
 }
 
 static id<MTLRenderPipelineState> mlPipeline(MetaLods *m, Enc *enc, int masked, char *err, int cap) {
-	MTLPixelFormat f[5];
-	for (int i = 0; i < 5; i++) f[i] = enc->colors[i] ? enc->colors[i].pixelFormat : MTLPixelFormatInvalid;
+	MTLPixelFormat f[1 + IM_G_ATTACHMENTS];
+	for (int i = 0; i < 1 + IM_G_ATTACHMENTS; i++) f[i] = enc->colors[i] ? enc->colors[i].pixelFormat : MTLPixelFormatInvalid;
 	MTLPixelFormat d = enc->depth ? enc->depth.pixelFormat : MTLPixelFormatInvalid;
 	if (memcmp(f, m->formats, sizeof f) != 0 || d != m->depth) {
 		// (the attachments changed: both variants are made again)
@@ -132,10 +132,10 @@ static id<MTLRenderPipelineState> mlPipeline(MetaLods *m, Enc *enc, int masked, 
 		pd.label = @"MetaLODS";
 		pd.vertexFunction = m->vs[masked >> 1];
 		pd.fragmentFunction = m->fs[masked];
-		for (int i = 0; i < 5; i++) {
+		for (int i = 0; i < 1 + IM_G_ATTACHMENTS; i++) {
 			if (f[i] == MTLPixelFormatInvalid) continue;
 			pd.colorAttachments[i].pixelFormat = f[i];
-			pd.colorAttachments[i].writeMask = i == 0 ? MTLColorWriteMaskNone : MTLColorWriteMaskAll;
+			pd.colorAttachments[i].writeMask = (i == 0 || i == IM_G_ATTACHMENTS) ? MTLColorWriteMaskNone : MTLColorWriteMaskAll;
 		}
 		pd.depthAttachmentPixelFormat = d;
 		pd.inputPrimitiveTopology = MTLPrimitiveTopologyClassTriangle;

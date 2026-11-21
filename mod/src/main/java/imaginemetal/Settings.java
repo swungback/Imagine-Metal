@@ -72,6 +72,8 @@ public final class Settings {
 	public static volatile boolean waterFx = Engine.flag("imaginemetal.waterFx", true);
 	public static volatile boolean pbrPack = Engine.flag("imaginemetal.pbrPack", true);
 	public static volatile boolean parallax = Engine.flag("imaginemetal.parallax", true);
+	public static volatile boolean parallaxNormals = Engine.flag("imaginemetal.parallaxNormals", false);
+	public static volatile boolean generatedEmissionSss = Engine.flag("imaginemetal.generatedEmissionSss", true);
 	public static volatile int outline = (int) Config.number("imaginemetal.outline", 0, 0, 2);
 	public static volatile boolean netherStorm = Engine.flag("imaginemetal.netherStorm", true);
 	public static volatile boolean bloomFog = Engine.flag("imaginemetal.bloomFog", true);
@@ -257,6 +259,8 @@ public final class Settings {
 		v.put("imaginemetal.outline", String.valueOf(outline));
 		v.put("imaginemetal.pbrPack", String.valueOf(pbrPack));
 		v.put("imaginemetal.parallax", String.valueOf(parallax));
+		v.put("imaginemetal.parallaxNormals", String.valueOf(parallaxNormals));
+		v.put("imaginemetal.generatedEmissionSss", String.valueOf(generatedEmissionSss));
 		v.put("imaginemetal.netherStorm", String.valueOf(netherStorm));
 		v.put("imaginemetal.taa", String.valueOf(taa));
 		v.put("imaginemetal.intenseDeepDark", String.valueOf(intenseDeepDark));

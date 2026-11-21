@@ -159,9 +159,15 @@ public final class SettingsScreen extends OptionsSubScreen {
 						"Stained glass, ice and other see-through blocks reflect the sky and the world."));
 				this.list.addBig(toggle("Water refraction and foam", Settings.waterFx, v -> Settings.waterFx = v,
 					"What's under the water wavers with its surface, and foam gathers where it meets the shore. Needs Reimagined water."));
-				this.list.addSmall(toggle("PBR resource packs", Settings.pbrPack, v -> Settings.pbrPack = v,
-					"Use a LabPBR resource pack's normal and specular maps (its bumps, shine, metals and glow) where it has them. Needs PBR."),
-					toggle("Parallax", Settings.parallax, v -> Settings.parallax = v, "The pack's height maps push the texture in, so its bumps have depth up close."));
+				this.list.addSmall(cycle("PBR source", new String[] {"Generated", "Pack + fallback"},
+					Settings.pbrPack ? 1 : 0, v -> Settings.pbrPack = v == 1,
+					"LabPBR maps set a block's material where supplied. Generated PBR fills in missing maps, including on modded blocks. Requires PBR."),
+					toggle("Voxel parallax", Settings.parallax, v -> Settings.parallax = v,
+						"Trace the pack's height texels to give block surfaces relief up close."));
+				this.list.addSmall(toggle("Normals from height", Settings.parallaxNormals, v -> Settings.parallaxNormals = v,
+					"Derive the bump normal from the pack's height map while voxel parallax is active."),
+					toggle("Generated glow and SSS", Settings.generatedEmissionSss, v -> Settings.generatedEmissionSss = v,
+						"Use built-in surface glow and subsurface scattering where a pack specular map is missing. Block lights still light the world."));
 				this.list.addBig(toggle("Coated textures", Settings.coated, v -> Settings.coated = v,
 					"Reimagined's coated textures: each texture pixel a touch lighter or darker, so flat colours read as a material."));
 				this.list.addBig(toggle("Wet in the rain", Settings.wet, v -> Settings.wet = v,

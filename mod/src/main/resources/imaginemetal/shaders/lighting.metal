@@ -71,8 +71,8 @@ struct ImFrame {
 	float4 endPortal;    // the End portal's rays (bloom.metal): xyz its middle, camera-relative; w the time (s)
 	float4 toggles;      // x 1 = coated textures, y 1 = coloured light fog (bloom.metal), z 1 = mob shadows, w 1 = water refraction and foam
 	float4 endFlash;     // the End's flashes: xyz toward the flash, w its strength now (0 none)
-	float4 pbrPack;      // x 1 = a PBR resource pack's maps (PbrAtlas, textures 27 and 28), y 1 = parallax from their height
-	float4 lodFog;       // x MetaLODS distance-fog density (near translucent and opaque/LOD paths share it), y coverage diagnostic (0 off, 1 material, 2 mask, 3 depth), zw reserved
+	float4 pbrPack;      // x enables LabPBR maps, y bits enable voxel parallax and height normals
+	float4 lodFog;       // x MetaLODS distance-fog density (near translucent and opaque/LOD paths share it), y coverage diagnostic (0 off, 1 material, 2 mask, 3 depth), zw near-to-LOD blend distances
 };
 
 // BEGIN LOD edge dither math
@@ -1158,6 +1158,13 @@ static inline float imDither(float2 pixel, constant ImFrame &f) {
 // (Build B2) What a fragment can only know where its triangle is drawn, from its own screen derivatives: the face normal, the
 // normal with the generated bevels, where the torch light comes from, its atlas texel. imShade works them out itself (pre.on
 // false: forward shading, as always) or is handed them (deferred lighting: own_fs_g stores them, im_defer_fs lights from them).
+// PbrAtlas reserves one value in a metal's unused blue channel for a missing specular map.
+constant float4 IM_MISSING_SPEC = float4(0.0, 230.0 / 255.0, 1.0, 1.0);
+
+static bool imHasPackSpec(float4 spec) {
+	return any(abs(spec - IM_MISSING_SPEC) > 0.001);
+}
+
 struct ImPre {
 	bool on;
 	bool slanted;
@@ -1165,6 +1172,7 @@ struct ImPre {
 	float3 N;      // with the generated normal
 	float3 Lt;     // toward the torch light (the face's normal leaned up the block light's slope)
 	float2 texel;  // the atlas texel (the coated textures' and the sculk's per-texel numbers)
+	float4 packSpec;
 	float farSun;  // (fix7) past the shadow maps, how much of the sun reaches it by MetaLODS' height map (1: all; the deferred pass)
 	bool lod;      // (s1119) a MetaLODS pixel (the deferred pass): the shadow maps hold no LOD casters, so their open-air test is skipped
 };
@@ -1178,6 +1186,7 @@ static inline ImPre imNoPre() {
 	m.Lt = float3(0.0, 1.0, 0.0);
 	m.texel = float2(0.0);
 	m.farSun = 1.0;
+	m.packSpec = IM_MISSING_SPEC;
 	m.lod = false;
 	return m;
 }
@@ -1187,6 +1196,7 @@ static ImPre imMaterial(float3 p, float2 light, uint mat, float3 tex, float2 uv,
 	ImPre m;
 	m.on = true;
 	m.farSun = 1.0;
+	m.packSpec = IM_MISSING_SPEC;
 	m.lod = false;
 	bool slanted;
 	float3 n = imFaceNormal(p, slanted);
@@ -1230,6 +1240,88 @@ static ImPre imMaterial(float3 p, float2 light, uint mat, float3 tex, float2 uv,
 	return m;
 }
 
+// Walk the height columns one texel at a time. The ray intersects a flat top or the wall
+// exposed when it crosses into a taller column. Keep every sample inside its atlas sprite.
+static float2 imPackParallax(float2 uv, float2 ray, float4 rect, texture2d<float> normals) {
+	constexpr sampler nearest(filter::nearest, address::clamp_to_edge);
+	float2 size = float2(normals.get_width(), normals.get_height());
+	float2 lo = rect.xy + 0.5 / size, hi = max(lo, rect.zw - 0.5 / size);
+	float2 position = uv * size;
+	float2 direction = ray * size;
+	float2 stride = 1.0 / max(abs(direction), 1e-5);
+	float2 next = select(fract(position), 1.0 - fract(position), direction >= 0.0) * stride;
+	int2 step = select(int2(-1), int2(1), direction >= 0.0);
+	int2 cell = int2(floor(position));
+	float entered = 0.0;
+	for (int i = 0; i < 32; i++) {
+		float2 center = (float2(cell) + 0.5) / size;
+		if (any(center < lo - 1e-6) || any(center > hi + 1e-6)) break;
+		float depth = 1.0 - normals.sample(nearest, center, level(0.0)).a;
+		float exit = min(next.x, next.y);
+		float hit = max(entered, depth);
+		if (hit <= min(exit, 1.0)) return clamp(uv + ray * (hit + 1e-6), lo, hi);
+		if (exit >= 1.0) break;
+		entered = exit;
+		if (next.x <= next.y) {
+			cell.x += step.x;
+			next.x += stride.x;
+		} else {
+			cell.y += step.y;
+			next.y += stride.y;
+		}
+	}
+	return clamp(uv + ray * entered, lo, hi);
+}
+
+static void imPackMaterial(thread ImPre &m, float3 p, thread float3 &albedo, thread float3 &tex, float2 uv, float4 rect,
+	texture2d<float> atlas, texture2d<float> normals, texture2d<float> specular, constant ImFrame &f) {
+	if (!IM_FC_PBRPACK || f.pbrPack.x < 0.5) return;
+	constexpr sampler nearest(filter::nearest, address::clamp_to_edge);
+	// Specular maps also describe crossed foliage and other slanted faces.
+	if (m.slanted) {
+		m.packSpec = specular.sample(nearest, uv, level(0.0));
+		return;
+	}
+	float3 dp1 = dfdx(p), dp2 = dfdy(p);
+	float2 duv1 = dfdx(uv), duv2 = dfdy(uv);
+	float4 pn = normals.sample(nearest, uv, level(0.0));
+	float2 packedUv = uv;
+	if (any(pn < 0.999)) {  // all white cannot encode a valid normal
+		float3 T = cross(dp2, m.n) * duv1.x + cross(m.n, dp1) * duv2.x;
+		float3 B = cross(dp2, m.n) * duv1.y + cross(m.n, dp1) * duv2.y;
+		float inv = rsqrt(max(max(dot(T, T), dot(B, B)), 1e-30));
+		float3 Tn = T * inv, Bn = B * inv;
+		uint parallax = uint(f.pbrPack.y);
+		bool trace = IM_FC_PARALLAX && (parallax & 1u) != 0u && length(p) < 24.0 && all(rect.zw > rect.xy);
+		if (trace && pn.a < 0.999) {
+			float3 view = -normalize(p);
+			float2 ray = -float2(dot(view, normalize(T)), dot(view, normalize(B))) * (rect.zw - rect.xy)
+				* (0.25 / max(dot(view, m.n), 0.25));
+			packedUv = imPackParallax(uv, ray, rect, normals);
+			if (any(packedUv != uv)) {
+				float3 displaced = atlas.sample(nearest, packedUv, level(0.0)).rgb;
+				albedo *= displaced / max(tex, float3(0.004));
+				tex = displaced;
+				pn = normals.sample(nearest, packedUv, level(0.0));
+			}
+		}
+		float2 xy = pn.rg * 2.0 - 1.0;
+		float3 bump = float3(xy.x, -xy.y, sqrt(saturate(1.0 - dot(xy, xy))));
+		if (trace && (parallax & 2u) != 0u) {
+			float2 pixel = 1.0 / float2(normals.get_width(), normals.get_height());
+			float2 lo = rect.xy + pixel * 0.5, hi = max(lo, rect.zw - pixel * 0.5);
+			float xl = normals.sample(nearest, clamp(packedUv - float2(pixel.x, 0.0), lo, hi), level(0.0)).a;
+			float xr = normals.sample(nearest, clamp(packedUv + float2(pixel.x, 0.0), lo, hi), level(0.0)).a;
+			float yl = normals.sample(nearest, clamp(packedUv - float2(0.0, pixel.y), lo, hi), level(0.0)).a;
+			float yr = normals.sample(nearest, clamp(packedUv + float2(0.0, pixel.y), lo, hi), level(0.0)).a;
+			bump = float3((float2(xl - xr, yl - yr) * (rect.zw - rect.xy)) / pixel * 0.125, 1.0);
+		}
+		m.N = normalize(Tn * bump.x + Bn * bump.y + m.n * max(bump.z, 1e-4));
+		albedo *= mix(1.0, pn.b, 0.8);
+	}
+	m.packSpec = specular.sample(nearest, packedUv, level(0.0));
+}
+
 static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint mat, float2 pixel, constant ImFrame &f, depth2d_array<float> smap, sampler cmp,
 	texture3d<float> lvol, sampler lsamp, texture3d<float> lfilt, texture3d<float> lopen, texture3d<float> seeds, texture2d<float> pbrN, texture2d<float> pbrS, float2 uv, float4 rect, texture2d<float> atlas, texture2d<float> hc, depth2d<float> hd, sampler hs,
 	depth2d<float> ud, ImPre pre) {
@@ -1253,58 +1345,18 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	uint kind = (mat >> 8) & 255u;  // (the translucent pass: 1 water, 2 glass and other see-through blocks)
 	// (mat bit 16: an opaque fragment. With the air pass on (f.pbrPack.w) its haze is laid on later, once per pixel: air.metal)
 	bool airLater = (mat & 0x10000u) != 0u && f.pbrPack.w > 0.5;
+	if (!pre.on && kind == 0u) imPackMaterial(m, p, albedo, tex, uv, rect, atlas, pbrN, pbrS, f);
 	float3 N = m.N;
-	// a PBR resource pack (LabPBR): its normal map, ambient occlusion and height (parallax), and below its smoothness, metalness and
-	// glow; in place of ours where the pack has a map
-	float4 pS = float4(0.0);
-	bool packed = false;
-	if (IM_FC_PBRPACK && f.pbrPack.x > 0.5 && kind == 0u && !slanted && !pre.on) {
-		constexpr sampler ps(filter::nearest, address::clamp_to_edge);
-		float3 dp1 = dfdx(p), dp2 = dfdy(p);
-		float2 duv1 = dfdx(uv), duv2 = dfdy(uv);
-		float3 dp2perp = cross(dp2, n), dp1perp = cross(n, dp1);
-		float3 T = dp2perp * duv1.x + dp1perp * duv2.x;
-		float3 B = dp2perp * duv1.y + dp1perp * duv2.y;
-		float im = rsqrt(max(max(dot(T, T), dot(B, B)), 1e-30));
-		float3 Tn = T * im, Bn = B * im;
-		float2 puv = uv;
-		float4 pn = pbrN.sample(ps, uv, level(0.0));
-		if (IM_FC_PARALLAX && f.pbrPack.y > 0.5 && pn.a < 0.999 && length(p) < 24.0) {
-			// (parallax: the surface's height pushes the texture along the view, four steps into it)
-			float3 Vv = -normalize(p);
-			float3 vt = float3(dot(Vv, normalize(Tn)), dot(Vv, normalize(Bn)), max(dot(Vv, n), 0.25));
-			float2 rs = rect.zw - rect.xy;
-			float2 stepUv = -vt.xy / vt.z * 0.25 * rs * 0.25;
-			float hgt = 1.0;
-			for (int k = 0; k < 4; k++) {
-				float hh = pbrN.sample(ps, puv, level(0.0)).a;
-				if (hh >= hgt) break;
-				puv = clamp(puv + stepUv, rect.xy, rect.zw);
-				hgt -= 0.25;
-			}
-			if (any(puv != uv)) {
-				float3 t2 = atlas.sample(ps, puv, level(0.0)).rgb;
-				albedo *= t2 / max(tex, float3(0.004));
-				tex = t2;
-				pn = pbrN.sample(ps, puv, level(0.0));
-			}
-		}
-		pS = pbrS.sample(ps, puv, level(0.0));
-		packed = any(pS != 0.0);
-		float2 nxy = pn.rg * 2.0 - 1.0;
-		if (any(abs(nxy) > 0.004)) {
-			float nz = sqrt(saturate(1.0 - dot(nxy, nxy)));
-			N = normalize(Tn * nxy.x - Bn * nxy.y + n * nz);
-		}
-		albedo *= mix(1.0, pn.b, 0.8);
-	}
+	float4 pS = m.packSpec;
+	bool packed = imHasPackSpec(pS);
+	bool generatedEffects = !packed && (uint(f.env.w + 0.5) & 256u) == 0u;
 	// (Reimagined lights the texture's colours as they are and encodes only at the end; that lifts the mid tones and keeps the
 	// shadows open: its bright, lively look. Linearizing them first, as physically based packs do, gives a darker, moodier picture.)
 	// ores we know glow as Reimagined's (imOre); one we don't (modded) by its own colours (imEmission)
 	uint oreT = (cls == IM_MAT_ORE || cls == IM_MAT_NETHER_ORE) ? (mat >> 4) & 15u : 0u;
 	float3 oreCm = float3(1.0);
-	float oreE = oreT != 0u ? imOre(oreT, tex, oreCm, cls == IM_MAT_NETHER_ORE) : 0.0;
-	if (cls == IM_MAT_GLOW_GEM) {
+	float oreE = generatedEffects && oreT != 0u ? imOre(oreT, tex, oreCm, cls == IM_MAT_NETHER_ORE) : 0.0;
+	if (generatedEffects && cls == IM_MAT_GLOW_GEM) {
 		// Reimagined's crying obsidian: only its purple veins (blue far over green) glow, the brightest far past white; its red
 		// pushed up a little so they read violet
 		float f0 = max(tex.b - tex.g * 6.0, 0.0);
@@ -1314,7 +1366,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		oreE = (1.35 + f14 * f14 * 7.5) * f0;
 		oreCm = float3(1.15, 1.0, 1.0);
 	}
-	if (cls == IM_MAT_NETHER_ORE && oreT == 2u) {
+	if (generatedEffects && cls == IM_MAT_NETHER_ORE && oreT == 2u) {
 		// Reimagined's End portal frame: the eye of ender glowing from its middle out, the frame's pale corner bits a soft green
 		oreE = 0.0;
 		oreCm = float3(1.0);
@@ -1395,7 +1447,9 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	float wrap = slanted ? 0.35 + 0.5 * abs(nl) : max(nl + 0.4, 0.0) * (1.0 / 1.4);
 	// leaves and plants let light through (Reimagined's subsurface modes): plants lit as if facing up, leaves a third of the way
 	// there whichever way they face (green parts only: dirt and the grass block's sides share the class)
-	bool leafy = cls == IM_MAT_FOLIAGE && tex.g > tex.r * 1.05 && tex.g > tex.b;
+	bool leafy = generatedEffects && cls == IM_MAT_FOLIAGE && tex.g > tex.r * 1.05 && tex.g > tex.b;
+	float packSss = packed && pS.g * 255.0 < 229.5 ? saturate((pS.b * 255.0 - 65.0) / 190.0) : 0.0;
+	if (packSss > 0.0) wrap = mix(wrap, 1.0, 0.35 * packSss);
 	if (leafy) wrap = slanted ? max(wrap, saturate(f.lightDir.y) * 0.9 + 0.1) : mix(wrap, 1.0, 0.35);
 	// sunlight: the shadow map where it reaches; the sky light stands in beyond it. Underground (no sky light at all) the sun is
 	// off regardless, so a cave never catches sunlight through an imprecision of the map.
@@ -1455,11 +1509,11 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// (and glow when the light is behind them: Reimagined's subsurface highlight, looking toward the sun through grass and leaves,
 	// their backlit edges lit up gold; added on top of the surface, as its highlight is)
 	float3 sssGlow = float3(0.0);
-	if (leafy && f.flags.x == 0) {
+	if ((leafy || packSss > 0.0) && f.flags.x == 0) {
 		float vl = saturate(dot(-V, f.lightDir.xyz));
 		float lf = pow(vl, 10.0) * (slanted ? 0.8 : 0.6) * sun;
 		float3 hc = normalize(pow(max(f.lightColor.rgb, 1e-4), 0.37)) * (0.3 + 1.5 * f.nightMiddle.w * f.nightMiddle.w) * (1.0 - 0.85 * f.dayUp.w);
-		sssGlow = hc * lf * (0.6 + 0.4 * base / max(max(max(base.r, base.g), base.b), 0.02));
+		sssGlow = hc * lf * (leafy ? 1.0 : packSss) * (0.6 + 0.4 * base / max(max(max(base.r, base.g), base.b), 0.02));
 	}
 
 	// sky light: blue from above, warmer and dimmer from below
@@ -1594,10 +1648,10 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		float gm = max(max(gl.r, gl.g), gl.b);
 		return pow(gm > 1e-4 ? gl.rgb / gm * saturate(gl.a * 1.5) : float3(0.0), 1.0 / 2.2) * 0.9 + base * 0.1;
 	}
-	float emit = oreT != 0u ? 0.0 : imEmission(cls, tex);
-	if (packed && pS.a * 255.0 < 254.5) emit = max(emit, pS.a * 3.0);
+	float emit = generatedEffects && oreT == 0u ? imEmission(cls, tex) : 0.0;
+	if (packed && pS.a * 255.0 < 254.5) emit = pS.a * (3.0 * 255.0 / 254.0);
 	// (Reimagined's distant light bokeh: far torches, lanterns and glowstone glow brighter, so they read as soft points of light)
-	if (cls == IM_MAT_FLAME || cls == IM_MAT_EMITTER) emit *= 1.0 + 1.8 * smoothstep(20.0, 140.0, length(p));
+	if (generatedEffects && (cls == IM_MAT_FLAME || cls == IM_MAT_EMITTER)) emit *= 1.0 + 1.8 * smoothstep(20.0, 140.0, length(p));
 	if (cls == IM_MAT_LAVA) {
 		// lava's slow currents (after Reimagined's lava noise): two layers of noise drifting against each other across the surface,
 		// hotter where they meet, so a lava lake churns instead of only playing its texture's loop
@@ -1608,7 +1662,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		float churn = 1.0 - abs(l1 - l2) * 2.0;
 		emit *= 0.72 + 0.55 * churn * churn;
 	}
-	if (cls == IM_MAT_SCULK && emit > 0.0) {
+	if (generatedEffects && cls == IM_MAT_SCULK && emit > 0.0) {
 		// sculk's specks pulse (after Euphoria Patches): each speck its own slow breathing, from its block and its place in the
 		// texture, so a field of sculk twinkles instead of glowing flat
 		// alien: slow rings of light roll outward through the sculk from hidden hearts, a few blocks apart, like a heartbeat
@@ -1721,12 +1775,12 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			// (the texture's light and dark kept strongly: dark crust much darker than the hot veins)
 			ecol = mix(mix(crust, mid, smoothstep(0.2, 0.5, ll)), hot, smoothstep(0.55, 0.95, ll)) * (0.15 + 0.85 * ll * ll);
 		}
-		if (cls == IM_MAT_EMITTER) {
+		if (generatedEffects && cls == IM_MAT_EMITTER) {
 			// (a light's colour kept: deepened a little, so its brightest parts glow in their own colour instead of washing to white)
 			float em = max(max(ecol.r, ecol.g), ecol.b);
 			ecol = ecol * pow(ecol / max(em, 1e-3), 0.4);
 		}
-		if (cls == IM_MAT_ORE || cls == IM_MAT_NETHER_ORE) {
+		if (generatedEffects && (cls == IM_MAT_ORE || cls == IM_MAT_NETHER_ORE)) {
 			// (Reimagined's glowing ores: each speck's own colour made deeper (colour x colour^k: redstone's red pure, diamond's
 			// cyan, emerald's green), then glowing well past white so the bloom gives every speck a halo; the stone stays dark)
 			float em = max(max(ecol.r, ecol.g), ecol.b);

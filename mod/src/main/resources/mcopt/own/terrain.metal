@@ -2668,6 +2668,7 @@ struct ImGOut {
 	float4 g2 [[color(2)]];
 	float4 g3 [[color(3)]];
 	float g4 [[color(4)]];
+	float4 g5 [[color(5)]];
 };
 
 static inline float2 imOctEnc(float3 n) {
@@ -2687,7 +2688,7 @@ static inline float3 imOctDec(float2 e) {
 
 fragment ImGOut own_fs_g(VOut in [[stage_in]], constant Globals &g [[buffer(22)]], constant Terrain &t [[buffer(23)]],
 	texture2d<float> atlas [[texture(16)]], sampler atlasSampler [[sampler(14)]], constant ImFrame &imf [[buffer(30)]], device const uint *imChunkFade [[buffer(25)]],
-	texture2d<float> imPbrN [[texture(27)]]) {
+	texture2d<float> imPbrN [[texture(27)]], texture2d<float> imPbrS [[texture(28)]]) {
     if (!imLodNearVisible(in.imPos, in.pos.xy, imf, imChunkFade)) discard_fragment();
 	float2 pixelSize = 1.0f / float2(t.TextureSize);
 	float imLod = imf.taa.w > 0.01 ? imf.taa.w : 1.0;
@@ -2710,6 +2711,8 @@ fragment ImGOut own_fs_g(VOut in [[stage_in]], constant Globals &g [[buffer(22)]
 		imLightQ = saturate(float2(mix(mix(qb.x, qb.y, st.y), mix(qb.w, qb.z, st.y), st.x), mix(mix(qs.x, qs.y, st.y), mix(qs.w, qs.z, st.y), st.x)) / 240.0);
 	}
 	ImPre m = imMaterial(in.imPos, imLightQ, in.imMat & 255u, texel.rgb, in.texCoord0, in.imRect, atlas, imPbrN, imf);
+	float3 packColor = color.rgb, packTexel = texel.rgb;
+	imPackMaterial(m, in.imPos, packColor, packTexel, in.texCoord0, in.imRect, atlas, imPbrN, imPbrS, imf);
 	float3 n = m.n;
 	uint axis = n.x > 0.5 ? 0u : n.x < -0.5 ? 1u : n.y > 0.5 ? 2u : n.y < -0.5 ? 3u : n.z > 0.5 ? 4u : 5u;
 	// (the torch lean: Lt's part along the face, as imMaterial put it together: up to 0.7 beside the normal's 0.75)
@@ -2721,10 +2724,11 @@ fragment ImGOut own_fs_g(VOut in [[stage_in]], constant Globals &g [[buffer(22)]
 	float2 code = clamp(floor(lean / 0.7 * 7.0 + 0.5) + 8.0, 1.0, 15.0);
 	uint flags = (m.slanted ? 1u : 0u) | (axis << 1) | (uint(saturate(imFade) * 15.0 + 0.5) << 4);
 	ImGOut o;
-	o.g1 = float4(saturate(color.rgb), float(flags) / 255.0);
-	o.g2 = float4(texel.rgb, float(in.imMat & 255u) / 255.0);
+	o.g1 = float4(saturate(packColor), float(flags) / 255.0);
+	o.g2 = float4(packTexel, float(in.imMat & 255u) / 255.0);
 	o.g3 = float4((floor(saturate(imLightQ) * 4095.0 + 0.5) * 16.0 + code) / 65535.0, imOctEnc(m.slanted ? n : m.N));
 	o.g4 = in.pos.z;
+	o.g5 = m.packSpec;
 	return o;
 }
 
@@ -2786,7 +2790,7 @@ static float imFarSun(float3 p, float3 n, float3 L, constant ImHeightP &hp, devi
 	return 1.0 - shade * smoothstep(start, start + 48.0, dist);
 }
 
-fragment float4 im_defer_fs(ImDeferOut in [[stage_in]], float4 imDst [[color(0)]], float4 g1 [[color(1)]], float4 g2 [[color(2)]], float4 g3 [[color(3)]], float4 g4 [[color(4)]],
+fragment float4 im_defer_fs(ImDeferOut in [[stage_in]], float4 imDst [[color(0)]], float4 g1 [[color(1)]], float4 g2 [[color(2)]], float4 g3 [[color(3)]], float4 g4 [[color(4)]], float4 g5 [[color(5)]],
 	constant ImHeightP &hp [[buffer(27)]], device const uint *hm [[buffer(28)]],
 	constant Fog &fog [[buffer(24)]], constant ImDeferParams &dp [[buffer(29)]], constant ImFrame &imf [[buffer(30)]],
 	depth2d_array<float> imShadowMap [[texture(20)]], sampler imShadowCmp [[sampler(13)]],
@@ -2823,6 +2827,7 @@ fragment float4 im_defer_fs(ImDeferOut in [[stage_in]], float4 imDst [[color(0)]
 	ImPre m;
 	m.on = true;
 	m.lod = lodPix;
+	m.packSpec = lodPix ? IM_MISSING_SPEC : g5;
 	m.slanted = (flags & 1u) != 0u;
 	float3 an = float3(axis < 2u ? 1.0 : 0.0, axis == 2u || axis == 3u ? 1.0 : 0.0, axis >= 4u ? 1.0 : 0.0) * ((axis & 1u) != 0u ? -1.0 : 1.0);
 	// Water reuses g3.ba for thickness, so reconstruct BOTH lighting normals

@@ -6,13 +6,13 @@ import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 
 /**
- * Build B2: deferred lighting in tile memory. The opaque terrain writes what the lighting needs into four attachments that live
+ * Build B2: deferred lighting in tile memory. The opaque terrain writes what the lighting needs into five attachments that live
  * only in the GPU's tile memory (terrain.metal own_fs_g), and one draw in the same pass lights each visible pixel once
  * (im_defer_fs), instead of every fragment of every small triangle lighting itself. Apple GPUs only, which is all this mod runs
  * on. The native side (mcown.m) switches the pass over at the first opaque terrain draw and back when the terrain is done.
  *
  * <p>Off (the terrain lights its own fragments, as before Build B2): imaginemetal.deferred=false, a debug view, the shaders
- * switched off live, a PBR resource pack in use (its maps are read per fragment), no HDR image, or the lighting pipeline could
+ * switched off live, no HDR image, or the lighting pipeline could
  * not be made.
  */
 public final class Deferred {
@@ -23,7 +23,7 @@ public final class Deferred {
 	}
 
 	public static boolean wanted() {
-		return Settings.deferred && Engine.TERRAIN && !failed && Settings.debug == 0 && !Live.isOff() && !(PbrAtlas.on && Settings.pbrPack) && Hdr.active();
+		return Settings.deferred && Engine.TERRAIN && !failed && Settings.debug == 0 && !Live.isOff() && Hdr.active();
 	}
 
 	/** (OwnTerrain.drawOpaque, before its draws) own: the terrain's native handle; clip: this frame's camera-relative world to clip. */

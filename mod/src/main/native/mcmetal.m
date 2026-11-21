@@ -2055,12 +2055,12 @@ int mc_im_g_enter(Enc *enc, id<MTLTexture> const *g) {
 	if (!enc->render || enc->colorCount != 1 || !enc->colors[0] || !enc->depth || enc->dead) return 0;
 	if (enc->colors[0].storageMode == MTLStorageModeMemoryless || enc->colors[0].sampleCount != 1) return 0;
 	if (enc->depth.storageMode == MTLStorageModeMemoryless || enc->depth.sampleCount != 1) return 0;
-	if (MAX_COLORS < 5) return 0;
-	for (int i = 0; i < 4; i++)
+	if (MAX_COLORS < 1 + IM_G_ATTACHMENTS) return 0;
+	for (int i = 0; i < IM_G_ATTACHMENTS; i++)
 		if (!g[i] || g[i].width != enc->colors[0].width || g[i].height != enc->colors[0].height) return 0;
 	endRender(enc);
-	for (int i = 0; i < 4; i++) enc->colors[1 + i] = g[i];
-	enc->colorCount = 5;
+	for (int i = 0; i < IM_G_ATTACHMENTS; i++) enc->colors[1 + i] = g[i];
+	enc->colorCount = 1 + IM_G_ATTACHMENTS;
 	enc->imG = 1;
 	mc_render_reopen(enc);
 	return 1;
