@@ -1,3 +1,99 @@
+# 2026-11-21 — Codex s1121 renderer investigation
+
+The working tree is on s1121, based on origin/s1121 (146d1df). The tracked source matched that revision byte-for-byte before
+this work. The local handoff was one revision behind and is backed up in claude-scratch/codex-s1121/HANDOFF.local.md.
+Rollback: claude-scratch/s1121/imagine-metal-s1121-final7.jar (SHA256 2fa996a159be365cf7642f41fb895ab4e6d076854b80add73dbf257b712fe1f6).
+
+## Movement
+
+ColdTp `steps` accepts `move=X/Z` offsets in blocks and `freezeTime=true` pauses daylight on the disposable save. Tests
+use a fresh copy of IM-coldtp-f1p, (-191.5, 94, 836.5), yaw 10.7, pitch -1.4, time 5000, rd 6. After loading, ColdTp
+walks four timed 8-block steps east, waits, returns, then repeats the 32-block move. See claude-scratch/codex-s1121/control.properties.
+The diagnostic JVM argument `-Dmetalods.movementStats=true` logs once per second (also settable with ColdTp's
+`imaginemetal.metalods.MetaWorld#movementStats=true`). Counters are cumulative per world. The line gives cold requests by level, with prefetch included. Dirty requests are
+broken down by refinement, real capture, newly available neighbor, Streams, and settings. Multiple reasons may apply.
+It also includes age, pressure and parent evictions, selected replacements, mesh fades, completed meshes, seed tiles,
+disk hits, and real captures built and accepted.
+
+First crossing, seconds 49–60 (full logs in claude-scratch/codex-s1121):
+| | final7 + probe | warm1 |
+|---|---:|---:|
+| Minimum mesh readiness | 99.34% | 100% |
+| New on-demand requests | 17 | 0 |
+| Prefetch requests | 32 | 0 |
+| Real-capture rebuild requests | 88 | 79 |
+| Neighbor rebuild requests | 30 | 13 |
+| Completed meshes | 167 | 92 |
+| Seed tiles generated | 10 | 0 |
+| Disk column hits | 80 | 35 |
+| Capture summaries built / published | 93 / 34 | 101 / 34 |
+
+The arena stayed over 82% free, with zero pressure evictions. Age evictions appeared during the later hold, after the
+first crossing. The original level-1 prefetch used detail 4 (512 blocks) but the traversal splits its parent at farDetail 6
+(768 blocks). It also preloaded only outward refinement, missing the coarser columns that come into view when backing
+away. The fixed buffer warms 64 blocks around the actual draw boundaries and holds its center until the camera moves
+more than 48 blocks. The live draw selection uses the existing thresholds. The repeat crossing completed 54 meshes
+before, 9 with warm1, with zero seed tiles in both. At the start of the route the warmed build held 301 prefetched columns
+vs 292, and made 100 seed tiles vs 93 during initial loading. Toggle `-Dmetalods.warmBuffer=false` for the old prefetch.
+
+Most real captures deduplicated, and the cache comparison found 30 first captures, 14 persistent block/biome differences
+and one lighting-only difference. warm2 invalidates just the changed mip levels and neighbors that read changed shared
+borders. First-time captures invalidate all applicable levels. Toggle `-Dmetalods.preciseCapture=false`.
+Previously a same-level replacement immediately retired its old pages, bypassing the transition noise. warm2 retains those
+pages for the existing 500 ms complementary dissolve when replacing a settled on-screen mesh and the arena has room.
+The shadow map still uses the new mesh. Toggle `-Dmetalods.meshFades=false` or the existing `-Dmetalods.fades=false`.
+
+The full build was rechecked on a warmed copy. The 32-block crossing stayed at 100% ready with two mesh jobs,
+zero new demand/prefetch jobs, zero generated tiles and zero evictions. This warmed replay had one accepted capture during
+the crossing, so it does not isolate the invalidation change's speed. It exercised 77 mesh fades by the end of the crossing.
+Before vs warm1 matched photos (fixed time and view) differed by 0.77–0.97/255 across the image and 0.17–0.75/255 in the
+terrain rows. Full build vs before and rd 12 real-chunk comparisons are in
+claude-scratch/codex-s1121/movement-comparison.jpg. The rd 12 reference shows the existing difference in mountain detail.
+Verified at 1728 × 1080 and render scale 67%. ColdTp restored rd 6.
+
+## Frame hitches and loading CPU
+
+JFR control, first 35 s after teleport: 40 stop-the-world pauses, 843 ms total, 139.3 ms longest (the frame window peaked
+at 170 ms). Over the recording, LOD workers allocated 7.9 GB, server 2.1 GB, render 1.7 GB and ColdTp 0.49 GB.
+Settled frame pacing still varied. A 136.7 ms frame took 15.9 ms of render-thread CPU, and its perf window recorded a
+120 ms maximum drawable wait. No JFR GC event coincided with that spike. There was also a separate 99.9 ms GC pause
+late in the run, near a 117 ms frame. Both GC and drawable waits contribute. JVM/present settings were kept for these runs.
+The second cold pass had unusually long structure-start blocking and GC and was excluded from the movement A/B.
+
+Control JFR, first 35 s, 3,088 LOD-worker CPU samples including capture and idle workers, inclusive categories overlap:
+LodNoise 39.5% (LodShellSampler 30.6% and LodLatticeSampler 11.7%), Streams 15.8%, MetaWorld.edge 17.7%,
+LodForest.tryStart 5.2% including base-height calls 2.1%. JFR logged 236 structure-start monitor waits totaling 23.8 s
+across the workers. The second cold pass logged 12 such waits totaling 40.3 s, so remaining structure cost is sensitive to
+contention in addition to the already-batched heights. The test save already held many coarse seed tiles.
+The edge optimization reads each immutable real capture once per chunk along the edge (up to 32 reads → 2 per L0 edge)
+and reuses four buffers per worker (192 KiB of edge-array allocations avoided per Overworld L0 job). All lighting and
+fallback data are kept. Toggle `-Dmetalods.reuseEdges=false`. The change's isolated in-game wall time was not measured.
+Terrain density, structure placement and Streams still use their existing algorithms.
+
+## End and Nether
+
+End test at (0.5, 113, -105.5), yaw -60, pitch 7, `dimension=end` in ColdTp. The End router generated 396 seed tiles
+in 16.7 s and reached 1,200/1,200 selected meshes ready at rd 6. The central island and distant floating islands render
+with the void between them. The far islands look flat where the End fog saturates. `ImagineFrame` packs the real-chunk
+distance into the End fog limit. The shared `imFogTail` in terrain.metal uses that same limit for deferred LOD pixels.
+
+IterationT is the in-game Black hole option. At rd 12 the streaks across the void reproduced with MetaLODS turned off,
+and the pale ribbon of far islands appeared with MetaLODS on. The shots reset the camera at matching coordinates.
+The sky's ringed-planet animation uses wall time. See claude-scratch/codex-s1121/end-comparison.jpg, end.log and
+endcheck.log. The End sky, fog and lighting code are untouched. Black hole and End LOD fog remain open.
+
+Nether design proposal: preserve lava seas, caverns and downward-facing natural ceilings below the bedrock, and exclude
+the bedrock roof and upward-facing exterior cap from the distant mesh. Use Nether biome fog, ambient and lava light
+without skylight. The desired look still needs Jack's choice between enclosed foggy caverns and an open cutaway.
+
+## Installed and verification
+
+Installed: claude-scratch/codex-s1121/imagine-metal-codex-s1121-buffered-final.jar
+(SHA256 3b74d024b5fb8fe98b8c5e3427432683ff3adb665ce3d9fc9eb6f07dcbbc1787).
+ColdTp disabled, render distance restored to 6, original render scale 67%, original End sky Reimagined.
+CI check `JAVA_HOME=<JDK 25> sh ci/metalods/check.sh` passed, including the 422,927-quad digest match.
+Also checked every light-only border mutation at capture sizes 1–16 and verified 1,176 edge lookup coordinate cases.
+
 # START HERE — 2026-11-21 16:10 Claude s1121: Jack's four (cave speckle, LOD village, LOD shadows, LOD meshing speed)
 
 ## Installed: claude-scratch/s1121/imagine-metal-s1121-final7.jar (SHA256 2fa996a159be365c...), all of s1121, tested.

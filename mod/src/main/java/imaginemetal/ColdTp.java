@@ -27,6 +27,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.gamerules.GameRules;
 
 /**
  * Cold-teleport benchmark (test harness, inert unless config/imaginemetal-coldtp.properties says enabled=true AND names a world
@@ -139,6 +140,11 @@ public final class ColdTp {
 	private static void applyStep(String set) {
 		try {
 			String k = set.substring(0, set.indexOf('=')).trim(), v = set.substring(set.indexOf('=') + 1).trim();
+			if (k.equals("renderDistance")) {
+				Minecraft.getInstance().options.renderDistance().set(Integer.parseInt(v));
+				System.out.println("[ColdTp] step " + set + " at " + ms(System.nanoTime()) + " ms");
+				return;
+			}
 			Class<?> owner = imaginemetal.metalods.MetaSettings.class;
 			if (k.startsWith("im.")) {
 				owner = Settings.class;
@@ -246,6 +252,8 @@ public final class ColdTp {
 			joinNanos = System.nanoTime();
 			System.out.println("[ColdTp] joined " + world + ", settling " + settle + " s");
 			IntegratedServer server = mc.getSingleplayerServer();
+			ServerLevel testLevel = "end".equals(cfg.getProperty("dimension"))
+				? java.util.Objects.requireNonNull(server.getLevel(net.minecraft.world.level.Level.END)) : server.overworld();
 			final boolean pauseWas = mc.options.pauseOnLostFocus;
 			mc.execute(() -> mc.options.pauseOnLostFocus = false);   // the server must not pause if the window loses focus
 			Thread.sleep((long) (settle * 1000) - 3000);
@@ -255,12 +263,14 @@ public final class ColdTp {
 			final long[] done = {0};
 			server.execute(() -> {
 				ServerPlayer p = server.getPlayerList().getPlayers().get(0);
-				ServerLevel sl = server.overworld();
 				p.getAbilities().flying = fly;
+				if (Boolean.parseBoolean(cfg.getProperty("freezeTime", "false"))) {
+					testLevel.getGameRules().set(GameRules.ADVANCE_TIME, false, server);
+				}
 				if (dayTime >= 0) server.getCommands().performPrefixedCommand(server.createCommandSourceStack().withSuppressedOutput(), "time set " + dayTime);
 				p.onUpdateAbilities();
 				tpNanos = System.nanoTime();
-				p.teleportTo(sl, dx + 0.5, ty, dz + 0.5, Set.of(), yaw, pitch, true);
+				p.teleportTo(testLevel, dx + 0.5, ty, dz + 0.5, Set.of(), yaw, pitch, true);
 				done[0] = 1;
 			});
 			while (tpNanos == 0) Thread.sleep(5);
@@ -282,7 +292,7 @@ public final class ColdTp {
 					nextPoll = now + 50_000_000L;
 					server.execute(() -> {
 						long t = System.nanoTime();
-						var src = server.overworld().getChunkSource();
+						var src = testLevel.getChunkSource();
 						int i = 0;
 						for (int z = -ring; z <= ring; z++) for (int x = -ring; x <= ring; x++, i++) {
 							if (tServer[i] < 0 && src.getChunkNow(cx0() + x, cz0() + z) != null) tServer[i] = ms(t);
@@ -314,7 +324,17 @@ public final class ColdTp {
 				}
 				if (step < stepAt.length && now - tpNanos >= (long) (stepAt[step] * 1e9)) {
 					final String set = stepSet[step++];
-					mc.execute(() -> applyStep(set));
+					if (set.startsWith("move=")) {
+						String[] offset = set.substring(5).split("/");
+						double x = dx + 0.5 + Double.parseDouble(offset[0]), z = dz + 0.5 + Double.parseDouble(offset[1]);
+						server.execute(() -> {
+							ServerPlayer player = server.getPlayerList().getPlayers().getFirst();
+							player.teleportTo(player.level(), x, ty, z, Set.of(), yaw, pitch, true);
+							System.out.println("[ColdTp] step " + set + " at " + ms(System.nanoTime()) + " ms");
+						});
+					} else {
+						mc.execute(() -> applyStep(set));
+					}
 				}
 				if (allDrawnAt != 0 && now - allDrawnAt > 5_000_000_000L && shot >= shots.length && step >= stepAt.length) break;
 				Thread.sleep(10);

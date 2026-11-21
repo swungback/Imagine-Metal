@@ -60,6 +60,17 @@ final class MetaWorld {
 	private long frame;
 	private int lastDrawPages, lastDrawCols, lastQuads;
 	private long nextPrefetch;
+	private static final boolean WARM_BUFFER = !"false".equals(System.getProperty("metalods.warmBuffer"));
+	private static final int WARM_MARGIN = 64;
+	private static final int WARM_RECENTER = 48;
+	private static final boolean PRECISE_CAPTURE = !"false".equals(System.getProperty("metalods.preciseCapture"));
+	private double warmX = Double.NaN, warmZ;
+	private static boolean movementStats = Boolean.getBoolean("metalods.movementStats");
+	private long nextMovementStats;
+	private final int[] movementRequests = new int[6];
+	private final int[] movementDirty = new int[5];
+	private int movementPrefetch, movementAgeEvictions, movementPressureEvictions, movementParentEvictions, movementSwaps, movementFades;
+	private static final int REFINEMENT = 1, REAL = 2, NEIGHBOR = 4, STREAMS = 8, SETTINGS = 16;
 	private long nextStats = System.currentTimeMillis() + 10000L, nextFlush = System.currentTimeMillis() + 5000L, nextEvict;
 	private final int[] maskBits = new int[MetaArena.MASK_MAX * MetaArena.MASK_MAX / 32];
 	private int maskX, maskZ, maskSize, maskWords;
@@ -175,6 +186,7 @@ final class MetaWorld {
 		/** 0 nothing, 1 asked, 2 meshed */
 		int state;
 		boolean dirty;
+		int dirtyReasons;
 		int version;
 		int edges;
 		volatile long wanted;
@@ -196,6 +208,7 @@ final class MetaWorld {
 		boolean pagesValid;
 		/** (fix18) the last frame drawn (not fading out), when it started showing / started dissolving out (ms, 0 not). */
 		long drawnFrame = -2, shownAt, hiddenAt, selectedFrame;
+		Col previousMesh;
 	}
 
 	record Job(Col col, int version, double prio, long seq) implements Comparable<Job> {
@@ -207,7 +220,7 @@ final class MetaWorld {
 	}
 
 	/** A worker's answer: the column's mesh (null: dropped), the sides it knew, columns it generated. */
-	record Result(@Nullable Col col, int version, MetaMesher.@Nullable Mesh mesh, int edges, long @Nullable [] generated, long realChunk) {
+	record Result(@Nullable Col col, int version, MetaMesher.@Nullable Mesh mesh, int edges, long @Nullable [] generated, long realChunk, int realChanges) {
 	}
 
 	/** (fix15) Diagnostics: CPU by thread group, GC, what the workers do; a one-time dump of Streams' plan around the player. */
@@ -305,11 +318,14 @@ final class MetaWorld {
 		this.allowedWorkers = under ? PRESSURE_WORKERS : Integer.MAX_VALUE;
 	}
 
+	private static final boolean REUSE_EDGES = !"false".equals(System.getProperty("metalods.reuseEdges"));
+
 	private void work(int index) {
 		// (Apple silicon: the utility QoS class, so the game's own threads always come first; background would keep the
 		// workers on the efficiency cores only, too slow to fill the view)
 		mcopt.metal.lod.LodGenQos.once(0x11, "MetaLODS worker");
 		MetaMesher mesher = new MetaMesher();
+		int[][] edges = new int[4][], edgeBuffers = new int[4][];
 		int turn = 0;
 		while (!this.closed) {
 			try {
@@ -346,11 +362,11 @@ final class MetaWorld {
 				if (this.closed) return;
 				Col c = j.col;
 				if (frameNow - c.wanted > 240) {
-					this.results.add(new Result(c, j.version, null, 0, null, Long.MIN_VALUE));
+					this.results.add(new Result(c, j.version, null, 0, null, Long.MIN_VALUE, 0));
 					continue;
 				}
 				try {
-					this.job(c, j, mesher);
+					this.job(c, j, mesher, edges, edgeBuffers);
 				} catch (TileBusy busy) {
 					// Its sibling is already generating the shared 64-cell tile. Keep
 					// this request alive and let this worker make another tile meanwhile.
@@ -358,7 +374,7 @@ final class MetaWorld {
 					java.util.concurrent.locks.LockSupport.parkNanos(100_000L);
 				} catch (Throwable t) {
 					// (dropped: asked for again when next wanted)
-					this.results.add(new Result(c, j.version, null, 0, null, Long.MIN_VALUE));
+					this.results.add(new Result(c, j.version, null, 0, null, Long.MIN_VALUE, 0));
 					throw t;
 				}
 			} catch (InterruptedException e) {
@@ -373,17 +389,23 @@ final class MetaWorld {
 	/** (fix21) Bytes allocated by jobs (derive: store reads, generation, mips; then the mesh) and by real chunks' summaries. */
 	final AtomicLong jobAlloc = new AtomicLong(), meshAlloc = new AtomicLong(), ingestAlloc = new AtomicLong(), ingestBuilt = new AtomicLong();
 
-	private void job(Col c, Job j, MetaMesher mesher) {
+	private void job(Col c, Job j, MetaMesher mesher, int[][] edges, int[][] edgeBuffers) {
 		if (this.closed) return;
 		long a0 = mcopt.metal.lod.MetaGen.allocated();
 		List<Long> generated = new ArrayList<>(4);
 		Rle center = this.derive(c.level, c.cx, c.cz, true, generated);
-		int[][] edges = new int[4][];
 		int known = 0;
-		int[][] nb = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
-		for (int s = 0; s < 4; s++) {
-			edges[s] = this.edge(c.level, c.cx + nb[s][0], c.cz + nb[s][1], s, center.h);
-			if (edges[s] != null) known |= 1 << s;
+		for (int side = 0; side < 4; side++) {
+			int x = c.cx + (side == 0 ? -1 : side == 1 ? 1 : 0);
+			int z = c.cz + (side == 2 ? -1 : side == 3 ? 1 : 0);
+			if (REUSE_EDGES) {
+				int[] buffer = edgeBuffers[side];
+				if (buffer == null || buffer.length < 32 * center.h) buffer = edgeBuffers[side] = new int[32 * center.h];
+				edges[side] = this.fillEdge(c.level, x, z, side, center.h, buffer) ? buffer : null;
+			} else {
+				edges[side] = this.edge(c.level, x, z, side, center.h);
+			}
+			if (edges[side] != null) known |= 1 << side;
 		}
 		long t1 = System.nanoTime(), am = mcopt.metal.lod.MetaGen.allocated();
 		MetaMesher.Mesh m = mesher.mesh(center, edges, c.level);
@@ -398,7 +420,7 @@ final class MetaWorld {
 		this.meshNanos.addAndGet(System.nanoTime() - t1);
 		this.meshed.incrementAndGet();
 		long[] gk = generated.isEmpty() ? null : generated.stream().mapToLong(Long::longValue).toArray();
-		this.results.add(new Result(c, j.version, m, known, gk, Long.MIN_VALUE));
+		this.results.add(new Result(c, j.version, m, known, gk, Long.MIN_VALUE, 0));
 	}
 
 	private @Nullable MetaGen generator() {
@@ -631,6 +653,33 @@ final class MetaWorld {
 		return any ? out : null;
 	}
 
+	private boolean fillEdge(int level, int ncx, int ncz, int side, int height, int[] out) {
+		Rle base = this.cachedGen(level, ncx, ncz);
+		if (base != null) base = this.streamChannels(base, level, ncx, ncz);
+		int chunks = chunksPer(level), cells = level <= 4 ? 16 >> level : 32;
+		// Adjacent cells from one real chunk share the same immutable captured data.
+		for (int start = 0; start < 32; start += cells) {
+			int x = side == 0 ? 31 : side == 1 ? 0 : start;
+			int z = side == 2 ? 31 : side == 3 ? 0 : start;
+			Rle source = base;
+			int sx = x, sz = z;
+			if (level <= 4) {
+				int chx = ncx * chunks + x / cells, chz = ncz * chunks + z / cells;
+				MetaStore.RealChunk captured = this.store.hasRegion(chx >> 5, chz >> 5) ? this.store.real(chx, chz) : null;
+				if (captured != null && captured.levels()[level].h == height) {
+					source = captured.levels()[level];
+					sx %= cells;
+					sz %= cells;
+				}
+			}
+			if (source == null) return false;
+			for (int i = 0; i < cells; i++) {
+				source.expand(sx + (side >= 2 ? i : 0), sz + (side < 2 ? i : 0), out, (start + i) * height);
+			}
+		}
+		return true;
+	}
+
 	// ======================================================= real chunks
 
 	/** A real chunk's blocks and light (copied on the render thread), made into LODs on a worker. */
@@ -649,9 +698,11 @@ final class MetaWorld {
 				this.latestIngest.publish(key, ticket, () -> {
 					MetaStore.RealChunk previous = this.store.real(s.chunkX(), s.chunkZ());
 					if (previous != null && previous.levels()[0].sameData(rc.levels()[0])) return;
+					int changes = !PRECISE_CAPTURE || previous == null ? (1 << 25) - 1
+						: changedCapture(previous.levels(), rc.levels());
 					this.store.putReal(s.chunkX(), s.chunkZ(), rc);
 					this.ingested.incrementAndGet();
-					this.results.add(new Result(null, 0, null, 0, null, key));
+					this.results.add(new Result(null, 0, null, 0, null, key, changes));
 				});
 			} catch (Throwable t) {
 				System.out.println("[MetaLODS] chunk " + s.chunkX() + ", " + s.chunkZ() + ": " + t);
@@ -659,6 +710,21 @@ final class MetaWorld {
 				this.latestIngest.finish(key, ticket);
 			}
 		});
+	}
+
+	/** Per level: center, west, east, north and south. A neighbor only reads the shared edge. */
+	private static int changedCapture(Rle[] previous, Rle[] current) {
+		int changes = 0;
+		for (int level = 0; level < current.length; level++) {
+			Rle old = previous[level], updated = current[level];
+			if (old.sameData(updated)) continue;
+			int mask = 1;
+			for (int side = 0; side < 4; side++) {
+				if (!old.sameSide(updated, side)) mask |= 2 << side;
+			}
+			changes |= mask << (level * 5);
+		}
+		return changes;
 	}
 
 	// ======================================================= render thread
@@ -676,8 +742,18 @@ final class MetaWorld {
 	private void request(Col c, double prio) {
 		c.wanted = this.frame;
 		if (c.state == 1) return;
-		if (c.state == 2 && !c.dirty) return;
+		if (c.state == 2 && (!c.dirty || c.previousMesh != null)) return;
 		if (c.state == 0 && this.frame < c.noRoomUntil) return;
+		if (movementStats) {
+			if (c.state == 0) {
+				this.movementRequests[c.level]++;
+				if (prio >= this.reach * 4) this.movementPrefetch++;
+			}
+			for (int i = 0; i < this.movementDirty.length; i++) {
+				if ((c.dirtyReasons & (1 << i)) != 0) this.movementDirty[i]++;
+			}
+			c.dirtyReasons = 0;
+		}
 		c.pagesValid = c.state == 2;
 		c.state = 1;
 		c.dirty = false;
@@ -685,9 +761,14 @@ final class MetaWorld {
 		this.jobs.add(new Job(c, c.version, prio, this.seq.incrementAndGet()), c.level >= 2);
 	}
 
-	private void dirtyColumn(int level, int x, int z) {
+	private void dirtyColumn(int level, int x, int z, int reason) {
 		Col c = this.cols.get(key(level, x, z));
-		if (c != null) c.dirty = true;
+		if (c != null) this.markDirty(c, reason);
+	}
+
+	private void markDirty(Col c, int reason) {
+		c.dirty = true;
+		if (movementStats) c.dirtyReasons |= reason;
 	}
 
 	/** Applies what the workers finished, for at most `budgetNs`. */
@@ -696,23 +777,25 @@ final class MetaWorld {
         long[] updated;
         while((updated=this.refined.poll())!=null)for(long k:updated) {
             int l=(int)(k>>>58),x=(int)(k<<6>>35),z=(int)(k<<35>>35);
-            this.dirtyColumn(l,x,z);this.dirtyColumn(l,x-1,z);this.dirtyColumn(l,x+1,z);
-            this.dirtyColumn(l,x,z-1);this.dirtyColumn(l,x,z+1);
+            this.dirtyColumn(l,x,z,REFINEMENT);this.dirtyColumn(l,x-1,z,REFINEMENT);this.dirtyColumn(l,x+1,z,REFINEMENT);
+            this.dirtyColumn(l,x,z-1,REFINEMENT);this.dirtyColumn(l,x,z+1,REFINEMENT);
         }
 		Result r;
 		while (System.nanoTime() < end && (r = this.results.poll()) != null) {
 			if (r.realChunk != Long.MIN_VALUE) {
 				int chx = (int) (r.realChunk >> 32), chz = (int) r.realChunk;
 				for (int l = 0; l <= 4; l++) {
+					int changes = r.realChanges >>> (l * 5) & 31;
+					if (changes == 0) continue;
 					int cps = chunksPer(l);
-					// A mesh also reads the one-cell border of each neighbour. Rebuild both sides
-					// when an ingested chunk touches a column edge (including negative coordinates).
+					// A mesh also reads the one-cell border of each neighbour. Rebuild it only
+					// if that shared edge changed (including negative coordinates).
 					int cx = Math.floorDiv(chx, cps), cz = Math.floorDiv(chz, cps);
-					this.dirtyColumn(l, cx, cz);
-					if (Math.floorMod(chx, cps) == 0) this.dirtyColumn(l, cx - 1, cz);
-					if (Math.floorMod(chx, cps) == cps - 1) this.dirtyColumn(l, cx + 1, cz);
-					if (Math.floorMod(chz, cps) == 0) this.dirtyColumn(l, cx, cz - 1);
-					if (Math.floorMod(chz, cps) == cps - 1) this.dirtyColumn(l, cx, cz + 1);
+					this.dirtyColumn(l, cx, cz,REAL);
+					if ((changes & 2) != 0 && Math.floorMod(chx, cps) == 0) this.dirtyColumn(l, cx - 1, cz,REAL);
+					if ((changes & 4) != 0 && Math.floorMod(chx, cps) == cps - 1) this.dirtyColumn(l, cx + 1, cz,REAL);
+					if ((changes & 8) != 0 && Math.floorMod(chz, cps) == 0) this.dirtyColumn(l, cx, cz - 1,REAL);
+					if ((changes & 16) != 0 && Math.floorMod(chz, cps) == cps - 1) this.dirtyColumn(l, cx, cz + 1,REAL);
 				}
 				continue;
 			}
@@ -739,7 +822,7 @@ final class MetaWorld {
 
 	private void edgeArrived(int level, int cx, int cz, int side) {
 		Col c = this.cols.get(key(level, cx, cz));
-		if (c != null && c.state == 2 && (c.edges & (1 << side)) == 0) c.dirty = true;
+		if (c != null && c.state == 2 && (c.edges & (1 << side)) == 0) this.markDirty(c, NEIGHBOR);
 	}
 
 	private void upload(Col c, MetaMesher.Mesh m) {
@@ -757,6 +840,25 @@ final class MetaWorld {
 			if (!c.pagesValid) c.noRoomUntil = this.frame + 90;
 			this.nextEvict = 0;
 			return;
+		}
+		if (movementStats && c.pagesValid && c.selectedFrame == this.frame - 1) this.movementSwaps++;
+		int[] oldPages = c.pages;
+		long now = System.currentTimeMillis();
+		if (FADES && MESH_FADES && c.pagesValid && oldPages.length > 0 && c.drawnFrame == this.frame - 1
+			&& now - c.shownAt >= FADE_MS && this.arena.freePages() - need >= this.arena.pages / 3
+			&& this.inView(c.cx * (32 << c.level), c.cz * (32 << c.level), 32 << c.level)) {
+			Col previous = new Col(c.level, c.cx, c.cz, c.key);
+			previous.pages = oldPages;
+			previous.minYb = c.minYb;
+			previous.maxYb = c.maxYb;
+			System.arraycopy(c.faceFirst, 0, previous.faceFirst, 0, c.faceFirst.length);
+			System.arraycopy(c.faceWater, 0, previous.faceWater, 0, c.faceWater.length);
+			previous.hiddenAt = now;
+			c.previousMesh = previous;
+			this.meshFades.add(c);
+			if (movementStats) this.movementFades++;
+		} else {
+			this.arena.release(oldPages, this.frame);
 		}
 		int[] pages = new int[need];
 		int n = 0;
@@ -779,7 +881,6 @@ final class MetaWorld {
 			}
 		}
 		c.faceFirst[6] = n;
-		this.arena.release(c.pages, this.frame);
 		c.pages = pages;
 		c.minYb = m.minY == Integer.MAX_VALUE ? this.minY : this.minY + (m.minY << c.level);
 		c.maxYb = m.maxY == Integer.MIN_VALUE ? this.minY : this.minY + (m.maxY << c.level);
@@ -1180,9 +1281,9 @@ final class MetaWorld {
             mcopt.metal.lod.LodStreams.Ready ready;
             while((ready=this.streams.pollCompleted())!=null) {
                 int l=ready.level(),x=ready.cx(),z=ready.cz();
-                this.dirtyColumn(l,x,z);
-                this.dirtyColumn(l,x-1,z);this.dirtyColumn(l,x+1,z);
-                this.dirtyColumn(l,x,z-1);this.dirtyColumn(l,x,z+1);
+                this.dirtyColumn(l,x,z,STREAMS);
+                this.dirtyColumn(l,x-1,z,STREAMS);this.dirtyColumn(l,x+1,z,STREAMS);
+                this.dirtyColumn(l,x,z-1,STREAMS);this.dirtyColumn(l,x,z+1,STREAMS);
             }
         }
 		this.frame++;
@@ -1234,39 +1335,20 @@ final class MetaWorld {
         }
         this.transitionEnd = this.transitionShown;
         this.crossfade(nowMs);
+		this.retireMeshFades(nowMs);
 		// the pages, face groups turned toward the camera only
 		int slot = (int) (this.frame % MetaArena.RING);
 		long vis = this.arena.vis[slot];
 		int colsDrawn = 0;
 		java.util.Arrays.fill(this.drawCount, 0);
 		for (Col c : this.draw) {
-			int w = 32 << c.level;
-			int bx = c.cx * w, bz = c.cz * w;
-			float rx = (float) (bx - camX), rz = (float) (bz - camZ);
-			if (!this.frustum.testAab(rx, (float) (c.minYb - camY), rz, rx + w, (float) (c.maxYb - camY), rz + w)) continue;
-			// Adjacent water faces and dissolving columns also need the mask.
 			int fade = this.fadeCode(c, nowMs);
-			boolean cut = MetaSettings.hideUnderReal && this.anyMasked(bx - 1, bz - 1, w + 2) || fade != 0;
-			int landGroup = cut ? 0 : MetaArena.LAND_BUCKETS;
-			int waterGroup = cut ? WATER_DRAW : WATER_DRAW + 1;
-			colsDrawn++;
-			for (int f = 0; f < 6; f++) {
-				boolean facing = switch (f) {
-					case 0 -> camX > bx;
-					case 1 -> camX < bx + w;
-					case 2 -> camY > c.minYb;
-					case 3 -> camY < c.maxYb;
-					case 4 -> camZ > bz;
-					default -> camZ < bz + w;
-				};
-				if (!facing) continue;
-				for (int i = c.faceFirst[f]; i < c.faceWater[f]; i++) {
-					int page = c.pages[i];
-					this.addPage(landGroup + this.arena.pageBucket[page], page, fade);
-				}
-				// Water's depth/thickness reads from earlier water fragments. Keep its original draw order.
-				for (int i = c.faceWater[f]; i < c.faceFirst[f + 1]; i++) this.addPage(waterGroup, c.pages[i], fade);
+			if (c.previousMesh != null) {
+				int phase = (int) Math.clamp((nowMs - c.previousMesh.hiddenAt) * 63L / FADE_MS, 0L, 63L);
+				fade = (1 << 23) | phase << 17;
+				this.listColumn(c.previousMesh, fade | (1 << 24));
 			}
+			if (this.listColumn(c, fade)) colsDrawn++;
 		}
 		if (MetaLods.probe == 3) java.util.Arrays.fill(this.drawCount, 0);
 		int n = 0, quads = 0;
@@ -1325,11 +1407,52 @@ final class MetaWorld {
 		return n;
 	}
 
+	private boolean listColumn(Col c, int fade) {
+		int w = 32 << c.level;
+		int bx = c.cx * w, bz = c.cz * w;
+		float rx = (float) (bx - this.camX), rz = (float) (bz - this.camZ);
+		if (!this.frustum.testAab(rx, (float) (c.minYb - this.camY), rz, rx + w, (float) (c.maxYb - this.camY), rz + w)) return false;
+		// Adjacent water faces and dissolving columns also need the mask.
+		boolean cut = MetaSettings.hideUnderReal && this.anyMasked(bx - 1, bz - 1, w + 2) || fade != 0;
+		int landGroup = cut ? 0 : MetaArena.LAND_BUCKETS;
+		int waterGroup = cut ? WATER_DRAW : WATER_DRAW + 1;
+		for (int f = 0; f < 6; f++) {
+			boolean facing = switch (f) {
+				case 0 -> this.camX > bx;
+				case 1 -> this.camX < bx + w;
+				case 2 -> this.camY > c.minYb;
+				case 3 -> this.camY < c.maxYb;
+				case 4 -> this.camZ > bz;
+				default -> this.camZ < bz + w;
+			};
+			if (!facing) continue;
+			for (int i = c.faceFirst[f]; i < c.faceWater[f]; i++) {
+				int page = c.pages[i];
+				this.addPage(landGroup + this.arena.pageBucket[page], page, fade);
+			}
+			// Water's depth/thickness reads from earlier water fragments. Keep its original draw order.
+			for (int i = c.faceWater[f]; i < c.faceFirst[f + 1]; i++) this.addPage(waterGroup, c.pages[i], fade);
+		}
+		return true;
+	}
+
 	// ---- (fix18) crossfades: a column dissolves in over FADE_MS where it first shows (four finer ones replacing a coarser one,
 	// new land), and the one it replaces dissolves out over the same time with the complementary pixels (metalods.metal: the
 	// visible list's bits 17-24, the same screen noise as the edge dither), so nothing pops. -Dmetalods.fades=false: off.
 	static final boolean FADES = !"false".equals(System.getProperty("metalods.fades"));
 	static final long FADE_MS = Long.getLong("metalods.fadeMs", 500L);
+	private static final boolean MESH_FADES = !"false".equals(System.getProperty("metalods.meshFades"));
+	private final ArrayList<Col> meshFades = new ArrayList<>();
+
+	private void retireMeshFades(long now) {
+		for (Iterator<Col> it = this.meshFades.iterator(); it.hasNext();) {
+			Col c = it.next();
+			if (c.drawnFrame == this.frame && now - c.previousMesh.hiddenAt < FADE_MS) continue;
+			this.arena.release(c.previousMesh.pages, this.frame);
+			c.previousMesh = null;
+			it.remove();
+		}
+	}
 	/** Blocks a second the edge's dither band slides in by. */
 	static final float TRANSITION_SPEED = 110f;
 	private float transitionShown;
@@ -1401,8 +1524,7 @@ final class MetaWorld {
 		// (fix17: past the full-detail ring the detail falls off faster (far detail, levels 2-4); level 5 never drawn, as before)
 		// (fix20: far detail on its own, no longer capped by detail: detail sets only the full-detail ring (level 0 to
 		// detail x 64 blocks), far detail everything past it; Jack 13:55 "we don't need full detail a kilometer away")
-		int kd = level <= 1 || level >= TOP ? this.detail : this.farDetail;
-		boolean refine = level > 0 && d < kd * w;
+		boolean refine = level > 0 && d < this.refineDistance(level);
 		if (!refine) {
 			this.count(level, c.ready());
 			if (c.state == 0 || c.state == 2 && c.dirty) this.request(c, this.priority(x0, z0, w, d));
@@ -1469,8 +1591,17 @@ final class MetaWorld {
 		return (distance + 16.0) * (inBand ? 0.25 : this.inView(x, z, width) ? 1.0 : 3.0);
 	}
 
+    private int refineDistance(int level) {
+        int widths = level <= 1 || level >= TOP ? this.detail : this.farDetail;
+        return widths * (32 << level);
+    }
+
     /**
-     * Warm one extra band of columns per level. Only schedule it once the live view is nearly filled and
+     * Warm columns near the draw boundaries once the live view is nearly filled. Keep the same
+     * center through small moves, so drawing from the buffer doesn't immediately start more work.
+     * Only the prefetch footprint is anchored; the draw traversal keeps using the live camera.
+     *
+     * Legacy prefetch warms one outward band per level. Both paths
      * keep the extra work and meshes bounded by the normal queue and arena pressure.
      */
     private void prefetch(long now) {
@@ -1478,6 +1609,10 @@ final class MetaWorld {
             || this.colsReady < this.colsAll * 0.95 || this.jobs.size() > 8
             || this.ingest.size() > 16 || this.arena.freePages() < this.arena.pages / 3) return;
         this.nextPrefetch = now + 250L;
+        if (WARM_BUFFER) {
+            this.prefetchBuffer();
+            return;
+        }
         for (int level = 0; level <= TOP; level++) {
             int w = 32 << level;
             int group = level == TOP ? w : 2 * w;
@@ -1496,21 +1631,73 @@ final class MetaWorld {
                     for (int q = 0; q < children; q++) {
                         int cx = level == TOP ? x : 2 * x + (q & 1);
                         int cz = level == TOP ? z : 2 * z + (q >> 1);
-                        if (w <= 256 && MetaSettings.hideUnderReal && MetaSettings.coverageDebug != 2 && this.allMasked(cx * w, cz * w, w)) continue;
-                        Col c = this.cols.get(key(level, cx, cz));
-                        if (c != null) c.wanted = this.frame;
-                        if (this.jobs.size() < 12 && (c == null || c.state == 0)) {
-                            this.request(c == null ? this.col(level, cx, cz) : c, this.reach * 4 + distance);
-                        }
+                        this.warmColumn(level, cx, cz, distance, true);
                     }
                 }
             }
         }
     }
 
+    private void prefetchBuffer() {
+        double dx = this.camX - this.warmX, dz = this.camZ - this.warmZ;
+        if (Double.isNaN(this.warmX) || dx * dx + dz * dz > WARM_RECENTER * WARM_RECENTER) {
+            this.warmX = this.camX;
+            this.warmZ = this.camZ;
+        }
+        double outerReach = this.reach + WARM_MARGIN;
+        for (int level = 0; level <= TOP; level++) {
+            int width = 32 << level;
+            int split = level == 0 ? 0 : this.refineDistance(level);
+            int parentSplit = level == TOP ? Integer.MAX_VALUE : this.refineDistance(level + 1);
+            double radius = level == TOP ? outerReach : Math.min(outerReach, parentSplit + WARM_MARGIN + width);
+            int x0 = (int) Math.floor((this.warmX - radius) / width);
+            int z0 = (int) Math.floor((this.warmZ - radius) / width);
+            int x1 = (int) Math.floor((this.warmX + radius) / width);
+            int z1 = (int) Math.floor((this.warmZ + radius) / width);
+            for (int z = z0; z <= z1; z++) {
+                for (int x = x0; x <= x1; x++) {
+                    double distance = distanceToColumn(this.warmX, this.warmZ, x * width, z * width, width);
+                    if (distance > outerReach || distance < split - WARM_MARGIN) continue;
+
+                    // A child may become visible as its parent crosses the split threshold, even
+                    // when the child itself is farther away. Use the parent's bounds for that edge.
+                    boolean approachingParent = false;
+                    if (level < TOP) {
+                        int parentWidth = width * 2;
+                        double parentDistance = distanceToColumn(this.warmX, this.warmZ,
+                            Math.floorDiv(x, 2) * parentWidth, Math.floorDiv(z, 2) * parentWidth, parentWidth);
+                        if (parentDistance >= parentSplit + WARM_MARGIN) continue;
+                        approachingParent = parentDistance >= parentSplit;
+                    }
+                    // Warm the inward edge too: backing away can need a coarser mesh that
+                    // hasn't been drawn before. Reach clips individual children, even siblings.
+                    boolean extra = approachingParent || distance > this.reach || distance < split;
+                    this.warmColumn(level, x, z, distance, extra);
+                }
+            }
+        }
+    }
+
+    private void warmColumn(int level, int cx, int cz, double distance, boolean schedule) {
+        Col column = this.cols.get(key(level, cx, cz));
+        // Keep meshes inside the anchored footprint, including the edge that just left view.
+        if (WARM_BUFFER && column != null) column.wanted = this.frame;
+        if (!schedule) return;
+        int width = 32 << level;
+        if (width <= 256 && MetaSettings.hideUnderReal && MetaSettings.coverageDebug != 2 && this.allMasked(cx * width, cz * width, width)) return;
+        if (column != null) column.wanted = this.frame;
+        if (this.jobs.size() < 12 && (column == null || column.state == 0)) {
+            this.request(column == null ? this.col(level, cx, cz) : column, this.reach * 4 + distance);
+        }
+    }
+
     private double distanceToColumn(int x, int z, int width) {
-        double dx = Math.max(0, Math.max(x - this.camX, this.camX - (x + width)));
-        double dz = Math.max(0, Math.max(z - this.camZ, this.camZ - (z + width)));
+        return distanceToColumn(this.camX, this.camZ, x, z, width);
+    }
+
+    private static double distanceToColumn(double camX, double camZ, int x, int z, int width) {
+        double dx = Math.max(0, Math.max(x - camX, camX - (x + width)));
+        double dz = Math.max(0, Math.max(z - camZ, camZ - (z + width)));
         return Math.sqrt(dx * dx + dz * dz);
     }
 
@@ -1585,6 +1772,10 @@ final class MetaWorld {
 					this.arena.release(c.pages, this.frame);
 					c.pages = new int[0];
 					it.remove();
+					if (movementStats) {
+						if (pressure) this.movementPressureEvictions++;
+						else this.movementAgeEvictions++;
+					}
 				}
 			}
 			if (pressure) {
@@ -1596,6 +1787,7 @@ final class MetaWorld {
 						all = child != null && child.ready();
 					}
 					if (!all) continue;
+					if (movementStats) this.movementParentEvictions++;
 					this.arena.release(c.pages, this.frame);
 					c.pages = new int[0];
 					c.pagesValid = false;
@@ -1603,6 +1795,16 @@ final class MetaWorld {
 				}
 			}
 			if (this.arenaFull && this.arena.freePages() > this.arena.pages / 6) this.arenaFull = false;
+		}
+		if (movementStats && now >= this.nextMovementStats) {
+			this.nextMovementStats = now + 1000L;
+			System.out.println(String.format(java.util.Locale.ROOT,
+				"[MetaLODS movement] x=%.1f z=%.1f ready=%d/%d queued=%d free=%d cold=%s prefetch=%d dirty=%s "
+					+ "evict=%d/%d/%d selectedReplacements=%d meshFades=%d meshes=%d tiles=%d disk=%d captures=%d changed=%d",
+				this.camX, this.camZ, this.colsReady, this.colsAll, this.jobs.size(), this.arena.freePages(),
+				java.util.Arrays.toString(this.movementRequests), this.movementPrefetch, java.util.Arrays.toString(this.movementDirty),
+				this.movementAgeEvictions, this.movementPressureEvictions, this.movementParentEvictions, this.movementSwaps, this.movementFades,
+				this.meshed.get(), this.generatedTiles.get(), this.store.cacheHits.get(), this.ingestBuilt.get(), this.ingested.get()));
 		}
 		if (now >= this.nextFlush) {
 			this.nextFlush = now + 5000L;
@@ -1663,7 +1865,7 @@ final class MetaWorld {
 
 	/** Everything meshed made again (a setting that changes what the columns hold). */
 	void remeshAll() {
-		for (Col c : this.cols.values()) c.dirty = true;
+		for (Col c : this.cols.values()) this.markDirty(c, SETTINGS);
 	}
 
 	void close() {
@@ -1678,6 +1880,8 @@ final class MetaWorld {
 		this.jobs.clear();
         this.details.close();this.refined.clear();
 		this.results.clear();
+		for (Col c : this.meshFades) this.arena.release(c.previousMesh.pages, this.frame);
+		this.meshFades.clear();
 		for (Col c : this.cols.values()) this.arena.release(c.pages, this.frame);
 		this.cols.clear();
 		this.store.close();

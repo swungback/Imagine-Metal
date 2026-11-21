@@ -25,6 +25,22 @@ public final class Rle {
 		return this.n == other.n && this.h == other.h && Arrays.equals(this.offsets, other.offsets) && Arrays.equals(this.runs, other.runs);
 	}
 
+	/** Identical runs on one border, including lighting (west, east, north, south). */
+	boolean sameSide(Rle other, int side) {
+		if (this.n != other.n || this.h != other.h) return false;
+		int step = side < 2 ? this.n : 1;
+		int cell = switch (side) {
+			case 1 -> this.n - 1;
+			case 3 -> this.n * (this.n - 1);
+			default -> 0;
+		};
+		for (int i = 0; i < this.n; i++, cell += step) {
+			if (!Arrays.equals(this.runs, 2 * this.offsets[cell], 2 * this.offsets[cell + 1],
+				other.runs, 2 * other.offsets[cell], 2 * other.offsets[cell + 1])) return false;
+		}
+		return true;
+	}
+
 	/** All air with the sky's light. */
 	public static Rle empty(int n, int h) {
 		int[] off = new int[n * n + 1];
