@@ -33,9 +33,21 @@ import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemp
  * mineshafts) and the templates' processors (mossy or cracked variants) are left out.
  * Level 0: the blocks themselves (as the exact trees, LodTile.treeBlocks); levels 1-3: a column per cell, its lowest block above
  * the ground (the walls) up to its top block (the roof).
+ *
+ * (s1121) Levels 1-3 as voxels: of each cube of 2^L blocks its most solid block, ties to the upper one (Rle.mip's rule, so a
+ * village far away looks as its near self mipped). The column per cell was filled solid from the ground to the roof in its
+ * lowest block: a stone corner post made a grey pillar, a floor a band of planks round the house, a foundation of bricks a
+ * tall brown post, and cells side by side stood at their own heights: Jack's "village looks broken, pieces overlapping"
+ * (2026-11-20 16.38.53, -505 123 1335 west, the village ~290 blocks out). And at every level: where a piece's lowest block
+ * stands a little over the LODs' ground (the game raises the ground under its pieces, the LODs' noise doesn't), the gap is
+ * ground (BEARD blocks at most), not air under a floating house.
  */
 final class LodStructurePreviews {
     private static final int CACHE_MAX = 512;
+    /** (s1121) levels 1-3 as voxels (-Dmetalods.structureVoxels=false: the old solid column per cell) */
+    static final boolean VOXELS = !"false".equals(System.getProperty("metalods.structureVoxels"));
+    /** (s1121) a gap under a piece's lowest block up to this many blocks is ground (the game's raised ground under its pieces) */
+    static final int BEARD = Integer.getInteger("metalods.structureBeard", 8);
 
     private final ServerLevel level;
     private final Field palettes, tTemplate, tSettings, tPos;
@@ -77,6 +89,7 @@ final class LodStructurePreviews {
         }
         if (hits == null) return;
         if (tile.level == 0) stamp0(tile, hits, span);
+        else if (VOXELS) stampVoxels(tile, hits, span, this.level.getMinY());
         else stampColumns(tile, hits, span);
     }
 
@@ -182,9 +195,85 @@ final class LodStructurePreviews {
                 tile.treeBlocks[i] = null;
                 continue;
             }
+            if (lo > 0 && lo <= BEARD) {
+                // (s1121) the gap under the piece: ground, as the game raises it under its pieces
+                beard(tile, i, col, 0, lo);
+                lo = 0;
+            }
             tile.canopyLo[i] = (short) (tile.ground[i] + lo);
             tile.canopyHi[i] = (short) (tile.ground[i] + hi);
             tile.canopyState[i] = col[hi];
+            tile.trunk[i] = col[lo];
+            tile.standing[i] = lo == 0;
+        }
+    }
+
+    /** (s1121) voxels from..to of a structure column: the ground's under block, its surface block on top. */
+    private static void beard(LodTile tile, int i, BlockState[] col, int from, int to) {
+        BlockState surface = tile.state[i], under = tile.under[i] != null ? tile.under[i] : surface;
+        if (surface == null || !surface.isSolidRender()) return;
+        for (int y = from; y < to; y++) col[y] = y == to - 1 ? surface : under;
+    }
+
+    /**
+     * (s1121) Levels 1-3 as voxels, as MetaGen.cell lays a column: its first voxel over the ground is the one over the voxel
+     * holding the ground's top block. Per voxel the most solid of its blocks (solid over leaves), ties to the upper one, then to
+     * the first.
+     */
+    private static void stampVoxels(LodTile tile, List<int[]> hits, int span, int minY) {
+        int cells = tile.cells(), L = tile.level, c = 1 << L;
+        int[][] score = new int[cells][];
+        BlockState[][] cols = new BlockState[cells][];
+        int[] hiY = new int[cells];
+        java.util.Arrays.fill(hiY, Integer.MIN_VALUE);
+        BlockState[] top = new BlockState[cells];
+        for (int[] b : hits) {
+            for (int k = 0; k < b.length; k += 4) {
+                int x = b[k] - tile.x0, y = b[k + 1], z = b[k + 2] - tile.z0;
+                if (x < 0 || z < 0 || x >= span || z >= span) continue;
+                int i = (z >> L) * tile.size + (x >> L);
+                int g = tile.ground[i];
+                if (y < g || tile.water[i] != LodTile.DRY && tile.water[i] > g) continue;
+                int at = Math.floorDiv(g - 1 - minY, c) + 1, vy = Math.floorDiv(y - minY, c), off = vy - at;
+                if (off < 0 || off > 255) continue;
+                BlockState st = Block.stateById(b[k + 3]);
+                int sc = (st.is(net.minecraft.tags.BlockTags.LEAVES) ? 1 : 2) * 1024 + (y - minY - vy * c) + 1;
+                int[] sv = score[i];
+                if (sv == null || off >= sv.length) {
+                    int len = Math.max(16, Math.max(off + 1, sv == null ? 0 : sv.length * 2));
+                    score[i] = sv = sv == null ? new int[len] : java.util.Arrays.copyOf(sv, len);
+                    cols[i] = cols[i] == null ? new BlockState[len] : java.util.Arrays.copyOf(cols[i], len);
+                }
+                if (sc > sv[off]) {
+                    sv[off] = sc;
+                    cols[i][off] = st;
+                }
+                if (y > hiY[i]) {
+                    hiY[i] = y;
+                    top[i] = st;
+                }
+            }
+        }
+        if (tile.treeBlocks == null) tile.treeBlocks = new BlockState[cells][];
+        for (int i = 0; i < cells; i++) {
+            BlockState[] col = cols[i];
+            if (col == null) continue;
+            if (tile.canopyHi[i] >= tile.canopyLo[i] && hiY[i] <= tile.canopyHi[i]) continue;
+            int lo = -1, hi = -1;
+            for (int y = 0; y < col.length; y++) if (col[y] != null) {
+                if (lo < 0) lo = y;
+                hi = y;
+            }
+            if (hi < 0) continue;
+            col = java.util.Arrays.copyOf(col, hi + 1);
+            if (lo > 0 && lo * c <= Math.max(BEARD, c)) {
+                beard(tile, i, col, 0, lo);
+                lo = 0;
+            }
+            tile.treeBlocks[i] = col;
+            tile.canopyLo[i] = tile.ground[i];
+            tile.canopyHi[i] = (short) hiY[i];
+            tile.canopyState[i] = top[i];
             tile.trunk[i] = col[lo];
             tile.standing[i] = lo == 0;
         }

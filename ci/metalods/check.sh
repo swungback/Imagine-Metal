@@ -27,9 +27,15 @@ JAVA
   "$ROOT/ci/metalods/SchedulingCheck.java" \
   "$ROOT/ci/metalods/IngestCheck.java" \
   "$ROOT/ci/metalods/GeometryCheck.java" \
-  "$ROOT/ci/metalods/CaveCheck.java"
+  "$ROOT/ci/metalods/CaveCheck.java" \
+  "$ROOT/ci/metalods/MeshFastCheck.java"
 "$JAVA_HOME/bin/java" -cp "$TMP/classes" imaginemetal.metalods.GeometryCheck
 "$JAVA_HOME/bin/java" -cp "$TMP/classes" imaginemetal.metalods.CaveCheck
+# (s1121) the mesher's fast path gives the old path's quads
+SLOW=$("$JAVA_HOME/bin/java" -Dmetalods.meshFast=false -cp "$TMP/classes" imaginemetal.metalods.MeshFastCheck)
+FAST=$("$JAVA_HOME/bin/java" -cp "$TMP/classes" imaginemetal.metalods.MeshFastCheck)
+echo "$SLOW"; echo "$FAST"
+[ "${SLOW#*quads}" = "${FAST#*quads}" ] || { echo "MeshFastCheck: the fast mesher's quads differ"; exit 1; }
 
 "$JAVA_HOME/bin/java" -cp "$TMP/classes" imaginemetal.metalods.IngestCheck
 "$JAVA_HOME/bin/java" -cp "$TMP/classes" imaginemetal.metalods.SchedulingCheck

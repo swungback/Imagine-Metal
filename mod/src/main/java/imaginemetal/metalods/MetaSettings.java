@@ -44,6 +44,14 @@ public final class MetaSettings {
 	 * longer bring their shadows in with them (Jack, 20 Nov). Not saved; -Dmetalods.lodShadows=false starts with it off.
 	 */
 	public static volatile boolean lodShadows = !"false".equals(System.getProperty("metalods.lodShadows"));
+	/**
+	 * (s1121) LOD pixels take the deferred lighting's open-air test (how open the air toward the sun is, from the far shadow map)
+	 * whenever that map holds the LOD casters (lodShadows), as real pixels do. Without it a LOD face with low sky light inside an
+	 * open sinkhole or under an overhang open to the sun was lit by the sky light alone: much darker than the real chunk's same
+	 * face, which showed as black speckle where the hand-over dither mixes the two (Jack's 16.38.25, the lush cave).
+	 * Not saved; -Dmetalods.lodOpenAir=false starts with it off.
+	 */
+	public static volatile boolean lodOpenAir = !"false".equals(System.getProperty("metalods.lodOpenAir"));
     /** Complementary screen-noise transition, enabled only over ready LOD coverage. */
     public static volatile boolean edgeDither = true;
 	/** Debug, not saved: each level drawn in its own colour. */

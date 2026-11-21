@@ -111,36 +111,52 @@ final class MetaMesher {
 			this.border(i, -1, i, 0, edges != null ? edges[2] : null, i);
 			this.border(i, N, i, N - 1, edges != null ? edges[3] : null, i);
 		}
-		// (corners: never looked at by the faces)
+		// (corners: never looked at by the faces. s1121: but the sky light spreads through them, and they held whatever the
+		// worker's previous column left there, so a column's light depended on which one was meshed before it: now this column's
+		// own corner cell, as an unknown side)
+		this.border(-1, -1, 0, 0, null, 0);
+		this.border(N, -1, N - 1, 0, null, 0);
+		this.border(-1, N, 0, N - 1, null, 0);
+		this.border(N, N, N - 1, N - 1, null, 0);
 		if (level >= 0) {
 			if (SKY_FILL) this.skyLight(level);
 			this.closeCaves(level);
 		}
 		// The y range that can hold faces: a voxel that differs from the one above it somewhere
 		int lo = h, hi = -1;
-		for (int z = -1; z <= N; z++) {
-			for (int x = -1; x <= N; x++) {
-				if ((x < 0 || x >= N) && (z < 0 || z >= N)) continue;
-				int a = this.at(x, z, 0);
-				for (int y = 0; y < h - 1; y++) {
-					if (g[a + y] != g[a + y + 1]) {
-						if (y < lo) lo = y;
-						if (y + 1 > hi) hi = y + 1;
+		if (MESH_FAST) {
+			// (s1121) where air, water and the rest meet: a face needs one of those changes (exposed(), and the skirts under a
+			// column's top). Ores, stone kinds and light made the old range reach deep under the ground for nothing, and the six
+			// face passes walked all of it (42 % of the meshing). Read off the column's runs (the grid only for the border ring):
+			// the caves closeCaves fills and the light skyLight sets only take such changes away, so the range still holds every face
+			this.kindRange(c);
+			lo = this.klo;
+			hi = this.khi;
+		} else {
+			for (int z = -1; z <= N; z++) {
+				for (int x = -1; x <= N; x++) {
+					if ((x < 0 || x >= N) && (z < 0 || z >= N)) continue;
+					int a = this.at(x, z, 0);
+					for (int y = 0; y < h - 1; y++) {
+						if (g[a + y] != g[a + y + 1]) {
+							if (y < lo) lo = y;
+							if (y + 1 > hi) hi = y + 1;
+						}
 					}
+					if (!Voxel.isAir(g[a + h - 1])) hi = h - 1;
 				}
-				if (!Voxel.isAir(g[a + h - 1])) hi = h - 1;
 			}
-		}
-		for (int z = 0; z < N; z++) {
-			for (int x = 0; x < N; x++) {
-				int a = this.at(x, z, 0), t = -1;
-				for (int y = h - 1; y >= 0; y--) {
-					if (!Voxel.isAir(g[a + y])) {
-						t = y;
-						break;
+			for (int z = 0; z < N; z++) {
+				for (int x = 0; x < N; x++) {
+					int a = this.at(x, z, 0), t = -1;
+					for (int y = h - 1; y >= 0; y--) {
+						if (!Voxel.isAir(g[a + y])) {
+							t = y;
+							break;
+						}
 					}
+					this.tops[x + z * N] = t;
 				}
-				this.tops[x + z * N] = t;
 			}
 		}
 		Arrays.fill(this.outN, 0);
@@ -208,6 +224,8 @@ final class MetaMesher {
 	static final int DIM = Integer.getInteger("metalods.caveDim", 4);
 	private byte[] light = new byte[0];
 	private int[] queue = new int[0];
+	/** (s1121) per grid column (x + 1 + (z + 1) B): the lowest y of its open sky (air from the top down), h when none */
+	private final int[] open = new int[B * B];
 
 	private boolean clear(int v) {
 		return Voxel.isAir(v) || Voxel.rank(v) != Voxel.KIND_SOLID;
@@ -236,15 +254,28 @@ final class MetaMesher {
 		int[] q = this.queue;
 		for (int z = -1; z <= N; z++) {
 			for (int x = -1; x <= N; x++) {
-				int a = this.at(x, z, 0);
-				for (int y = h - 1; y >= 0 && Voxel.isAir(g[a + y]); y--) L[a + y] = 15;
+				int a = this.at(x, z, 0), y = h - 1;
+				for (; y >= 0 && Voxel.isAir(g[a + y]); y--) L[a + y] = 15;
+				this.open[(z + 1) * B + x + 1] = y + 1;
 			}
 		}
 		// the open sky's edge: lit voxels next to unlit clear ones
+		int[] open = this.open;
 		for (int z = -1; z <= N; z++) {
 			for (int x = -1; x <= N; x++) {
-				int a = this.at(x, z, 0);
-				for (int y = h - 1; y >= 0 && L[a + y] == 15; y--) {
+				int a = this.at(x, z, 0), c = (z + 1) * B + x + 1, o = open[c], from = h - 1;
+				if (MESH_FAST) {
+					// (s1121) a side can be dark only below the bottom of that neighbour's open sky; above every neighbour's, only the
+					// run's own bottom can seed (its voxel under). sideDark was 20 % of the meshing, asked of every lit voxel. Same
+					// voxels, same order
+					int maxN = -1;
+					if (x > -1) maxN = Math.max(maxN, open[c - 1]);
+					if (x < N) maxN = Math.max(maxN, open[c + 1]);
+					if (z > -1) maxN = Math.max(maxN, open[c - B]);
+					if (z < N) maxN = Math.max(maxN, open[c + B]);
+					from = Math.max(o, Math.min(h - 1, maxN - 1));
+				}
+				for (int y = from; y >= o; y--) {
 					int i = a + y;
 					if (y > 0 && L[i - 1] == 0 && this.clear(g[i - 1]) || this.sideDark(x, z, y)) q[qn++] = i;
 				}
@@ -285,13 +316,17 @@ final class MetaMesher {
 				}
 			}
 		}
-		for (int i = 0; i < size; i++) {
-			int v = g[i];
-			if (Voxel.isAir(v) && Voxel.sky(v) == 15 && L[i] < 15) g[i] = (v & 0xF0FFFFFF) | L[i] << 24;
-			// (s1119: water takes the light worked out here where it is more: columns made from real chunks hold the game's sky light
-			// in their water, low over a deep bed)
-			else if (Voxel.rank(v) == Voxel.KIND_WATER && L[i] != Voxel.sky(v) && (Voxel.sky(v) == 15 || L[i] > Voxel.sky(v)))
-				g[i] = (v & 0xF0FFFFFF) | L[i] << 24;  // (generated water, made at 15, takes it as the air does)
+		// (s1121: a column's open sky is air at 15 both ways: nothing to do there, the pass stops under it)
+		for (int c = 0; c < B * B; c++) {
+			int a = c * h, end = a + (MESH_FAST ? open[c] : h);
+			for (int i = a; i < end; i++) {
+				int v = g[i];
+				if (Voxel.isAir(v) && Voxel.sky(v) == 15 && L[i] < 15) g[i] = (v & 0xF0FFFFFF) | L[i] << 24;
+				// (s1119: water takes the light worked out here where it is more: columns made from real chunks hold the game's sky
+				// light in their water, low over a deep bed)
+				else if (Voxel.rank(v) == Voxel.KIND_WATER && L[i] != Voxel.sky(v) && (Voxel.sky(v) == 15 || L[i] > Voxel.sky(v)))
+					g[i] = (v & 0xF0FFFFFF) | L[i] << 24;  // (generated water, made at 15, takes it as the air does)
+			}
 		}
 	}
 
@@ -353,6 +388,85 @@ final class MetaMesher {
 		}
 		return r;
 	}
+
+	private int klo, khi, k0;
+	private boolean bottomMixed, topSolid;
+
+	/**
+	 * (s1121) The face range (klo, khi) for mesh(): the lowest and highest y where a voxel's kindKey differs from the one above
+	 * in the column or its border ring; 0 when the columns' bottom voxels aren't all of one kind (side faces from the bottom up),
+	 * up to h - 1 when a top voxel isn't air (its top face, the skirts). Also each cell's top (tops()).
+	 */
+	private void kindRange(Rle c) {
+		int h = this.h;
+		this.klo = h;
+		this.khi = -1;
+		this.k0 = Integer.MIN_VALUE;
+		this.bottomMixed = false;
+		this.topSolid = false;
+		for (int z = 0; z < N; z++) {
+			for (int x = 0; x < N; x++) {
+				int cell = x + z * c.n, y = 0, pk = Integer.MIN_VALUE, top = -1;
+				boolean lastAir = true;
+				for (int r = c.offsets[cell]; r < c.offsets[cell + 1]; r++) {
+					int v = c.runs[2 * r], e = Math.min(c.runs[2 * r + 1], h);
+					if (e <= y) continue;
+					pk = this.step(pk, kindKey(v), y);
+					lastAir = Voxel.isAir(v);
+					if (!lastAir) top = e - 1;
+					y = e;
+				}
+				if (y < h) {
+					pk = this.step(pk, -1, y);
+					lastAir = true;
+				}
+				if (!lastAir) this.topSolid = true;
+				this.tops[x + z * N] = top;
+			}
+		}
+		int[] g = this.grid;
+		for (int i = 0; i < 4 * N; i++) {
+			int side = i / N, k = i % N;
+			int x = side == 0 ? -1 : side == 1 ? N : k, z = side == 2 ? -1 : side == 3 ? N : k;
+			int a = this.at(x, z, 0), pv = g[a], pk = this.step(Integer.MIN_VALUE, kindKey(pv), 0);
+			for (int y = 1; y < h; y++) {
+				int v = g[a + y];
+				if (v != pv) {
+					pk = this.step(pk, kindKey(v), y);
+					pv = v;
+				}
+			}
+			if (!Voxel.isAir(pv)) this.topSolid = true;
+		}
+		if (this.bottomMixed) this.klo = 0;
+		if (this.topSolid) {
+			this.khi = h - 1;
+			this.klo = Math.min(this.klo, h - 1);
+		}
+	}
+
+	/** kindRange's walk up a column: kind k from y on after kind pk (MIN_VALUE: the column's bottom). */
+	private int step(int pk, int k, int y) {
+		if (pk == Integer.MIN_VALUE) {
+			if (this.k0 == Integer.MIN_VALUE) this.k0 = k;
+			else if (k != this.k0) this.bottomMixed = true;
+		} else if (k != pk) {
+			if (y - 1 < this.klo) this.klo = y - 1;
+			if (y > this.khi) this.khi = y;
+		}
+		return k;
+	}
+
+	/** (s1121) What exposed() tells apart: air -1, else the voxel's kind (water, leaves, solid). */
+	private static int kindKey(int v) {
+		return Voxel.isAir(v) ? -1 : Voxel.rank(v);
+	}
+
+	/**
+	 * (s1121) -Dmetalods.meshFast=false: the mesher as in s1120 (the face range by any voxel change, the sky light's edge
+	 * searched over every lit voxel). Same quads either way (checked on 7000 stored columns, ci/metalods/MeshFastCheck).
+	 */
+	static final boolean MESH_FAST = !"false".equals(System.getProperty("metalods.meshFast"));
 
 	/** Water hides other water, but it must not erase the seabed or submerged cliffs. */
 	private static boolean exposed(int voxel, int front) {

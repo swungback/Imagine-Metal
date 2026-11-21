@@ -54,6 +54,10 @@ public final class ColdTp {
 	/** (fix24) the day time set at the teleport (-1: left as the save has it), so runs on different copies see the same sun */
 	private static long dayTime = -1;
 	private static double[] shots = new double[0];
+	/** (s1121) steps: "seconds:field=value" (comma separated), a MetaSettings (or "im." + Settings) field set on the render thread at
+	 * that time after the teleport, so one run gives matched shots of the same view with a setting on and off */
+	private static double[] stepAt = new double[0];
+	private static String[] stepSet = new String[0];
 
 	// timeline
 	private static volatile long tpNanos;           // 0 until teleported
@@ -97,6 +101,17 @@ public final class ColdTp {
 			dayTime = Long.parseLong(cfg.getProperty("time", "-1").trim());
 			String sh = cfg.getProperty("shots", "").trim();
 			if (!sh.isEmpty()) shots = Arrays.stream(sh.split(",")).map(String::trim).filter(v -> !v.isEmpty()).mapToDouble(Double::parseDouble).sorted().toArray();
+			String st = cfg.getProperty("steps", "").trim();
+			if (!st.isEmpty()) {
+				String[] parts = Arrays.stream(st.split(",")).map(String::trim).filter(v -> v.contains(":")).toArray(String[]::new);
+				Arrays.sort(parts, (a, b) -> Double.compare(Double.parseDouble(a.substring(0, a.indexOf(':'))), Double.parseDouble(b.substring(0, b.indexOf(':')))));
+				stepAt = new double[parts.length];
+				stepSet = new String[parts.length];
+				for (int k = 0; k < parts.length; k++) {
+					stepAt[k] = Double.parseDouble(parts[k].substring(0, parts[k].indexOf(':')));
+					stepSet[k] = parts[k].substring(parts[k].indexOf(':') + 1);
+				}
+			}
 			int side = 2 * ring + 1;
 			n = side * side;
 			tServer = new long[n];
@@ -117,6 +132,28 @@ public final class ColdTp {
 			System.out.println("[ColdTp] armed: " + label + " world " + world + " -> " + dx + "," + dz);
 		} catch (IOException | RuntimeException e) {
 			System.out.println("[ColdTp] config: " + e);
+		}
+	}
+
+	/** (s1121) one step: a static boolean/int/float field of MetaSettings ("im.name": imaginemetal.Settings) set from text */
+	private static void applyStep(String set) {
+		try {
+			String k = set.substring(0, set.indexOf('=')).trim(), v = set.substring(set.indexOf('=') + 1).trim();
+			Class<?> owner = imaginemetal.metalods.MetaSettings.class;
+			if (k.startsWith("im.")) {
+				owner = Settings.class;
+				k = k.substring(3);
+			}
+			var f = owner.getDeclaredField(k);
+			f.setAccessible(true);
+			Class<?> t = f.getType();
+			if (t == boolean.class) f.setBoolean(null, Boolean.parseBoolean(v));
+			else if (t == int.class) f.setInt(null, Integer.parseInt(v));
+			else if (t == float.class) f.setFloat(null, Float.parseFloat(v));
+			else if (t == double.class) f.setDouble(null, Double.parseDouble(v));
+			System.out.println("[ColdTp] step " + set + " at " + ms(System.nanoTime()) + " ms");
+		} catch (ReflectiveOperationException | RuntimeException e) {
+			System.out.println("[ColdTp] step " + set + " failed: " + e);
 		}
 	}
 
@@ -232,7 +269,7 @@ public final class ColdTp {
 			final boolean[] polling = {false};
 			long end = tpNanos + (long) (timeout * 1e9);
 			long allDrawnAt = 0;
-			int shot = 0;
+			int shot = 0, step = 0;
 			while (System.nanoTime() < end) {
 				long now = System.nanoTime();
 				if (!polling[0] && now >= nextPoll) {
@@ -270,7 +307,11 @@ public final class ColdTp {
 						System.out.println("[ColdTp] shot " + name);
 					});
 				}
-				if (allDrawnAt != 0 && now - allDrawnAt > 5_000_000_000L && shot >= shots.length) break;
+				if (step < stepAt.length && now - tpNanos >= (long) (stepAt[step] * 1e9)) {
+					final String set = stepSet[step++];
+					mc.execute(() -> applyStep(set));
+				}
+				if (allDrawnAt != 0 && now - allDrawnAt > 5_000_000_000L && shot >= shots.length && step >= stepAt.length) break;
 				Thread.sleep(10);
 			}
 			finished = true;

@@ -127,6 +127,13 @@ public final class MetaLods {
 	}
 
 	private static boolean saidShadow;
+	/** (s1121) the far shadow map (cascade 1) as last drawn holds the LOD casters (ImFrame env.w bit 128, lighting.metal) */
+	public static volatile boolean farMapHasLods;
+
+	/** (s1121) whether LOD pixels may take the lighting's open-air test this frame (MetaSettings.lodOpenAir) */
+	public static boolean lodOpenAir() {
+		return MetaSettings.lodOpenAir && farMapHasLods && MetaSettings.enabled && !failed;
+	}
 
 	/**
 	 * (s1120, Shadows after drawing a cascade's terrain casters) the LOD land around the real terrain into that cascade too, so the
@@ -134,6 +141,7 @@ public final class MetaLods {
 	 * camera-relative world -> light clip (column-major); the columns of the last frame's selection. Off: MetaSettings.lodShadows.
 	 */
 	public static void drawShadow(long enc, long shadow, int cascade, float[] m, double camX, double camY, double camZ, float slope) {
+		if (cascade == 1) farMapHasLods = false;
 		if (failed || !MetaSettings.enabled || !MetaSettings.lodShadows || lib == 0 || shadow == 0 || probe == 3 || !MetaNative.canShadow()) return;
 		MetaArena a = arena;
 		MetaWorld w = world;
@@ -144,6 +152,7 @@ public final class MetaLods {
 			if (groups <= 0) return;
 			int r = MetaNative.shadow(lib, enc, shadow, cascade, a.shadowFrame, MetaArena.FRAME_BYTES, a.shadowVisBuf[slot], a.shadowGroups, groups, a.infoBuf,
 				a.quadBuf, a.mask, MetaArena.MASK_BYTES, slope);
+			if (r == 1 && cascade == 1) farMapHasLods = true;
 			if (r == 1 && !saidShadow) {
 				saidShadow = true;
 				System.out.println("[MetaLODS] LOD shadow casters drawn (cascade " + cascade + ", " + w.shadowPages + " pages)");

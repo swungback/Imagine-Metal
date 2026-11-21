@@ -1408,7 +1408,11 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// (s1119: not for MetaLODS pixels: the maps hold no LOD casters, so under a LOD overhang the air read as open and the
 	// overhang's underside and the ground below were lit as daylight, where the real chunks are dark: Jack's "underpass".
 	// A LOD face's own sky light says it instead: the mesher works it out over the voxels, open water counting as open sky)
-	bool wantOpen = IM_FC_SHADOWS && !m.lod && f.ambientUp.w > 0.5 && f.flags.x == 0 && sky < 0.45 && f.env.x < 0.99 && f.water.z < 0.5;
+	// (s1121: again for MetaLODS pixels when the far map holds the LOD casters (env.w bit 128, since s1120): an overhang of LOD
+	// land now shadows the map like real land, and without the test a LOD face low in sky light inside an open sinkhole was lit
+	// by the sky light alone, near black beside the real chunk's same face: black speckle in the hand-over dither, Jack's
+	// 16.38.25. Past the far cascade the test finds nothing (cover 0), as before)
+	bool wantOpen = IM_FC_SHADOWS && (!m.lod || (uint(f.env.w + 0.5) & 128u) != 0u) && f.ambientUp.w > 0.5 && f.flags.x == 0 && sky < 0.45 && f.env.x < 0.99 && f.water.z < 0.5;
 	float2 sm = IM_FC_SHADOWS ? imShadowX(p, n, pixel, f, smap, cmp, wantOpen, oa) : float2(1.0, 0.0);
 	oa *= 1.0 - f.env.x;
 	if (oa > 0.0) skyF = max(skyF, 0.8 * oa);

@@ -35,6 +35,8 @@ final class MetaStore {
 	/** (fix24: 10: the structures are the game's own (LodStructurePreviews), not guessed sites: gen9 tiles hold houses where the
 	 * world has none; levels 4 and up have no structures and are read from gen9 or gen8) */
 	static final int GEN_VERSION = 10;
+	/** (s1121) as mcopt.metal.lod.LodStructurePreviews.VOXELS (that class isn't loaded with the store) */
+	static final boolean STRUCTURE_VOXELS = !"false".equals(System.getProperty("metalods.structureVoxels"));
 	/**
 	 * The real chunks' folder. real2 (fix9): only still water counts (a waterfall's flowing water is air to the LODs) and a
 	 * coarser voxel is water only when at least half of its eight is: the old files hold waterfalls grown into huge water
@@ -75,7 +77,9 @@ final class MetaStore {
     private String dirFor(int level) {
         // (-t3, fix21: level 0's soil by the rules' own depth and the ground's disks: made again)
         // (-s1, fix21: levels 1-3 with the surface structures from the seed; level 2+'s density every second voxel)
-        return level==0?this.genDir+"-t5":level<=3?this.genDir+"-s2":this.genDir;
+        // (-s3, s1121: levels 1-3's structures as voxels, mcopt.metal.lod.LodStructurePreviews: made again; -s2 still read with
+        // -Dmetalods.structureVoxels=false)
+        return level==0?this.genDir+"-t5":level<=3?this.genDir+(STRUCTURE_VOXELS?"-s3":"-s2"):this.genDir;
     }
     private Path surfacePath(int level,int cx,int cz) {
         return this.dir.resolve(this.dirFor(level)+"-surface").resolve("L"+level).resolve(cx+"."+cz+".bin");
