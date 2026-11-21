@@ -211,7 +211,7 @@ final class LodNoise {
 	/** MetaLODS must follow the world's router, including datapacks' terrain operators. */
 	static @Nullable LodNoise of(ServerLevel level, boolean worldRouter) {
 		if (!(level.getChunkSource().getGenerator() instanceof NoiseBasedChunkGenerator gen)) return null;
-		if (level.dimensionType().hasCeiling()) return null;
+		if (level.dimensionType().hasCeiling() && !(worldRouter && level.dimension().equals(net.minecraft.world.level.Level.NETHER))) return null;
 		NoiseGeneratorSettings settings = gen.generatorSettings().value();
 		RandomState random = level.getChunkSource().randomState();
 		DensityFunction terrain = settings.noiseRouter().finalDensity();
@@ -424,6 +424,10 @@ final class LodNoise {
 
 	int volumeNy() {
 		return (this.maxY - this.minY) / STEP_Y + 1;
+	}
+
+	Holder<Biome> biomeAt(int x, int y, int z) {
+		return this.workers.get().resolver.getNoiseBiome(x >> 2, y >> 2, z >> 2);
 	}
 
 	/** The top face of the water the game's aquifer puts over a column's ground (DRY: none; under sea level only). */

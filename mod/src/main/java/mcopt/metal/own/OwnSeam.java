@@ -4,6 +4,7 @@ import java.util.Arrays;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.ViewArea;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.levelgen.Heightmap;
 import org.jspecify.annotations.Nullable;
@@ -182,7 +183,15 @@ public final class OwnSeam {
 		int cx = sx - vd + Math.floorMod(xg - (sx - vd), g), cz = sz - vd + Math.floorMod(zg - (sz - vd), g);
 		boolean ready = false;
 		LevelChunk chunk = level.getChunkSource().getChunk(cx, cz, false);
-		if (chunk != null) {
+		if (chunk != null && level.dimension().equals(Level.NETHER)) {
+			// The exterior roof need not be compiled while inside a cavern. Use the cavern's own
+			// compiled sections near the camera, where the LOD mesh otherwise overlaps real faces.
+			int first = Math.max(minSy, sy - Math.min(2, vd));
+			int last = Math.min(maxSy, sy + Math.min(2, vd));
+			for (int y = first; y <= last && !ready; y++) {
+				ready = own.compiledAt((zg * h + y - minSy) * g + xg, cx << 4, y << 4, cz << 4);
+			}
+		} else if (chunk != null) {
 			// The sections that hold the chunk's surface: the one with each column's top block (WORLD_SURFACE gives the y above
 			// it). Not every section between the lowest and highest top: in a chunk with a ravine or a cave mouth those include
 			// sealed sections vanilla never compiles, so the chunk never counted as drawn and its LOD stayed for good, poking out of

@@ -73,7 +73,7 @@ public final class MetaLods {
 
 	/** The reach in blocks while MetaLODS draws, else 0. */
 	public static float reach() {
-		return active() ? MetaSettings.distance * 16f : 0f;
+		return active() ? world.reachLimit() : 0f;
 	}
 
 	/** (OwnTerrain.drawOpaque) this frame's camera-relative clip, camera and block atlas. */
@@ -252,7 +252,8 @@ public final class MetaLods {
 			worldLevel = level;
 			synchronized (pendingEdits) { pendingEdits.clear(); }
 			if (level == null || arena == null) return null;
-			if (level.dimensionType().hasCeiling()) {
+			if (level.dimensionType().hasCeiling()
+				&& !(MetaSettings.netherLods && level.dimension().equals(net.minecraft.world.level.Level.NETHER))) {
 				System.out.println("[MetaLODS] " + level.dimension().identifier() + " has a ceiling: no LODs there");
 				return null;
 			}

@@ -1,10 +1,13 @@
 package mcopt.metal.lod;
 
 import imaginemetal.metalods.Rle;
+import imaginemetal.metalods.Voxel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
@@ -28,6 +31,7 @@ public final class MetaGen {
 	}
 
 	private final LodNoise noise;
+	private final boolean nether;
 	/** Levels 2 and up: the terrain without its caves (LodNoise.far), or null (then `noise` at every level). */
 	private final @Nullable LodNoise far;
 	/** The game's trees on the far terrain's ground (level-0 tiles made with `far`), or null. */
@@ -89,6 +93,7 @@ public final class MetaGen {
 
 	private MetaGen(LodNoise noise, @Nullable LodNoise far, @Nullable LodForest forest, @Nullable LodForest farForest) {
 		this.noise = noise;
+		this.nether = noise.level.dimension().equals(Level.NETHER);
 		this.far = far;
 		this.farForest = farForest;
 		if (far != null) far.stageNanos = noise.stageNanos;  // (one stats line: the far one only fills levels 2+)
@@ -99,12 +104,13 @@ public final class MetaGen {
 		this.snow = Blocks.SNOW_BLOCK.defaultBlockState();
 	}
 
-	/** A generator for the level, or null where it can't be done (not noise based, a ceiling: the Nether). */
+	/** A generator for the level, or null for unsupported dimensions or generators. */
 	public static @Nullable MetaGen of(ServerLevel level, boolean trees) {
 		LodNoise n = LodNoise.of(level, true);
 		if (n == null) return null;
 		// Sample the actual router for both surface and volume; no vanilla sloped-cheese substitution.
 		n.fineLevels = 0;
+		if (level.dimension().equals(Level.NETHER)) return new MetaGen(n, null, null, null);
 		LodForest f = null;
 		if (trees) {
 			try {
@@ -169,6 +175,7 @@ public final class MetaGen {
 		return this.far != null;
 	}
     private Rle[] generate(int level,int tx,int tz,int minY,int height,boolean exactTrees,int airSky,boolean overhangs,boolean preview,boolean cheap,Ids ids) {
+		if (this.nether) return this.netherVolume(level, tx, tz, minY, height, ids);
 		LodTile t = new LodTile(level, tx, tz);
         t.surfacePreview=preview;
 		LodNoise noise = (cheap || level >= 2) && this.far != null ? this.far : this.noise;
@@ -282,6 +289,75 @@ public final class MetaGen {
 		ALLOC.addAndGet(ta + 2, a3 - a2);
 		ALLOC.addAndGet(ta + 3, allocated() - a3);
 		mcopt.metal.lod.LodBuffers.tick();
+		return out;
+	}
+
+	/** In a ceiling dimension there is no single surface. Sample the full density lattice, keeping every solid and open run. */
+	private Rle[] netherVolume(int level, int tx, int tz, int minY, int height, Ids ids) {
+		long start = System.nanoTime(), allocated = allocated();
+		int cell = 1 << level, h = Math.max(1, height >> level);
+		int x0 = tx * LodTile.SIZE * cell, z0 = tz * LodTile.SIZE * cell;
+		int stride = LodNoise.stride(level, cell), grid = LodTile.SIZE * cell / stride + 1;
+		int ny = this.noise.volumeNy(), y0 = this.noise.volumeY0();
+		float[] density = this.noise.terrainVolume(x0, z0, grid, stride);
+		long sampled = System.nanoTime(), sampleBytes = allocated();
+		int rock = ids.block(this.stone), fluid = ids.block(this.noise.settings.defaultFluid());
+		int basalt = ids.block(Blocks.BASALT.defaultBlockState()), soul = ids.block(Blocks.SOUL_SOIL.defaultBlockState());
+		Rle.Builder builder = new Rle.Builder(32, h, 0);
+		int[] column = new int[h];
+		float[] vertical = new float[ny];
+		Rle[] out = new Rle[4];
+		for (int q = 0; q < out.length; q++) {
+			builder.reset();
+			int ox = (q & 1) * 32, oz = (q >> 1) * 32;
+			for (int z = 0; z < 32; z++) for (int x = 0; x < 32; x++) {
+				int dx = (ox + x) * cell + cell / 2, dz = (oz + z) * cell + cell / 2;
+				int ix = dx / stride, iz = dz / stride;
+				float fx = (dx % stride) / (float) stride, fz = (dz % stride) / (float) stride;
+				int a = (ix + iz * grid) * ny, b = a + grid * ny;
+				for (int k = 0; k < ny; k++) vertical[k] = lerp2(density[a + k], density[a + ny + k], density[b + k], density[b + ny + k], fx, fz);
+				int light = 0, biome = 0, surface = rock;
+				Holder<Biome> lastBiome = null;
+				int lastQuartY = Integer.MIN_VALUE;
+				for (int v = 0; v < h; v++) {
+					int y = minY + v * cell + cell / 2;
+					if (y > this.noise.maxY || y < this.noise.minY) {
+						column[v] = 0;
+						continue;
+					}
+					if (y / 16 != lastQuartY) {
+						lastQuartY = y / 16;
+						Holder<Biome> here = this.noise.biomeAt(x0 + dx, y, z0 + dz);
+						if (here != lastBiome) {
+							lastBiome = here;
+							biome = ids.biome(here) << 16;
+							surface = here.is(Biomes.BASALT_DELTAS) ? basalt : here.is(Biomes.SOUL_SAND_VALLEY) ? soul : rock;
+						}
+					}
+					float fy = (y - y0) / 8f;
+					int low = Math.min((int) fy, ny - 1), high = Math.min(low + 1, ny - 1);
+					boolean solid = vertical[low] + (vertical[high] - vertical[low]) * (fy - low) > 0f;
+					if (solid) {
+						column[v] = surface | biome;
+						light = 0;
+					} else if (y < this.noise.seaLevel && fluid != 0) {
+						column[v] = fluid | biome;
+						light = 15;
+					} else {
+						light = Math.max(0, light - cell);
+						column[v] = Voxel.air(0, light);
+					}
+				}
+				builder.column(x, z, column);
+			}
+			out[q] = builder.build();
+		}
+		int slot = level * 5;
+		NANOS.addAndGet(slot + 2, sampled - start);
+		NANOS.addAndGet(slot + 3, System.nanoTime() - sampled);
+		NANOS.incrementAndGet(slot + 4);
+		ALLOC.addAndGet(level * 4 + 2, sampleBytes - allocated);
+		ALLOC.addAndGet(level * 4 + 3, allocated() - sampleBytes);
 		return out;
 	}
 

@@ -98,6 +98,11 @@ final class MetaMesher {
 
 	/** As above; level >= 0: the column's level (pockets of dark air are closed, see closeCaves), -1: as stored. */
 	Mesh mesh(Rle c, int @Nullable [][] edges, int level) {
+		return this.mesh(c, edges, level, false);
+	}
+
+	/** A Nether cavern can have zero skylight throughout and still be visible from an adjacent cavern. */
+	Mesh mesh(Rle c, int @Nullable [][] edges, int level, boolean nether) {
 		this.fast = meshAB ? (this.abCount++ & 1) == 0 : meshFast;
 		long t0 = System.nanoTime();
 		int h = c.h;
@@ -120,7 +125,7 @@ final class MetaMesher {
 		this.border(N, -1, N - 1, 0, null, 0);
 		this.border(-1, N, 0, N - 1, null, 0);
 		this.border(N, N, N - 1, N - 1, null, 0);
-		if (level >= 0) {
+		if (level >= 0 && !nether) {
 			if (SKY_FILL) this.skyLight(level);
 			this.closeCaves(level);
 		}
@@ -280,7 +285,7 @@ final class MetaMesher {
 					if (z < N) maxN = Math.max(maxN, open[c + B]);
 					from = Math.max(o, Math.min(h - 1, maxN - 1));
 				}
-				for (int y = from; y >= o; y--) {
+				for (int y = Math.min(from, h - 1); y >= o; y--) {
 					int i = a + y;
 					if (y > 0 && L[i - 1] == 0 && this.clear(g[i - 1]) || this.sideDark(x, z, y)) q[qn++] = i;
 				}

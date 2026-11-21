@@ -629,6 +629,7 @@ public final class ImagineFrame {
 		System.arraycopy(present(ncl), 0, netherFog, 0, 3);
 		System.arraycopy(present(nsl), 0, netherStorm, 0, 3);
 		float farM = Math.min(Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f, 256f);
+		if (dim == 1) farM = Math.max(farM, Math.min(farM + 96f, imaginemetal.metalods.MetaLods.reach()));
 		netherFar = farM;
 		// (the End: w minus the render distance, for Reimagined's border fog there into its violet sky)
 		boolean endFog = dim == 2 && Settings.sky && camera.fogType == net.minecraft.world.level.material.FogType.NONE;

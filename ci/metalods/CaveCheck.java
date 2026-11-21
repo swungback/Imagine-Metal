@@ -37,6 +37,13 @@ public final class CaveCheck {
         check(m.mesh(c2, null, 2).total() < m.mesh(c2, null).total(), "level-2 pocket closed");
         Rle c3 = col(stack(64, new int[][]{{0, 20, 3}, {5, 12, dark}}));
         check(m.mesh(c3, null, 2).total() == m.mesh(c3, null).total(), "level-2 tall pocket kept");
+        // A Nether passage has dark air even where a player can see straight through it.
+        Rle.Builder cavern = new Rle.Builder(32, 128, dark);
+        int[] passage = stack(128, new int[][]{{0, 32, 3}, {32, 50, dark}, {50, 128, 3}});
+        for (int z = 0; z < 32; z++) for (int x = 0; x < 32; x++) cavern.column(x, z, passage);
+        Rle roof = cavern.build();
+        check(m.mesh(roof, null, 0).counts[3] == 0, "overworld cleanup removes the covered pocket");
+        check(m.mesh(roof, null, 0, true).counts[3] == 1, "Nether keeps the downward-facing cavern ceiling");
         System.out.println("PASS cave closing: " + open + " -> " + closed + " quads; island/water, tall, lit, level-scaled cases kept");
     }
 }

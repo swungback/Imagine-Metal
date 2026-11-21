@@ -1,3 +1,51 @@
+# 2026-11-21 — Nether cavern LODs and screenshot triage
+
+Installed `claude-scratch/codex-s1121-nether/imagine-metal-s1121-nether-caverns.jar` (SHA256
+`caf50d5dec5a538a450b755f8e91dd946ad4824678aba5ffb72690006aab98e2`). Rollback is the LabPBR release
+in the previous entry. The original final7 is preserved. ColdTp disabled, render distance 6, render scale 67%.
+
+Measured the stock mesher on a 32×32 uniform slice with an 18-block-high dark passage. As stored it emitted
+7 quads including a ceiling underside. The Overworld cleanup emitted 5 quads and no underside with sky
+relighting off. With sky relighting on, a fully blocked neighboring column could send the scan past its
+last voxel. Nether meshing now keeps the dark air and skips skylight reconstruction. The general scan was
+also bounded. The regression fixture verifies that the Overworld still closes its redundant pocket and
+that the Nether emits the downward-facing ceiling.
+
+Nether seed tiles use the dimension's 3D density and fluid level. They keep separate rock and open runs
+through each column and use the resolved biome to distinguish basalt deltas and soul sand valleys. Real
+chunk captures replace estimates. Nether LODs have up to 24 chunks of reach and use the existing biome
+haze. There is no Streams, Overworld cave stripping, or Overworld structure preview in the Nether.
+Use `-Dmetalods.netherLods=false` to restore the previous dimension guard.
+
+The first run showed a block-sized checker pattern in one cavern. It persisted with edge dithering and
+LOD texture sampling disabled. The ownership view showed alternating real and LOD faces. The near
+handoff looked for the exterior roof section because it owns the WORLD_SURFACE heightmap. The Nether
+handoff now looks for compiled sections within two sections of the camera vertically. The Overworld
+and End still use their surface sections.
+
+Matched ColdTp views at (0.5, 53, 0.5), yaw/pitch 0, and (25.5, 56, 45.5), yaw -45, pitch 3.
+The near wall's checker disappeared with the corrected handoff. The real rd 12 reference at the second
+spot shows the distant pillar and cavern underside that are visible at rd 6 with LODs. The comparison is
+`nether-caverns-comparison.jpg` in the session folder. The final run logged 184,737–261,308 drawn
+quads, including 49,275–63,671 undersides, in sampled windows around these views. The first cold test
+generated 123 tiles in 9.9 seconds. Its stable windows were near 16.7 ms median frame time. The final
+comparison ran at an apparent 10 fps pacing cap, so it provides visual verification only.
+Seeded materials are biome approximations and lack the structures and vegetation of captured chunks.
+The LOD checks passed, including the new cavern regression.
+
+The screenshots at 18:41 and 18:48 show cave speckling near (-92, 65, -9) and grid-aligned terrain
+stripes near (-167, 75, -243). At 18:46–18:47,
+the barrel's relief looks inverted and a seam moves across the cobblestone as the view turns. The log
+confirms SPBR-22_6 loaded 4059 maps for the material screenshots. The cobblestone height map has recessed
+texels along all four edges. The two barrel samples have full-height edges. At 18:56 the End ring effect
+has a horizontal cutoff near (1, 1864, -1). These reports still need matched reproductions and separate fixes.
+
+The 1.20.1 instance currently uses Forge 47.4.10. Imagine Metal's Fabric build targets the 26.3
+RenderPearl device and command-encoder interfaces, and uses Java 25. A native Metal port needs a
+1.20.1 client rendering bridge, chunk and world-generation adapters, and loader-specific integration.
+The native shaders and voxel mesh algorithms provide reusable code. Start a separate 1.20.1 port
+after the 26.3 renderer is stable.
+
 # 2026-11-21 — LabPBR materials and Nether smoke test
 
 The LabPBR loader found all three test maps, but matched screenshots showed no material response. A shader probe

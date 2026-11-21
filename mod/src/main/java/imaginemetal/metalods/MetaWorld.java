@@ -43,6 +43,7 @@ final class MetaWorld {
 	final int minY, height;
 	final boolean skyLight;
 	private final boolean end;
+	private final boolean nether;
 	/** Generated LODs in 3D (MetaSettings.overhangs as the world was loaded). */
 	private final boolean overhangs;
 	final MetaStore store;
@@ -236,10 +237,11 @@ final class MetaWorld {
 		this.height = Math.clamp(level.getHeight() / 32 * 32, 32, 512);
 		this.skyLight = level.dimensionType().hasSkyLight();
 		this.end = level.dimension().equals(net.minecraft.world.level.Level.END);
+		this.nether = level.dimension().equals(net.minecraft.world.level.Level.NETHER);
 		this.arena = arena;
 		this.server = server;
-        if(server!=null)mcopt.metal.lod.LodTrees.configure(server);
-        this.streams = server == null ? null : mcopt.metal.lod.LodStreams.create(server);
+        if (server != null && !this.nether) mcopt.metal.lod.LodTrees.configure(server);
+        this.streams = server == null || this.nether ? null : mcopt.metal.lod.LodStreams.create(server);
 		this.overhangs = MetaSettings.overhangs;
 		this.store = new MetaStore(dir, level.registryAccess(), this.overhangs);
 		int n = MetaSettings.workerThreads();
@@ -278,6 +280,10 @@ final class MetaWorld {
 
 	static long key(int level, int cx, int cz) {
 		return (long) level << 58 | (long) (cx & 0x1FFFFFFF) << 29 | (cz & 0x1FFFFFFF);
+	}
+
+	float reachLimit() {
+		return (this.nether ? Math.min(MetaSettings.distance, 24) : MetaSettings.distance) * 16f;
 	}
 
 	int airSky() {
@@ -410,7 +416,7 @@ final class MetaWorld {
 			if (edges[side] != null) known |= 1 << side;
 		}
 		long t1 = System.nanoTime(), am = mcopt.metal.lod.MetaGen.allocated();
-		MetaMesher.Mesh m = mesher.mesh(center, edges, c.level);
+		MetaMesher.Mesh m = mesher.mesh(center, edges, c.level, this.nether);
 		m.splitWater();
 		long am2 = mcopt.metal.lod.MetaGen.allocated();
 		this.meshAlloc.addAndGet(am2 - am);
@@ -1296,7 +1302,7 @@ final class MetaWorld {
 		this.camX = camX;
 		this.camY = camY;
 		this.camZ = camZ;
-		this.reach = MetaSettings.distance * 16f;
+		this.reach = this.reachLimit();
         this.transitionLimit = (renderDistance + 2) * 16f;
         this.transitionCandidate = MetaSettings.edgeDither && MetaSettings.hideUnderReal && MetaSettings.coverageDebug == 0
             && renderDistance >= 4 && this.reach > this.transitionLimit * 1.42f ? (renderDistance - 1) * 16f : 0f;
