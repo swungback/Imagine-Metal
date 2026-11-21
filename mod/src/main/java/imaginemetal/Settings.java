@@ -42,6 +42,8 @@ public final class Settings {
 	public static volatile int stars = (int) Config.number("imaginemetal.stars", 1, 0, 1);
 	/** the End's sky: 0 Reimagined's violet with its beams, 1 a black hole (after Iteration's) */
 	public static volatile int endStyle = (int) Config.number("imaginemetal.endStyle", 0, 0, 1);
+	/** Use the LOD horizon for the Black hole sky's terrain fog. -Dimaginemetal.endLodClarity=false restores the old curve. */
+	public static volatile boolean endLodClarity = Engine.flag("imaginemetal.endLodClarity", true);
 	public static volatile boolean shootingStars = Engine.flag("imaginemetal.shootingStars", true);
 	public static volatile boolean wet = Engine.flag("imaginemetal.wet", true);
 	public static volatile boolean intenseDeepDark = Engine.flag("imaginemetal.intenseDeepDark", true);

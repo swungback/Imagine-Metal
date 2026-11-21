@@ -2406,7 +2406,15 @@ static float4 imFogTail(float4 color, float3 imPos, uint imMat, float fogValue, 
 			// islands fade into a bright mist on its side and into the dark on the other)
 			float nu = dot(imPos / max(dist, 1e-3), normalize(imf.lightDir.xyz));
 			float hg = 0.0795775 * (1.0 - 0.49) / pow(1.0 + 0.49 - 1.4 * nu, 1.5);
-			imFog = max(1.0 - exp(-min(dist, 512.0) * 0.0028), imFog);
+			if (imf.nether.y > 0.0) {
+				// A gentle atmospheric haze across both real chunks and LODs. Only the far
+				// edge should dissolve into the sky, where the available terrain runs out.
+				float haze = 0.4 * (1.0 - exp(-dist * 0.007));
+				float edge = smoothstep(0.92, 1.0, length(imPos.xz) / imf.nether.y);
+				imFog = mix(haze, 1.0, edge);
+			} else {
+				imFog = max(1.0 - exp(-min(dist, 512.0) * 0.0028), imFog);
+			}
 			imFogColor = pow(imPresent(float3(0.54, 0.49, 0.48) * (0.01 + 0.9 * hg), imf), 1.0 / 2.2);  // (IterationT's EndFog: the 6000 K light's white)
 		}
 	} else if (imf.water.z > 0.5 && imf.flags.x == 0 && imf.water.x > 0.5) {

@@ -608,9 +608,12 @@ public final class ImagineFrame {
 		netherFar = farM;
 		// (the End: w minus the render distance, for Reimagined's border fog there into its violet sky)
 		boolean endFog = dim == 2 && Settings.sky && camera.fogType == net.minecraft.world.level.material.FogType.NONE;
-		// (in the End, x the sky's style)
-		if (dim == 2) put(Settings.endStyle, 0f, 0f, endFog ? -Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f : 0f);
-		else put(netherFog[0], netherFog[1], netherFog[2], netherHaze ? farM : 0f);
+		// In the End, x is the sky style and y is the active Black hole LOD fog horizon.
+		if (dim == 2) {
+			float realReach = Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f;
+			float lodReach = Settings.endStyle == 1 && Settings.endLodClarity ? imaginemetal.metalods.MetaLods.reach() : 0f;
+			put(Settings.endStyle, lodReach > realReach ? lodReach : 0f, 0f, endFog ? -realReach : 0f);
+		} else put(netherFog[0], netherFog[1], netherFog[2], netherHaze ? farM : 0f);
 		float[] pc = Settings.portals ? LightVolume.portalCentre(cam.x, cam.y, cam.z) : null;
 		put(Settings.portals ? 1f : 0f, Settings.glassSun && Settings.coloredLight && LightVolume.glassInGrid() ? 1f : 0f, pc != null ? 1f : 0f,
 			Settings.nebula && dim == 0 ? 1f : 0f);

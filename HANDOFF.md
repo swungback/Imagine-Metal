@@ -1,3 +1,28 @@
+# 2026-11-21 — Black hole End island visibility
+
+Installed `claude-scratch/codex-s1121-end/imagine-metal-s1121-end-clarity.jar` (SHA256 4c0f3ac9158c6887b8e4dfb8e4647480e66912184a8d19bf8e51ac20741c509c).
+Rollback for this change is `claude-scratch/codex-s1121/imagine-metal-codex-s1121-buffered-final.jar`. The final7 rollback
+is preserved. ColdTp is disabled, render distance is 6, and the preferred sky style and render scale were restored.
+
+In Black hole mode, `imFogTail` previously applied the real render-distance fog curve to both real and LOD pixels.
+At rd 12 it mixes 95% fog at 192 blocks and essentially 100% at 512 blocks. The new curve keeps the directional color,
+caps atmospheric haze at 40%, and applies the final fade over the last 8% of the active LOD distance. It applies across
+the real-to-LOD boundary. Toggle `-Dimaginemetal.endLodClarity=false` to restore the old curve, or toggle the setting live
+in ColdTp. Reimagined and Black hole with no farther LOD horizon use their existing curves.
+
+ColdTp `codex-end-clarity` used (0.5, 113, -105.5), yaw -60, pitch 7 and time 5000. Matched before/after shots at
+rd 6 (15 and 19 s) and rd 12 (29 and 33 s) show the outer islands' stone color, ledges and chorus plants. The Black hole
+sky still uses its wall-clock animation and the void streaks are visible. `islands-before-after.jpg` in the session folder
+shows the comparison. The MetalLODS checks passed.
+
+Enderman motion probe at (0.5, 76, -32.5), yaw 0, pitch 12. The server held 20 ticks/s. Captured MetalFX, built-in TAA,
+and MetalFX with mob subpixel compensation toggled off and back on. In one mostly stationary Enderman crop, the median
+horizontal silhouette shift was 0.19 px per captured frame with compensation off and 0.05 px after restoring it. This
+does not isolate the walking jitter. The clip used uncontrolled mob movement, and the 60 fps recorder repeated
+302 of 1,740 frames. The temporal scaler receives camera motion from depth. Independent mob motion has only the reactive
+mask. The installed build uses the original mob rendering settings. Raw capture and timestamps are `endermen.mp4` and
+`endermen.mp4.csv` in the session folder.
+
 # 2026-11-21 — Codex s1121 renderer investigation
 
 The working tree is on s1121, based on origin/s1121 (146d1df). The tracked source matched that revision byte-for-byte before
