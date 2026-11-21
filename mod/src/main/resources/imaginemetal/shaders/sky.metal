@@ -183,6 +183,7 @@ static float3 itRayPlane(float3 ori, float3 dir, float3 normal) {
 
 // the planet's place in its 15-minute circle round the horizon (timeFactor), and how much of the light it lets through
 static float itTimeFactor(constant ImFrame &f) {
+	if (f.nether.z >= 0.0) return f.nether.z;
 	return fract(f.world.w * ((1.0 / 60.0) / 15.0) + 0.282) * 6.28318531;
 }
 

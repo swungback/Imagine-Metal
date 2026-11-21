@@ -29,6 +29,8 @@ public final class MetaSettings {
 	 * the game's trees) reaches. 4 to 16; 16 = as detail.
 	 */
 	public static volatile int farDetail = 6;
+	/** Extend the 2- and 4-block voxel ranges across the End's void. */
+	public static volatile boolean endFineLods = !"false".equals(System.getProperty("metalods.endFineLods"));
 	/** Terrain never visited is filled in from the world seed (singleplayer only: a server's seed isn't known). */
 	public static volatile boolean generate = true;
 	/** The game's own trees on the nearest generated LODs (slower to generate than the biome's estimate). */

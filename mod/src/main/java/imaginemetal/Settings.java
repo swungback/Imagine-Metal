@@ -44,6 +44,8 @@ public final class Settings {
 	public static volatile int endStyle = (int) Config.number("imaginemetal.endStyle", 0, 0, 1);
 	/** Use the LOD horizon for the Black hole sky's terrain fog. -Dimaginemetal.endLodClarity=false restores the old curve. */
 	public static volatile boolean endLodClarity = Engine.flag("imaginemetal.endLodClarity", true);
+	/** Synchronize the Black hole eclipse and add fill light to the terrain. */
+	public static volatile boolean endLighting = Engine.flag("imaginemetal.endLighting", true);
 	public static volatile boolean shootingStars = Engine.flag("imaginemetal.shootingStars", true);
 	public static volatile boolean wet = Engine.flag("imaginemetal.wet", true);
 	public static volatile boolean intenseDeepDark = Engine.flag("imaginemetal.intenseDeepDark", true);

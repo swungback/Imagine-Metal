@@ -1,3 +1,36 @@
+# 2026-11-21 — Brighter Black hole lighting and finer End islands
+
+Installed `claude-scratch/codex-s1121-end-detail/imagine-metal-s1121-end-lit-detail.jar`
+(SHA256 46c13cd0531fbdba2e28703467a4705b5fbd48f08e12cbf54f49cfd215e9de54).
+Rollback for this change is `claude-scratch/codex-s1121-end/imagine-metal-s1121-end-clarity.jar`. ColdTp is disabled,
+render distance is back to 6, and render scale is still 67%.
+
+The supplied IterationT 3.2.0 archive uses one 15-minute planet phase for the sky and terrain lighting. It also uses
+adaptive exposure and bounced light. Our port used a 3600-second wrap for lighting and a 1000-second wrap for the sky.
+For example, at clock time 1636 seconds the old terrain phase is in full eclipse while the sky phase shows full sunlight.
+The Black hole sky and terrain now read one phase, which starts in the lit part of the cycle when entering the End.
+Brighter fill approximates bounced light and keeps shadowed terrain readable during an eclipse. Toggle
+`-Dimaginemetal.endLighting=false` to restore the previous lighting and clocks. This is a match to the lighting behavior
+identified in the supplied shaders, with a measured fill adjustment to Imagine Metal's own lighting.
+
+At (0.5, 113, -105.5), yaw -60, pitch 7, world time 5000, the same shadowed patch averaged 36.4 → 53.1 during eclipse
+and 69.8 → 89.0 outside eclipse (0–255 brightness). ColdTp pinned each planet phase for the comparison. The view was
+also checked after unpinning the phase. The separate streaks in the sky are visible in this run.
+
+End LODs extend the 2- and 4-block voxel ranges. With detail 4, far detail 6 and distance 112 chunks, the 2-block range
+now extends to about 1536 blocks instead of 768. The 4-block level reaches the 1792-block horizon, and the nearest
+1-block range retains its existing cutoff. Toggle `-Dmetalods.endFineLods=false` for the previous detail falloff.
+In the same End view, 54,213 → 156,904 drawn quads and 1200 → 2360 visible-column requests. After the finer view was
+ready, the comparable 10-second perf windows showed 16.7 → 16.7 ms median frame time, 22.7 → 27.3 ms p99 and
+3.07 → 3.30 ms terrain GPU time. The warmed-save detail switch generated 140 additional tiles in about 10 seconds and
+had a 166 ms maximum frame during loading. The finer view still had 87,029 of 98,304 arena pages free.
+The matched rd 6 shots (30 and 56 s), rd 12 shot at the same pose (64 s), and rd 12 closer reference at
+(910.5, 113, 420.5) (81 s) are in `end-lighting-and-detail.jpg`. `end-detail-crop.jpg` shows the ledges at full pixel size.
+Existing renderer checks passed.
+
+Nether design decision from Jack: keep downward-facing natural cavern ceilings. Exclude the exterior bedrock slab and
+use the dimension's biome fog and ambient light. Implementation remains deferred.
+
 # 2026-11-21 — Black hole End island visibility
 
 Installed `claude-scratch/codex-s1121-end/imagine-metal-s1121-end-clarity.jar` (SHA256 4c0f3ac9158c6887b8e4dfb8e4647480e66912184a8d19bf8e51ac20741c509c).

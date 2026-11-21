@@ -133,6 +133,10 @@ public final class ImagineFrame {
 	private static final float[] END_LIGHT = {0.52f, 0.40f, 0.74f};
 	private static final float[] END_SKY = {0.095f, 0.068f, 0.15f};
 	/** where the End's black hole hangs (Settings.endStyle 1): low in the sky, so the islands throw long shadows */
+	private static final double END_CYCLE_SECONDS = 900.0;
+	private static ClientLevel endCycleLevel;
+	private static long endCycleStart;
+	private static float endPhaseOverride = -1f;  // ColdTp can pin the phase for matched lighting comparisons.
 	private static final float[] BLACK_HOLE = {0.8565f, 0.2764f, 0.4359f};  // (IterationT's End light: its shadowModelViewInverseEnd[2])
 	/** The moon's light by phase (vanilla's index: 0 full ... 4 new). */
 	private static final float[] MOON_PHASE = {1f, 0.8f, 0.6f, 0.4f, 0.25f, 0.4f, 0.6f, 0.8f};
@@ -212,6 +216,19 @@ public final class ImagineFrame {
 		rain = Math.max(rain, thunder);
 		int dim = sky.skybox == DimensionType.Skybox.OVERWORLD ? 0 : sky.skybox == DimensionType.Skybox.END ? 2 : 1;
 		dimNow = dim;
+		boolean blackHoleEnd = dim == 2 && Settings.endStyle == 1;
+		boolean endLighting = blackHoleEnd && Settings.endLighting;
+		if (!blackHoleEnd) endCycleLevel = null;
+		else if (endCycleLevel != level) {
+			endCycleLevel = level;
+			endCycleStart = System.nanoTime();
+		}
+		float endPhase = endPhaseOverride;
+		if (endLighting && endPhase < 0f) {
+			// Start lit when entering the End. The sky and terrain share the entire 15-minute cycle.
+			double seconds = (System.nanoTime() - endCycleStart) / 1e9;
+			endPhase = (float) (((seconds / END_CYCLE_SECONDS + 0.32) % 1.0) * Math.TAU);
+		}
 
 		float[] lightDir = {0f, 1f, 0f}, light = new float[3], up = new float[3], down = new float[3];
 		float day = 0f, sunFlag = 0f;
@@ -370,13 +387,20 @@ public final class ImagineFrame {
 			normalize(lightDir);
 			// (IterationT's End (world1/composite.fsh): a 6000 K white light, the shade a sixtieth of it, both dimmed while its
 			// ringed planet passes in front of the black hole (planetShadow, the same 15-minute circle the sky draws))
-			double es = (System.nanoTime() / 1e9) % 100000.0 % 3600.0;
-			double tf = ((es * (1.0 / 60.0 / 15.0) + 0.282) % 1.0) * Math.PI * 2.0;
-			float ps = (1f - smoothstep(0.35f, 0.62f, (float) tf)) + smoothstep(1.6f, 1.87f, (float) tf);
+			float phase = endPhase;
+			if (phase < 0f) {
+				double seconds = (System.nanoTime() / 1e9) % 100000.0 % 3600.0;
+				phase = (float) (((seconds / END_CYCLE_SECONDS + 0.282) % 1.0) * Math.TAU);
+			}
+			float sunlight = (1f - smoothstep(0.35f, 0.62f, phase)) + smoothstep(1.6f, 1.87f, phase);
+			sunlight *= sunlight;
+			float ambient = 2.2f * (0.005f / 0.3f) * 2f * (sunlight * 0.93f + 0.07f);
+			// Approximate bounced light and retain enough fill to read the terrain during an eclipse.
+			if (endLighting) ambient += 0.085f + 0.12f * sunlight;
 			float[] bb = {1.088f, 0.979f, 0.953f};
 			for (int i = 0; i < 3; i++) {
-				light[i] = bb[i] * 2.2f * ps * ps;
-				up[i] = bb[i] * 2.2f * (0.005f / 0.3f) * 2f * (ps * ps * 0.93f + 0.07f);
+				light[i] = bb[i] * 2.2f * sunlight;
+				up[i] = bb[i] * ambient;
 			}
 		} else {
 			// the End: a lavender light from above, a violet sky
@@ -608,11 +632,11 @@ public final class ImagineFrame {
 		netherFar = farM;
 		// (the End: w minus the render distance, for Reimagined's border fog there into its violet sky)
 		boolean endFog = dim == 2 && Settings.sky && camera.fogType == net.minecraft.world.level.material.FogType.NONE;
-		// In the End, x is the sky style and y is the active Black hole LOD fog horizon.
+		// In the End, x is the sky style, y the LOD fog horizon, and z the shared eclipse phase.
 		if (dim == 2) {
 			float realReach = Minecraft.getInstance().options.getEffectiveRenderDistance() * 16f;
 			float lodReach = Settings.endStyle == 1 && Settings.endLodClarity ? imaginemetal.metalods.MetaLods.reach() : 0f;
-			put(Settings.endStyle, lodReach > realReach ? lodReach : 0f, 0f, endFog ? -realReach : 0f);
+			put(Settings.endStyle, lodReach > realReach ? lodReach : 0f, endPhase, endFog ? -realReach : 0f);
 		} else put(netherFog[0], netherFog[1], netherFog[2], netherHaze ? farM : 0f);
 		float[] pc = Settings.portals ? LightVolume.portalCentre(cam.x, cam.y, cam.z) : null;
 		put(Settings.portals ? 1f : 0f, Settings.glassSun && Settings.coloredLight && LightVolume.glassInGrid() ? 1f : 0f, pc != null ? 1f : 0f,

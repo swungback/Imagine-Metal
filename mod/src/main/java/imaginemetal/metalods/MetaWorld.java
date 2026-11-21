@@ -42,6 +42,7 @@ final class MetaWorld {
 	final ClientLevel level;
 	final int minY, height;
 	final boolean skyLight;
+	private final boolean end;
 	/** Generated LODs in 3D (MetaSettings.overhangs as the world was loaded). */
 	private final boolean overhangs;
 	final MetaStore store;
@@ -234,6 +235,7 @@ final class MetaWorld {
 		this.minY = level.getMinY();
 		this.height = Math.clamp(level.getHeight() / 32 * 32, 32, 512);
 		this.skyLight = level.dimensionType().hasSkyLight();
+		this.end = level.dimension().equals(net.minecraft.world.level.Level.END);
 		this.arena = arena;
 		this.server = server;
         if(server!=null)mcopt.metal.lod.LodTrees.configure(server);
@@ -1268,6 +1270,7 @@ final class MetaWorld {
 		return l == null ? 0f : (float) l.getSeaLevel();
 	}
 	private int detail, farDetail;
+	private boolean fineEndLods;
 	private final FrustumIntersection frustum = new FrustumIntersection();
 
 	/**
@@ -1299,6 +1302,7 @@ final class MetaWorld {
             && renderDistance >= 4 && this.reach > this.transitionLimit * 1.42f ? (renderDistance - 1) * 16f : 0f;
 		this.detail = MetaSettings.detail;
 		this.farDetail = MetaSettings.farDetail;
+		this.fineEndLods = this.end && MetaSettings.endFineLods;
 		this.frustum.set(clip, false);
 		long nowMs = System.currentTimeMillis();
 		this.updateMask(camX, camY, camZ, renderDistance);
@@ -1593,6 +1597,7 @@ final class MetaWorld {
 
     private int refineDistance(int level) {
         int widths = level <= 1 || level >= TOP ? this.detail : this.farDetail;
+        if (this.fineEndLods && (level == 2 || level == 3)) widths *= 2;
         return widths * (32 << level);
     }
 
@@ -1617,7 +1622,8 @@ final class MetaWorld {
             int w = 32 << level;
             int group = level == TOP ? w : 2 * w;
             int detail = level <= 1 || level + 1 == TOP ? this.detail : this.farDetail;
-            double inner = level == TOP ? this.reach : Math.min(this.reach, detail * group);
+            int cutoff = this.fineEndLods ? this.refineDistance(level + 1) : detail * group;
+            double inner = level == TOP ? this.reach : Math.min(this.reach, cutoff);
             double outer = inner + Math.min(128, group);
             int x0 = (int) Math.floor((this.camX - outer) / group);
             int z0 = (int) Math.floor((this.camZ - outer) / group);
