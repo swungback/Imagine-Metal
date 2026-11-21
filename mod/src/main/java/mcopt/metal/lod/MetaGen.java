@@ -372,7 +372,27 @@ public final class MetaGen {
 		int at = top + 1;
 		if (wet) {
 			int wTop = vy(t.water[i] - 1, minY, level, h);
-			if (wTop >= at) {
+			BlockState[] blocks = level > 0 && t.treeBlocks != null ? t.treeBlocks[i] : null;
+			if (blocks != null) {
+				// (s1121: a structure standing in the water, levels 1-3 (LodStructurePreviews.stampVoxels): its blocks, the water
+				// round them up to the surface (ice on top where cold))
+				int end = Math.min(h - 1, Math.max(wTop, at + blocks.length - 1));
+				int runFrom = at, runV = Integer.MIN_VALUE;
+				for (int y = at; y <= end + 1; y++) {
+					int v = Integer.MIN_VALUE;
+					if (y <= end) {
+						BlockState b = y - at < blocks.length ? blocks[y - at] : null;
+						if (b != null) v = ids.block(b) | biome << 16;
+						else if (y <= wTop) v = ids.block(cold && y == wTop ? this.ice : this.water) | biome << 16;
+					}
+					if (v != runV) {
+						if (runV != Integer.MIN_VALUE) n = put(seg, n, runFrom, y, runV);
+						runFrom = y;
+						runV = v;
+					}
+				}
+				at = Math.max(at, end + 1);
+			} else if (wTop >= at) {
 				if (cold) {
 					if (wTop > at) n = put(seg, n, at, wTop, ids.block(this.water) | biome << 16);
 					n = put(seg, n, Math.max(at, wTop), wTop + 1, ids.block(this.ice) | biome << 16);

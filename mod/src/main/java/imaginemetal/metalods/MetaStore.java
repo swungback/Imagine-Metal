@@ -78,8 +78,8 @@ final class MetaStore {
         // (-t3, fix21: level 0's soil by the rules' own depth and the ground's disks: made again)
         // (-s1, fix21: levels 1-3 with the surface structures from the seed; level 2+'s density every second voxel)
         // (-s3, s1121: levels 1-3's structures as voxels, mcopt.metal.lod.LodStructurePreviews: made again; -s2 still read with
-        // -Dmetalods.structureVoxels=false)
-        return level==0?this.genDir+"-t5":level<=3?this.genDir+(STRUCTURE_VOXELS?"-s3":"-s2"):this.genDir;
+        // -Dmetalods.structureVoxels=false. -t6, s1121: level 0's structures on the shore the game raises (raiseShore): made again)
+        return level==0?this.genDir+(STRUCTURE_VOXELS?"-t6":"-t5"):level<=3?this.genDir+(STRUCTURE_VOXELS?"-s3":"-s2"):this.genDir;
     }
     private Path surfacePath(int level,int cx,int cz) {
         return this.dir.resolve(this.dirFor(level)+"-surface").resolve("L"+level).resolve(cx+"."+cz+".bin");
@@ -160,7 +160,7 @@ final class MetaStore {
         if(!Files.exists(p) && level<=1) {p=this.farPath(level,cx,cz);kind=2;}
         if(!Files.exists(p)) {p=this.surfacePath(level,cx,cz);kind=1;}
         if (!Files.exists(p) && level <= 3 && !MetaSettings.generate) {
-            String[] folders = level == 0 ? new String[]{"-t4", "-t3"} : new String[]{"-s1"};
+            String[] folders = level == 0 ? new String[]{"-t5", "-t4", "-t3"} : new String[]{"-s2", "-s1"};
             Path file = Path.of("L" + level, cx + "." + cz + ".bin");
             for (String folder : folders) {
                 String old = this.genDir + folder;

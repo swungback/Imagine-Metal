@@ -46,6 +46,10 @@ final class LodStructurePreviews {
     private static final int CACHE_MAX = 512;
     /** (s1121) levels 1-3 as voxels (-Dmetalods.structureVoxels=false: the old solid column per cell) */
     static final boolean VOXELS = !"false".equals(System.getProperty("metalods.structureVoxels"));
+    /** (s1121) LodStructurePreviews.raiseShore (-Dmetalods.structureShore=false: off) */
+    static final boolean RAISE = !"false".equals(System.getProperty("metalods.structureShore"));
+    /** (s1121) raiseShore's land round the raised cells, in blocks */
+    static final int SHORE = Integer.getInteger("metalods.structureShoreReach", 3);
     /** (s1121) a gap under a piece's lowest block up to this many blocks is ground (the game's raised ground under its pieces) */
     static final int BEARD = Integer.getInteger("metalods.structureBeard", 8);
 
@@ -75,7 +79,7 @@ final class LodStructurePreviews {
         int span = tile.size << tile.level, reach = LodForest.STRUCT_REACH;
         BoundingBox box = new BoundingBox(tile.x0, this.level.getMinY(), tile.z0, tile.x0 + span - 1, this.level.getMaxY(), tile.z0 + span - 1);
         int c0x = (tile.x0 >> 4) - reach, c0z = (tile.z0 >> 4) - reach, c1x = ((tile.x0 + span - 1) >> 4) + reach, c1z = ((tile.z0 + span - 1) >> 4) + reach;
-        java.util.ArrayList<int[]> hits = null;
+        java.util.ArrayList<int[]> hits = null, raised = null;
         for (int cz = c0z; cz <= c1z; cz++) {
             for (int cx = c0x; cx <= c1x; cx++) {
                 for (StructureStart st : forest.starts(cx, cz)) {
@@ -84,10 +88,17 @@ final class LodStructurePreviews {
                     if (b.length == 0) continue;
                     if (hits == null) hits = new java.util.ArrayList<>(2);
                     hits.add(b);
+                    var adapt = st.getStructure().terrainAdaptation();
+                    if (adapt == net.minecraft.world.level.levelgen.structure.TerrainAdjustment.BEARD_THIN
+                        || adapt == net.minecraft.world.level.levelgen.structure.TerrainAdjustment.BEARD_BOX) {
+                        if (raised == null) raised = new java.util.ArrayList<>(2);
+                        raised.add(b);
+                    }
                 }
             }
         }
         if (hits == null) return;
+        if (raised != null && RAISE) raiseShore(tile, raised, span);
         if (tile.level == 0) stamp0(tile, hits, span);
         else if (VOXELS) stampVoxels(tile, hits, span, this.level.getMinY());
         else stampColumns(tile, hits, span);
@@ -208,6 +219,55 @@ final class LodStructurePreviews {
         }
     }
 
+    /**
+     * (s1121) Under the pieces of a structure the game raises the ground for (BEARD_THIN, BEARD_BOX: villages, outposts), a cell
+     * the LODs' noise puts under water becomes land up to the piece's lowest block, where that block is at the water's surface or
+     * over it: the game's ground there is dry. Without it a village on a shore lost the pieces on those cells at level 0 and stood
+     * them in the water at levels 1-3 (2026-11-21, Jack's village: the tower at the water's edge, the huts in front). Only raises.
+     */
+    private static void raiseShore(LodTile tile, List<int[]> raised, int span) {
+        int cells = tile.cells(), L = tile.level;
+        int[] low = new int[cells];
+        java.util.Arrays.fill(low, Integer.MAX_VALUE);
+        for (int[] b : raised) {
+            for (int k = 0; k < b.length; k += 4) {
+                int x = b[k] - tile.x0, z = b[k + 2] - tile.z0;
+                if (x < 0 || z < 0 || x >= span || z >= span) continue;
+                int i = (z >> L) * tile.size + (x >> L);
+                low[i] = Math.min(low[i], b[k + 1]);
+            }
+        }
+        boolean[] land = new boolean[cells];
+        for (int i = 0; i < cells; i++) {
+            if (low[i] == Integer.MAX_VALUE || tile.water[i] == LodTile.DRY || tile.water[i] <= tile.ground[i]) continue;
+            if (low[i] < tile.water[i] - 1 || low[i] <= tile.ground[i]) continue;
+            tile.ground[i] = (short) low[i];
+            tile.water[i] = LodTile.DRY;
+            land[i] = true;
+        }
+        // (and SHORE blocks round them: the game's raised ground reaches past the pieces; there up to the water's surface)
+        int r = Math.max(1, SHORE >> L), n = tile.size;
+        for (int z = 0; z < n; z++) {
+            for (int x = 0; x < n; x++) {
+                int i = z * n + x;
+                if (tile.water[i] == LodTile.DRY || tile.water[i] <= tile.ground[i] || low[i] != Integer.MAX_VALUE) continue;
+                boolean near = false;
+                for (int dz = -r; dz <= r && !near; dz++) {
+                    for (int dx = -r; dx <= r; dx++) {
+                        int xx = x + dx, zz = z + dz;
+                        if (xx >= 0 && zz >= 0 && xx < n && zz < n && land[zz * n + xx]) {
+                            near = true;
+                            break;
+                        }
+                    }
+                }
+                if (!near) continue;
+                tile.ground[i] = tile.water[i];
+                tile.water[i] = LodTile.DRY;
+            }
+        }
+    }
+
     /** (s1121) voxels from..to of a structure column: the ground's under block, its surface block on top. */
     private static void beard(LodTile tile, int i, BlockState[] col, int from, int to) {
         BlockState surface = tile.state[i], under = tile.under[i] != null ? tile.under[i] : surface;
@@ -235,7 +295,9 @@ final class LodStructurePreviews {
                 if (x < 0 || z < 0 || x >= span || z >= span) continue;
                 int i = (z >> L) * tile.size + (x >> L);
                 int g = tile.ground[i];
-                if (y < g || tile.water[i] != LodTile.DRY && tile.water[i] > g) continue;
+                // (on water too: the coarser cells' shore can put a wall or a tower at the water's edge in the water, where the game
+                // raised the ground under it; MetaGen.cell fills the rest with the water)
+                if (y < g) continue;
                 int at = Math.floorDiv(g - 1 - minY, c) + 1, vy = Math.floorDiv(y - minY, c), off = vy - at;
                 if (off < 0 || off > 255) continue;
                 java.util.ArrayList<int[]> list = vox.computeIfAbsent((long) i << 8 | off, q -> new java.util.ArrayList<>(4));
@@ -288,7 +350,8 @@ final class LodStructurePreviews {
             }
             if (hi < 0) continue;
             if (hi + 1 < col.length) col = java.util.Arrays.copyOf(col, hi + 1);
-            if (lo > 0 && lo * c <= Math.max(BEARD, c)) {
+            boolean wet = tile.water[i] != LodTile.DRY && tile.water[i] > tile.ground[i];
+            if (lo > 0 && lo * c <= Math.max(BEARD, c) && !wet) {
                 beard(tile, i, col, 0, lo);
                 lo = 0;
             }
