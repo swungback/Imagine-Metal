@@ -44,6 +44,37 @@ MetaMesher.meshAB): 9.4 ms new vs 20.2 ms old per column (wall time on the worke
 Toggles: MetaMesher.meshFast (runtime, -Dmetalods.meshFast=false), meshAB; stats line "[MetaLODS] meshing: fast N ... old N ...".
 Next for LOD CPU: structure heights (biggest single part), MetaWorld.edge (~6 %), Streams.
 
+## NEXT (Jack 21 Nov 15:26; he is away until Tuesday, Codex may pick this up)
+Jack's standing rules: find the cause before changing anything (profile/measure first); no resolution drops or visible quality
+loss; compare before/after shots at the same spot and time, and LOD look changes against real chunks (renderDistance 12 for
+one run, then back to 6); keep this file updated as you go; keep a rollback jar.
+1. LODs rebuilding when moving a couple of chunks ("pretty annoying moving two chunks and it has to regen again"). Jack wants
+   DH-like behaviour: a bigger area than needed is kept ready, so it is done for a while once loaded. Facts (code, not yet
+   measured): metalods.properties distance=112 chunks, detail=4 (level 0 to ~256 blocks), farDetail=6. Generated tiles are
+   cached on disk in the save (metalods/), so they are not generated twice, but: MetaWorld.housekeeping drops columns not
+   wanted for 600 frames (~10 s), 60 frames under arena pressure (an 1/8 or less free), and parents whose children are ready;
+   the look-ahead ring (around MetaWorld ~1486) is only min(128, group) blocks past each level's inner edge; the refine rule
+   (level > 0 && d < kd * w) moves level boundaries with every step; real chunks entering the render distance are captured
+   (MetaLods ~255-300, 2 s after load) and their columns rebuilt. MEASURE FIRST which of these makes the "regen" (log mesh
+   jobs / generated tiles / disk-cache loads / evictions while flying a few chunks: ColdTp can teleport; the stats line
+   "[MetaLODS] ... meshes N, tiles generated N, disk cache ..." and "MetaLODS: current view X% ready; N mesh jobs" help),
+   then fix the cause (likely: hysteresis on level boundaries, a wider kept ring, longer keep time when memory allows).
+2. Hitches / unstable FPS (Jack's standing complaint, before LODs too). At his spot (s1121 final, run f1p): p50 17.5 ms,
+   p99 22.5 ms once loaded, but a 394 ms hitch at 15-20 s and ~2.7 s of GC pauses in a 40 s run. Profile the spikes (JFR:
+   jdk.GarbageCollection, allocation by thread, the slow-frame log lines) before changing anything.
+3. LOD CPU left (s1120/s1121 JFR at his spot): structure placement heights (biggest single part), terrain noise ~13 %, Streams
+   rivers ~12 %, MetaWorld.edge ~6 %. Meshing is done (s1121).
+4. Nether / End LODs (Jack asked). Nether: off by design: MetaLods ~255 "has a ceiling: no LODs there". Possible (DH draws the
+   Nether), needs a design: e.g. the LODs without the bedrock roof and the upper ceiling layer so the view from inside isn't a
+   lid, and sky/fog/lighting without sky light (MetaWorld.skyLight = dimensionType().hasSkyLight()). Ask Jack how it should look
+   before building. End: not blocked (no ceiling), never tested: try it first (floating islands, void below, no sky light),
+   report what breaks.
+5. Older open items: GPU terrain G-pass ~9.6 ms independent of resolution (leaf triangles); the C2 ideas (simpler leaves far away)
+   change the look: ask Jack first.
+Git note for Codex: renderer-work/Imagine-Metal's files equal origin/s1121 (checked 21 Nov 15:05), but git there still shows
+branch screenshot-audit with the changes uncommitted. Check with `git fetch origin && git diff origin/s1121 --stat` before
+switching branches; commit on s1121.
+
 ## Tools this session
 ColdTp steps=SECONDS:field=value,... : a MetaSettings field, im.+Settings, or a.b.Class#field (any static): matched on/off shots
 or A/B timing in one run. setrun.sh x= y= z= yaw= pitch= for other spots. Offline mesher harness: claude-scratch/s1121/store-c1c.tgz
