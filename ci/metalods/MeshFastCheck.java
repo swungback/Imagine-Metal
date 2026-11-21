@@ -115,6 +115,6 @@ public final class MeshFastCheck {
 			bb.putInt(mesh.minY).putInt(mesh.maxY);
 			all.update(bb.array());
 		}
-		System.out.println("MeshFastCheck meshFast=" + MetaMesher.MESH_FAST + " quads " + quads + " digest " + HexFormat.of().formatHex(all.digest()));
+		System.out.println("MeshFastCheck meshFast=" + MetaMesher.meshFast + " quads " + quads + " digest " + HexFormat.of().formatHex(all.digest()));
 	}
 }

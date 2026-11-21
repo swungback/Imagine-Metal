@@ -98,6 +98,8 @@ final class MetaMesher {
 
 	/** As above; level >= 0: the column's level (pockets of dark air are closed, see closeCaves), -1: as stored. */
 	Mesh mesh(Rle c, int @Nullable [][] edges, int level) {
+		this.fast = meshAB ? (this.abCount++ & 1) == 0 : meshFast;
+		long t0 = System.nanoTime();
 		int h = c.h;
 		this.h = h;
 		int size = B * B * h;
@@ -124,7 +126,7 @@ final class MetaMesher {
 		}
 		// The y range that can hold faces: a voxel that differs from the one above it somewhere
 		int lo = h, hi = -1;
-		if (MESH_FAST) {
+		if (this.fast) {
 			// (s1121) where air, water and the rest meet: a face needs one of those changes (exposed(), and the skirts under a
 			// column's top). Ores, stone kinds and light made the old range reach deep under the ground for nothing, and the six
 			// face passes walked all of it (42 % of the meshing). Read off the column's runs (the grid only for the border ring):
@@ -181,6 +183,9 @@ final class MetaMesher {
 				m.maxY = Math.max(m.maxY, y + hh);
 			}
 		}
+		int slot = this.fast ? 0 : 2;
+		TIME.addAndGet(slot, System.nanoTime() - t0);
+		TIME.incrementAndGet(slot + 1);
 		return m;
 	}
 
@@ -264,7 +269,7 @@ final class MetaMesher {
 		for (int z = -1; z <= N; z++) {
 			for (int x = -1; x <= N; x++) {
 				int a = this.at(x, z, 0), c = (z + 1) * B + x + 1, o = open[c], from = h - 1;
-				if (MESH_FAST) {
+				if (this.fast) {
 					// (s1121) a side can be dark only below the bottom of that neighbour's open sky; above every neighbour's, only the
 					// run's own bottom can seed (its voxel under). sideDark was 20 % of the meshing, asked of every lit voxel. Same
 					// voxels, same order
@@ -318,7 +323,7 @@ final class MetaMesher {
 		}
 		// (s1121: a column's open sky is air at 15 both ways: nothing to do there, the pass stops under it)
 		for (int c = 0; c < B * B; c++) {
-			int a = c * h, end = a + (MESH_FAST ? open[c] : h);
+			int a = c * h, end = a + (this.fast ? open[c] : h);
 			for (int i = a; i < end; i++) {
 				int v = g[i];
 				if (Voxel.isAir(v) && Voxel.sky(v) == 15 && L[i] < 15) g[i] = (v & 0xF0FFFFFF) | L[i] << 24;
@@ -463,10 +468,17 @@ final class MetaMesher {
 	}
 
 	/**
-	 * (s1121) -Dmetalods.meshFast=false: the mesher as in s1120 (the face range by any voxel change, the sky light's edge
+	 * (s1121) -Dmetalods.meshFast=false (or the field, read once per column): the mesher as in s1120 (the face range by any voxel change, the sky light's edge
 	 * searched over every lit voxel). Same quads either way (checked on 7000 stored columns, ci/metalods/MeshFastCheck).
 	 */
-	static final boolean MESH_FAST = !"false".equals(System.getProperty("metalods.meshFast"));
+	static volatile boolean meshFast = !"false".equals(System.getProperty("metalods.meshFast"));
+	/** (s1121) meshing time and columns, [0] the fast path, [1] the old one (MetaWorld's stats line; ColdTp steps flip meshFast) */
+	static final java.util.concurrent.atomic.AtomicLongArray TIME = new java.util.concurrent.atomic.AtomicLongArray(4);
+	/** this column's path (meshFast read once per column) */
+	private boolean fast;
+	/** (s1121) A/B timing: the two paths column by column (same terrain for both; ColdTp step MetaMesher#meshAB=true) */
+	static volatile boolean meshAB;
+	private int abCount;
 
 	/** Water hides other water, but it must not erase the seabed or submerged cliffs. */
 	private static boolean exposed(int voxel, int front) {

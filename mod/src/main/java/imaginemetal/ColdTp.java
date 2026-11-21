@@ -55,7 +55,7 @@ public final class ColdTp {
 	private static long dayTime = -1;
 	private static double[] shots = new double[0];
 	/** (s1121) steps: "seconds:field=value" (comma separated), a MetaSettings (or "im." + Settings) field set on the render thread at
-	 * that time after the teleport, so one run gives matched shots of the same view with a setting on and off */
+	 * that time after the teleport (or "a.b.Class#field": any static field), so one run gives matched shots of the same view with a setting on and off */
 	private static double[] stepAt = new double[0];
 	private static String[] stepSet = new String[0];
 
@@ -143,6 +143,11 @@ public final class ColdTp {
 			if (k.startsWith("im.")) {
 				owner = Settings.class;
 				k = k.substring(3);
+			}
+			else if (k.contains("#")) {
+				// (any class's static field: imaginemetal.metalods.MetaMesher#meshFast)
+				owner = Class.forName(k.substring(0, k.indexOf('#')));
+				k = k.substring(k.indexOf('#') + 1);
 			}
 			var f = owner.getDeclaredField(k);
 			f.setAccessible(true);

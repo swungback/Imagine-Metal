@@ -1643,6 +1643,10 @@ final class MetaWorld {
 				this.bandFrames > 0 ? 100.0 * (this.bandFrames - this.bandNoCandidate - this.bandUncovered) / this.bandFrames : 0.0,
 				this.bandFrames > 0 ? 100.0 * this.bandNoCandidate / this.bandFrames : 0.0, this.bandFrames > 0 ? 100.0 * this.bandUncovered / this.bandFrames : 0.0));
 			System.out.println("[MetaLODS] drawn quads: " + this.quadTally());
+			// (s1121) the mesher's time per column, fast path / old one (MetaMesher.meshFast)
+			var mt = MetaMesher.TIME;
+			System.out.println(String.format(java.util.Locale.ROOT, "[MetaLODS] meshing: fast %d columns %.3f ms each, old %d columns %.3f ms each",
+				mt.get(1), mt.get(0) / 1e6 / Math.max(1, mt.get(1)), mt.get(3), mt.get(2) / 1e6 / Math.max(1, mt.get(3))));
 			this.bandFrames = this.bandNoCandidate = this.bandUncovered = 0;
 			this.missingSum = this.missingSamples = this.pressureSamples = 0;
 			if (tiles > this.statsTiles) {

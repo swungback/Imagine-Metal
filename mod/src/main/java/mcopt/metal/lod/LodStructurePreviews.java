@@ -34,8 +34,8 @@ import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemp
  * Level 0: the blocks themselves (as the exact trees, LodTile.treeBlocks); levels 1-3: a column per cell, its lowest block above
  * the ground (the walls) up to its top block (the roof).
  *
- * (s1121) Levels 1-3 as voxels: of each cube of 2^L blocks its most solid block, ties to the upper one (Rle.mip's rule, so a
- * village far away looks as its near self mipped). The column per cell was filled solid from the ground to the roof in its
+ * (s1121) Levels 1-3 as voxels: of each cube of 2^L blocks its most solid kind, then its most common block, ties to the upper
+ * one (first tried as Rle.mip's topmost-wins: a floor inside a wall's line then coloured the wall in bands of planks). The column per cell was filled solid from the ground to the roof in its
  * lowest block: a stone corner post made a grey pillar, a floor a band of planks round the house, a foundation of bricks a
  * tall brown post, and cells side by side stood at their own heights: Jack's "village looks broken, pieces overlapping"
  * (2026-11-20 16.38.53, -505 123 1335 west, the village ~290 blocks out). And at every level: where a piece's lowest block
@@ -217,16 +217,18 @@ final class LodStructurePreviews {
 
     /**
      * (s1121) Levels 1-3 as voxels, as MetaGen.cell lays a column: its first voxel over the ground is the one over the voxel
-     * holding the ground's top block. Per voxel the most solid of its blocks (solid over leaves), ties to the upper one, then to
-     * the first.
+     * holding the ground's top block. Per voxel the most solid of its blocks (solid over leaves), then the most common, ties to
+     * the upper one, then to the first.
      */
     private static void stampVoxels(LodTile tile, List<int[]> hits, int span, int minY) {
         int cells = tile.cells(), L = tile.level, c = 1 << L;
-        int[][] score = new int[cells][];
-        BlockState[][] cols = new BlockState[cells][];
+        // per voxel (cell << 8 | offset): its blocks as {state id, count, highest y in the voxel + 1}
+        java.util.HashMap<Long, java.util.ArrayList<int[]>> vox = new java.util.HashMap<>();
         int[] hiY = new int[cells];
         java.util.Arrays.fill(hiY, Integer.MIN_VALUE);
         BlockState[] top = new BlockState[cells];
+        int[] maxOff = new int[cells];
+        java.util.Arrays.fill(maxOff, -1);
         for (int[] b : hits) {
             for (int k = 0; k < b.length; k += 4) {
                 int x = b[k] - tile.x0, y = b[k + 1], z = b[k + 2] - tile.z0;
@@ -236,23 +238,43 @@ final class LodStructurePreviews {
                 if (y < g || tile.water[i] != LodTile.DRY && tile.water[i] > g) continue;
                 int at = Math.floorDiv(g - 1 - minY, c) + 1, vy = Math.floorDiv(y - minY, c), off = vy - at;
                 if (off < 0 || off > 255) continue;
-                BlockState st = Block.stateById(b[k + 3]);
-                int sc = (st.is(net.minecraft.tags.BlockTags.LEAVES) ? 1 : 2) * 1024 + (y - minY - vy * c) + 1;
-                int[] sv = score[i];
-                if (sv == null || off >= sv.length) {
-                    int len = Math.max(16, Math.max(off + 1, sv == null ? 0 : sv.length * 2));
-                    score[i] = sv = sv == null ? new int[len] : java.util.Arrays.copyOf(sv, len);
-                    cols[i] = cols[i] == null ? new BlockState[len] : java.util.Arrays.copyOf(cols[i], len);
+                java.util.ArrayList<int[]> list = vox.computeIfAbsent((long) i << 8 | off, q -> new java.util.ArrayList<>(4));
+                int id = b[k + 3], yc = y - minY - vy * c + 1;
+                int[] e = null;
+                for (int[] f : list) if (f[0] == id) {
+                    e = f;
+                    break;
                 }
-                if (sc > sv[off]) {
-                    sv[off] = sc;
-                    cols[i][off] = st;
+                if (e == null) list.add(new int[] {id, 1, yc});
+                else {
+                    e[1]++;
+                    e[2] = Math.max(e[2], yc);
                 }
+                if (off > maxOff[i]) maxOff[i] = off;
                 if (y > hiY[i]) {
                     hiY[i] = y;
-                    top[i] = st;
+                    top[i] = Block.stateById(id);
                 }
             }
+        }
+        // (the voxel's block: the most solid kind (solid over leaves), then the one filling most of it (a wall fills half a
+        // voxel on a wall's line, the floor inside a quarter: the wall's block shows outside, not bands of floor), ties to the
+        // upper one, then to the first)
+        BlockState[][] cols = new BlockState[cells][];
+        for (var en : vox.entrySet()) {
+            int i = (int) (en.getKey() >> 8), off = (int) (en.getKey() & 255);
+            int[] best = null;
+            long bestScore = Long.MIN_VALUE;
+            for (int[] e : en.getValue()) {
+                BlockState st = Block.stateById(e[0]);
+                long sc = (st.is(net.minecraft.tags.BlockTags.LEAVES) ? 1L : 2L) << 40 | (long) e[1] << 16 | e[2];
+                if (sc > bestScore) {
+                    bestScore = sc;
+                    best = e;
+                }
+            }
+            if (cols[i] == null) cols[i] = new BlockState[maxOff[i] + 1];
+            cols[i][off] = Block.stateById(best[0]);
         }
         if (tile.treeBlocks == null) tile.treeBlocks = new BlockState[cells][];
         for (int i = 0; i < cells; i++) {
@@ -265,7 +287,7 @@ final class LodStructurePreviews {
                 hi = y;
             }
             if (hi < 0) continue;
-            col = java.util.Arrays.copyOf(col, hi + 1);
+            if (hi + 1 < col.length) col = java.util.Arrays.copyOf(col, hi + 1);
             if (lo > 0 && lo * c <= Math.max(BEARD, c)) {
                 beard(tile, i, col, 0, lo);
                 lo = 0;
