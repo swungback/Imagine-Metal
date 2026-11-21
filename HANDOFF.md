@@ -1,55 +1,54 @@
-# START HERE — 2026-11-21 02:45 Claude s1121: Jack's four (cave speckle, LOD village, LOD shadows, LOD meshing speed)
+# START HERE — 2026-11-21 16:10 Claude s1121: Jack's four (cave speckle, LOD village, LOD shadows, LOD meshing speed)
 
-## State: branch s1121 on origin (CI 44850651572 green). NOT yet deployed in full; Jack tests on 21 Nov.
-Installed on Jack's Mac now: claude-scratch/s1121/imagine-metal-s1121-c1.jar (s1120-final + the cave fix + ColdTp steps).
-Ready: imagine-metal-s1121-final.jar (all of s1121; built in Claude's cloud workspace as build.sh does: perf1 + this tree's
-classes/shaders + s1120's CI dylib, natives unchanged), sent to Jack in the chat. Rollback: claude-scratch/s1120/imagine-metal-s1120-final.jar.
-Jack's local working tree (renderer-work/Imagine-Metal) has only part of s1121 (ColdTp, MetaSettings, MetaLods, ImagineFrame,
-lighting.metal); the Mac slept before MetaMesher, MetaStore, LodStructurePreviews, ci/ came over: sync them from origin/s1121.
+## Installed: claude-scratch/s1121/imagine-metal-s1121-final7.jar (SHA256 2fa996a159be365c...), all of s1121, tested.
+Branch s1121 on origin (CI 44911680342 green) = Jack's working tree (checked identical). Built by build.sh (perf1 +
+this tree's classes/shaders + s1120's CI dylib, natives unchanged). Rollback: claude-scratch/s1120/imagine-metal-s1120-final.jar.
+Edited files' originals: claude-scratch/s1121/orig/. Test saves moved to claude-scratch/s1121/saves. options.txt rd 6, ColdTp off.
+FIRST LOAD AFTER INSTALL: level 0 (gen10-t6) and levels 1-3 (gen10-s3) LOD tiles are made again once (old -t5/-s2 kept on
+disk, read only with generate=false or -Dmetalods.structureVoxels=false). Real-chunk captures (real2) untouched.
 
-## 1 Cave speckle: FIXED, checked in game (matched shots)
-Spot -321 95.37 1226 yaw 28.7 pitch 20.7, time 5000 (ColdTp runs c1a-c1c, c1r = real chunks rd 12). The speckle is the
-hand-over dither band (edgeDither off: gone). The speckled surfaces were the REAL chunks; the pixels they hand to the LODs
-came out near black: lighting.metal skipped the open-air test for LOD pixels (s1119: no LOD casters in the maps). s1120 put
-LOD land into the far cascade, so LOD pixels take the test again when that map holds them: MetaLods.farMapHasLods (set per
-cascade-1 redraw), ImFrame env.w bit 128, toggle MetaSettings.lodOpenAir (-Dmetalods.lodOpenAir=false).
-Same run on/off + real: mean abs diff to real 11.0 -> 4.4 (luma 50.7 -> 58.4, real 60.9), pixel noise 1.07 -> 0.94 (real 0.93).
-Shots: screenshots/coldtp-c1c-40 (on), -45 (off), coldtp-c1r-55 (real).
+## 1 Cave speckle: FIXED, tested
+Spot -321 95.37 1226 yaw 28.7 pitch 20.7, time 5000. The speckle = the hand-over dither band (edgeDither off: gone). The
+speckled surfaces were the REAL chunks; the pixels they hand to the LODs were near black: lighting.metal skipped the open-air
+test for LOD pixels (s1119: no LOD casters in the maps). s1120 put LOD land in the far cascade, so LOD pixels take it again when
+that map holds them: MetaLods.farMapHasLods (per cascade-1 redraw), ImFrame env.w bit 128, toggle MetaSettings.lodOpenAir.
+Final build, same run on/off vs real rd 12 (c1r): diff to real 10.4 -> 3.5, luma 51.1 -> 59.1 (real 60.9), noise 1.08 -> 0.95
+(real 0.93). Shots coldtp-c2-40 (on), -45 (off), coldtp-c1r-55 (real).
 
-## 2 LOD village: cause from the shots + code, FIX NOT YET SEEN IN GAME
-Reproduced at Jack's spot (v1a; Jack was zoomed in: crop the shot). From 150 blocks closer on the same line (-626 95.3 1246,
-same yaw/pitch) the LOD village (level 0, the blocks themselves) matches the real one (v2l vs v2r rd 12): it is a walled
-castle-style village, dense and tall in reality too. At Jack's distance (~290 blocks) it is levels 1-3, where
-LodStructurePreviews.stampColumns made each 2^L cell ONE solid column from the ground to its top block, in its LOWEST block:
-stone corner posts -> grey pillars, a floor -> a band of planks, a brick/dirt foundation -> a tall brown post, cells at their
-own heights -> "pieces overlapping". Fix: stampVoxels: each 2^L cube's most solid block, ties to the upper one (Rle.mip's
-rule) into treeBlocks (MetaGen.cell lays them at any level); a gap of up to 8 blocks (metalods.structureBeard) under a
-piece's lowest block is ground (the game raises the ground under its pieces), at level 0 too. Toggle
--Dmetalods.structureVoxels=false. Levels 1-3 cache folder gen10-s2 -> gen10-s3: made again once (loading after the update).
-Check: v1a spot vs v2l / v2r crops. The rd 20 run (v1r) is not a usable reference (terrain didn't load by 65 s).
+## 2 LOD village: FIXED, tested (level 0 and forced level 1)
+Spot -505 123.63 1335 yaw 126.3 pitch 10.7 (Jack's; his shot was zoomed, the FOV varies run to run: crop 700,480-960,640).
+Real reference: same line 150 blocks closer, -626 95.3 1246 (v2r real rd 12, v2l LOD). The village is a walled castle-style
+village (tall in reality too). Causes:
+a) MAIN: the LODs' noise puts water where the game raised the ground under the village (BEARD_THIN); structure blocks on LOD-water
+   cells were dropped: the hall right of the tower lost its front wall (its floors showed: "open floors, yellow bands"), the huts
+   in front and the long wall were missing. LodStructurePreviews.raiseShore: under BEARD_THIN/BEARD_BOX pieces whose lowest block
+   is at the water's surface or above, the cell becomes land up to that block, and 3 blocks round (structureShoreReach) land at
+   the water's surface. Only raises; only those adaptations (no shipwrecks, igloos, buried). -Dmetalods.structureShore=false.
+b) Levels 1-3 (shown past ~256 blocks, and until level 0 is ready: Jack's shot) drew each 2^L cell as ONE solid column in its
+   LOWEST block (grey corner pillars, a brick post, floor bands). stampVoxels: per voxel the most solid kind, then the most
+   common block, ties to the upper one (topmost-wins first: banded walls); structure voxels stand on water cells too
+   (MetaGen.cell's wet branch lays them with the water round them); a gap of up to 8 blocks under a piece is ground.
+Shots: before coldtp-v1a-55 / b4v-55 (forced level 1: steps=0:detail=2); after coldtp-f7v-55 (level 0), a6v-55 (level 1).
 
-## 3 LOD shadows: the pillar is NOT darker (measured)
-s4c (real rd 12) vs s4a (LOD + LOD shadows): pillar body luma 136.1 vs 136.0 (s3a no LOD shadows 137.3). Difference map:
-nothing on the pillar; with LOD shadows the LOD ground is closer to real (mean +5.1 -> +3.2), the darker spots at its foot are
-tree shadows the real ground has too. What remains: LOD slopes a little brighter than real (no per-block corner shading:
-Jack's choice, fix22). Nothing changed.
+## 3 LOD shadows: the pillar is NOT darker (measured), nothing changed
+s4c (real rd 12) vs s4a: pillar body luma 136.1 vs 136.0. With LOD shadows the LOD ground is closer to real (+5.1 -> +3.2);
+the darker spots at the pillar's foot are tree shadows real ground has too. LOD slopes a little brighter than real (no corner
+shading, Jack's choice fix22). Whole frame at his spot, final vs s1120 (f1p vs s4a): mean diff 1.16 = run-to-run noise.
 
-## 4 LOD meshing: ~2.5x faster, same quads
-JFR (s4a, his spot): meshing 14.8 % of MetaLODS worker CPU in that run; in it exposed() via facesX/Y/Z 42 %, sky light seeding
-(sideDark) 20 %, the last light pass 8 %. MetaMesher (MESH_FAST, -Dmetalods.meshFast=false = old):
-- face y range from where air/water/rest meet, read off the column's runs (ring from the grid): ores, stone kinds and light
-  no longer stretch it deep under the ground (closeCaves/skyLight only remove such changes, so every face stays in range);
-- sky seeding only below the neighbours' open-sky bottoms (same voxels, same order); last pass stops under the open sky;
-- grid corners filled with the column's own corner cell: they held the worker's previous column (light near the corners
-  depended on job order; 4 % of columns change slightly, now deterministic).
-Checked offline on 6315 stored columns (IM-coldtp-c1c's store) with a stub palette: identical digests, 22.4 s -> 8.3 s.
-ci/metalods/MeshFastCheck (in check.sh): synthetic columns, both paths, same digest (CI green).
-Next for LOD CPU: MetaWorld.edge (~6 %), structure heights (still the biggest single part), Streams.
+## 4 LOD meshing: ~2.2x faster in game, same quads
+JFR (s4a): in the mesher exposed() via facesX/Y/Z 42 %, sky seeding (sideDark) 20 %, last light pass 8 %. MetaMesher fast path:
+face range from where air/water/rest meet, read off the column's runs; sky seeding only below the neighbours' open-sky bottoms;
+last pass stops under the open sky; grid corners filled (were stale from the worker's previous column: light depended on job
+order). Offline 6315 stored columns: identical, 22.4 -> 8.3 s. In game (run m1, his spot, paths alternating per column,
+MetaMesher.meshAB): 9.4 ms new vs 20.2 ms old per column (wall time on the workers). CI: ci/metalods/MeshFastCheck.
+Toggles: MetaMesher.meshFast (runtime, -Dmetalods.meshFast=false), meshAB; stats line "[MetaLODS] meshing: fast N ... old N ...".
+Next for LOD CPU: structure heights (biggest single part), MetaWorld.edge (~6 %), Streams.
 
 ## Tools this session
-ColdTp steps=SECONDS:field=value,... (MetaSettings field, or im.+Settings) for matched on/off shots in one run.
-Offline mesher harness: claude-scratch/s1121 has store-c1c.tgz; harness = ci/metalods/MeshFastCheck's approach with a
-MetaPalette stub (kinds from block names).
+ColdTp steps=SECONDS:field=value,... : a MetaSettings field, im.+Settings, or a.b.Class#field (any static): matched on/off shots
+or A/B timing in one run. setrun.sh x= y= z= yaw= pitch= for other spots. Offline mesher harness: claude-scratch/s1121/store-c1c.tgz
++ a MetaPalette stub (MeshFastCheck's approach). The cloud workspace can build the jar when the Mac sleeps (libs staged from
+claude-scratch/s1117d/libs.tgz).
 
 # START HERE — 2026-11-20 22:25 Claude s1120: Jack's four fixes (structures, MetalFX passes, leaves, LOD shadows)
 
