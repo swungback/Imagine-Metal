@@ -58,6 +58,8 @@ public final class MetaSettings {
 	public static volatile boolean lodOpenAir = !"false".equals(System.getProperty("metalods.lodOpenAir"));
     /** Complementary screen-noise transition, enabled only over ready LOD coverage. */
     public static volatile boolean edgeDither = true;
+	/** Keep compiled low-skylight Overworld surfaces during the outer handoff. */
+	public static volatile boolean caveHandoff = !"false".equals(System.getProperty("metalods.caveHandoff"));
 	/** Debug, not saved: each level drawn in its own colour. */
 	public static volatile boolean showLevels = false;
 	/** Diagnostic startup view: 1 opaque coverage/material, 2 mask candidates, 3 opaque depth. */

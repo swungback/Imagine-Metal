@@ -523,6 +523,10 @@ public final class MetaGen {
 		return n + 3;
 	}
 
+	public static void refreshLooks() {
+		LodColors.refresh();
+	}
+
 	/**
 	 * What a block looks like for the LODs, from its baked model (mcopt's LodColors): top and side sprites' rectangles in the
 	 * block atlas (u0 v0 u1 v1 each), their average colours (sRGB), the tint kinds (LodColors.TINT_*) and a constant tint.

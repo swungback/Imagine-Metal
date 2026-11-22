@@ -439,7 +439,9 @@ fragment float4 im_sky_fs(ImSkyOut in [[stage_in]], constant ImFrame &f [[buffer
 fragment float4 im_sky_end_fs(ImSkyOut in [[stage_in]], constant ImFrame &f [[buffer(0)]], constant float4x4 &rot [[buffer(1)]],
 	depth2d<float> depth [[texture(2)]]) {
 	uint2 px = min(uint2(in.pos.xy), uint2(depth.get_width() - 1, depth.get_height() - 1));
-	if (depth.read(px) > 0.00001) discard_fragment();  // (the game's depth is reversed: 0 is the far plane, the sky)
+	// The reverse-Z clear is exactly zero. Small positive depths are still
+	// geometry, especially the islands when seen from high above.
+	if (depth.read(px) > 0.0) discard_fragment();
 	return imSkyPixel(in, f, rot);
 }
 

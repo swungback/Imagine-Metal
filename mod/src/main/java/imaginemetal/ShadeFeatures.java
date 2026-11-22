@@ -12,6 +12,7 @@ import mcopt.metal.own.OwnTerrain;
  */
 final class ShadeFeatures {
 	private static int current = -1;
+	private static final boolean SPECIALIZE_MATERIAL_SWITCHES = Boolean.getBoolean("imaginemetal.specializeMaterialSwitches");
 	/** -Dimaginemetal.shadeFeatures=false: every feature compiled in, as before (switched by the frame's values only). */
 	private static boolean failed = "false".equalsIgnoreCase(System.getProperty("imaginemetal.shadeFeatures"));
 	private static final MemorySegment ERR = Arena.global().allocate(1024);
@@ -25,8 +26,14 @@ final class ShadeFeatures {
 		if (Settings.shadows) m |= 1;
 		if (Settings.pbr) m |= 1 << 1;
 		if (Settings.normals > 0f) m |= 1 << 2;
-		if (Settings.pbrPack) m |= 1 << 3;
-		if (Settings.parallax) m |= 1 << 4;
+		if (SPECIALIZE_MATERIAL_SWITCHES) {
+			if (Settings.pbrPack) m |= 1 << 3;
+			if (Settings.parallax) m |= 1 << 4;
+		} else if (PbrAtlas.on) {
+			// ImFrame already controls these live. Keep the pipelines warm when
+			// changing either setting with maps available, and omit both without a pack.
+			m |= (1 << 3) | (1 << 4);
+		}
 		if (Settings.coated) m |= 1 << 5;
 		if (Settings.mobShadows) m |= 1 << 6;
 		if (Settings.glassSun) m |= 1 << 7;

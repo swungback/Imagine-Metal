@@ -121,10 +121,10 @@ final class MetaWorld {
         double dx=(tx+.5)*w-this.camX,dz=(tz+.5)*w-this.camZ;
         this.details.offer(key,new Refinement(level,tx,tz,key,dx*dx+dz*dz));
     }
-    private MetaGen.Ids ids() { return new MetaGen.Ids() {
+    private static final MetaGen.Ids IDS = new MetaGen.Ids() {
         public int block(BlockState state) { return MetaPalette.id(state); }
         public int biome(Holder<Biome> biome) { return MetaPalette.biome(biome); }
-    }; }
+    };
     private double detailDistance(Refinement r) {
         double w=64L<<r.level,x=r.tx*w,z=r.tz*w;
         double dx=Math.max(0,Math.max(x-this.camX,this.camX-(x+w)));
@@ -147,7 +147,7 @@ final class MetaWorld {
             if(this.closed)return true;
             MetaGen g=this.generator();if(g==null)return true;
             Rle[] four = g.generateFar(r.level, r.tx, r.tz, this.minY, this.height,
-                MetaSettings.exactTrees, this.airSky(), this.overhangs, this.ids());
+                MetaSettings.exactTrees, this.airSky(), this.overhangs, IDS);
             synchronized(this.publicationLock) {
                 if(this.closed || epoch!=this.cacheEpoch)return true;
                 long[] keys=new long[4];
@@ -513,7 +513,7 @@ final class MetaWorld {
             Rle[] four;
             try {
                 four = g.generateFar(level, tx, tz, this.minY, this.height,
-                    MetaSettings.exactTrees, this.airSky(), this.overhangs, this.ids());
+                    MetaSettings.exactTrees, this.airSky(), this.overhangs, IDS);
 			} catch (Throwable t) {
 				if (!this.genFailed) {
 					this.genFailed = true;
@@ -578,10 +578,7 @@ final class MetaWorld {
         if(level>0 || this.store.isSurface(level,cx,cz) || !MetaSettings.exactTrees)
             base=this.canopies.apply(base,level,cx,cz,this.minY,this.airSky());
         if (this.streams == null) return base;
-        return this.streams.apply(base, level, cx, cz, this.minY, this.airSky(), new MetaGen.Ids() {
-            public int block(BlockState state) { return MetaPalette.id(state); }
-            public int biome(Holder<Biome> biome) { return MetaPalette.biome(biome); }
-        });
+        return this.streams.apply(base, level, cx, cz, this.minY, this.airSky(), IDS);
     }
 
 	/** The column as drawn: the seed's (or air) with every real chunk seen there over it (levels 0 to 4). */
@@ -662,14 +659,14 @@ final class MetaWorld {
 	}
 
 	private boolean fillEdge(int level, int ncx, int ncz, int side, int height, int[] out) {
-		Rle base = this.cachedGen(level, ncx, ncz);
-		if (base != null) base = this.streamChannels(base, level, ncx, ncz);
+		Rle base = null;
+		boolean lookedUpSeed = false;
 		int chunks = chunksPer(level), cells = level <= 4 ? 16 >> level : 32;
 		// Adjacent cells from one real chunk share the same immutable captured data.
 		for (int start = 0; start < 32; start += cells) {
 			int x = side == 0 ? 31 : side == 1 ? 0 : start;
 			int z = side == 2 ? 31 : side == 3 ? 0 : start;
-			Rle source = base;
+			Rle source = null;
 			int sx = x, sz = z;
 			if (level <= 4) {
 				int chx = ncx * chunks + x / cells, chz = ncz * chunks + z / cells;
@@ -680,7 +677,14 @@ final class MetaWorld {
 					sz %= cells;
 				}
 			}
-			if (source == null) return false;
+			if (source == null) {
+				if (!lookedUpSeed) {
+					base = this.streamChannels(this.cachedGen(level, ncx, ncz), level, ncx, ncz);
+					lookedUpSeed = true;
+				}
+				if (base == null) return false;
+				source = base;
+			}
 			for (int i = 0; i < cells; i++) {
 				source.expand(sx + (side >= 2 ? i : 0), sz + (side < 2 ? i : 0), out, (start + i) * height);
 			}
@@ -1390,7 +1394,9 @@ final class MetaWorld {
 		MemoryUtil.memPutInt(fr + 116, this.maskZ);
 		MemoryUtil.memPutInt(fr + 120, this.maskSize);
 		MemoryUtil.memPutInt(fr + 124, this.maskWords);
-		MemoryUtil.memPutFloat(fr + 128, MetaSettings.hideUnderReal ? 1f : 0f);
+		float maskMode = MetaSettings.hideUnderReal ? 1f : 0f;
+		if (maskMode > 0f && this.skyLight && !this.end && MetaSettings.caveHandoff) maskMode += 2f;
+		MemoryUtil.memPutFloat(fr + 128, maskMode);
 		MemoryUtil.memPutFloat(fr + 132, this.reach);
 		int probe = MetaLods.probe;
 		MemoryUtil.memPutFloat(fr + 136, probe == 1 || probe == 2 ? 10f + probe : probe == 4 || probe == 5 ? 9f + probe

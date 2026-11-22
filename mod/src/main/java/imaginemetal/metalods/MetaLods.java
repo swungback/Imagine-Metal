@@ -184,6 +184,7 @@ public final class MetaLods {
 			if (w == null) return;
 			if (preparedPages < 0) pumpChunks(w);
 			MetaArena a = arena;
+			a.refreshModels(enc);
 			int pages = preparedPages >= 0 ? preparedPages : w.prepare(clip, camX, camY, camZ, renderDistance);
             if (preparedPages < 0) {
                 // Near terrain already drew without fading on this first frame.

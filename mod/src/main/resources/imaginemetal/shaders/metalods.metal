@@ -202,8 +202,14 @@ fragment MLGOut ml_fs(MLOut in [[stage_in]], float4 oldG2 [[color(2)]], float4 o
 			maskedHere = ((mask[bit >> 5] >> (bit & 31u)) & 1u) != 0u;
 			if (maskedHere && f.params.z != 3.0) {
                 float end = f.camFrac.w;
-                float amount = max(imLodEdgeAmount(in.rel.xz, end - float(f.camBlock.w), end),
-                    imLodChunkAmount(in.rel.xz, chunkFade));
+                float arrival = imLodChunkAmount(in.rel.xz, chunkFade);
+                if (f.params.x > 2.5 && oldDepth > 0.0 && arrival == 0.0) {
+                    // Keep a surviving real cave pixel even if the LOD's filled
+                    // geometry lies in front of the passage.
+                    uint2 light = uint2(oldG3.rg * 65535.0 + 0.5);
+                    if ((light.x & 15u) != 0u && (light.y >> 4) < 1638u) discard_fragment();
+                }
+                float amount = max(imLodEdgeAmount(in.rel.xz, end - float(f.camBlock.w), end), arrival);
                 // Complement of near opaque, cutout prepass and translucent tests.
                 if (imLodEdgeNoise(in.pos.xy) >= amount) discard_fragment();
             }

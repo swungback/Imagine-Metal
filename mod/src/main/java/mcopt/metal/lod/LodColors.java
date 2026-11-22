@@ -49,23 +49,34 @@ final class LodColors {
 		int overTint) {
 	}
 
-	private static final ConcurrentHashMap<BlockState, Look> LOOKS = new ConcurrentHashMap<>();
-	private static final ConcurrentHashMap<Identifier, Integer> TEXTURES = new ConcurrentHashMap<>();
+	private record Cache(ConcurrentHashMap<BlockState, Look> looks, ConcurrentHashMap<Identifier, Integer> textures,
+		ConcurrentHashMap<Identifier, int[]> profiles) {
+		Cache() {
+			this(new ConcurrentHashMap<>(), new ConcurrentHashMap<>(), new ConcurrentHashMap<>());
+		}
+	}
+
+	private static volatile Cache cache = new Cache();
 	private static final Look FALLBACK = new Look(0x7F7F7F, 0x6F6F6F, TINT_NONE, TINT_NONE, 0, new float[4], new float[4], false, new int[4], new float[4], TINT_NONE);
-	private static final ConcurrentHashMap<Identifier, int[]> PROFILES = new ConcurrentHashMap<>();
 
 	private LodColors() {
 	}
 
+	static void refresh() {
+		// Workers holding an older cache can finish without publishing old UVs into the new one.
+		cache = new Cache();
+	}
+
 	static Look look(BlockState state) {
-		Look l = LOOKS.get(state);
+		Cache current = cache;
+		Look l = current.looks.get(state);
 		if (l != null) return l;
 		try {
-			l = compute(state);
+			l = compute(state, current);
 		} catch (RuntimeException e) {
 			l = FALLBACK;
 		}
-		LOOKS.put(state, l);
+		current.looks.put(state, l);
 		return l;
 	}
 
@@ -111,7 +122,7 @@ final class LodColors {
 		return r << 16 | g << 8 | bl;
 	}
 
-	private static Look compute(BlockState state) {
+	private static Look compute(BlockState state, Cache current) {
 		Minecraft mc = Minecraft.getInstance();
 		BlockStateModel model = mc.getModelManager().getBlockStateModelSet().get(state);
 		List<BlockStateModelPart> parts = new ArrayList<>();
@@ -124,14 +135,14 @@ final class LodColors {
 		TextureAtlasSprite particle = model.particleMaterial().sprite();
 		TextureAtlasSprite topSprite = up != null ? up.materialInfo().sprite() : particle;
 		TextureAtlasSprite sideSprite = side != null ? side.materialInfo().sprite() : topSprite;
-		int topRgb = average(topSprite), sideRgb = average(sideSprite);
+		int topRgb = average(topSprite, current), sideRgb = average(sideSprite, current);
 		int[] topTint = tintOf(state, up), sideTint = tintOf(state, side);
 		if (state.getBlock() == Blocks.WATER) {
 			topTint = new int[] {TINT_WATER, 0};
 			sideTint = topTint;
 		}
 		// The grass block's side is dirt under a tinted overlay: from afar mostly dirt, so it stays untinted.
-		int[] profile = diagonal != null ? profile(sideSprite) : new int[4];
+		int[] profile = diagonal != null ? profile(sideSprite, current) : new int[4];
 		// (fix7) a side with a second, tinted quad over it (the grass block's overlay): MetaLODS lays it on, tinted, as the game does
 		float[] overUv = new float[4];
 		int overTint = TINT_NONE;
@@ -175,8 +186,8 @@ final class LodColors {
 	}
 
 	/** Per sixteenth of the sprite's width: how high its opaque texels reach (0-16), a byte each. */
-	static int[] profile(TextureAtlasSprite sprite) {
-		return PROFILES.computeIfAbsent(sprite.contents().name(), LodColors::loadProfile);
+	private static int[] profile(TextureAtlasSprite sprite, Cache current) {
+		return current.profiles.computeIfAbsent(sprite.contents().name(), LodColors::loadProfile);
 	}
 
 	private static int[] loadProfile(Identifier name) {
@@ -244,9 +255,9 @@ final class LodColors {
 	}
 
 	/** Average of a sprite's first frame, weighted by alpha (cutout textures count only what is drawn). */
-	static int average(TextureAtlasSprite sprite) {
+	private static int average(TextureAtlasSprite sprite, Cache current) {
 		Identifier name = sprite.contents().name();
-		return TEXTURES.computeIfAbsent(name, LodColors::load);
+		return current.textures.computeIfAbsent(name, LodColors::load);
 	}
 
 	private static int load(Identifier name) {

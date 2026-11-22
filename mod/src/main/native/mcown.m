@@ -15,7 +15,11 @@ static id<MTLTexture> imLightTex;
 static id<MTLSamplerState> imLightSampler;
 static id<MTLTexture> imSeedTex, imUnderTex, imUnderDepthTex, imPbrN, imPbrS;
 void mc_im_pbr_bind(id<MTLTexture> n, id<MTLTexture> s) {
-	imPbrN = n;  // (kept for good: one per resource reload, the last one's few MB)
+	// The upload transfers ownership. In-flight Metal command buffers keep
+	// their references, and the bevel upload shares one texture across both slots.
+	if (imPbrS != imPbrN) [imPbrS release];
+	[imPbrN release];
+	imPbrN = n;
 	imPbrS = s;
 }
 void mc_im_under_bind(id<MTLTexture> color, id<MTLTexture> depth) {

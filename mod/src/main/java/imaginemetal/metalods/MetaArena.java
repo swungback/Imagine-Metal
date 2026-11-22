@@ -1,6 +1,8 @@
 package imaginemetal.metalods;
 
 import java.util.ArrayDeque;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.block.BlockStateModelSet;
 import org.lwjgl.system.MemoryUtil;
 
 /**
@@ -15,7 +17,9 @@ final class MetaArena {
 	static final int LAND_BUCKETS = 5;  // 16, 32, 64, 128, 256 quads
 	static final int FRAME_BYTES = 144, MASK_MAX = 128, MASK_BYTES = MASK_MAX * MASK_MAX / 8;
 	final int pages;
-	final long quadBuf, infoBuf, modelBuf, biomeBuf;
+	final long quadBuf, infoBuf, biomeBuf;
+	long modelBuf;
+	private BlockStateModelSet modelSet;
 	final long quads, infos;
 	final byte[] pageBucket;
 	/**
@@ -44,6 +48,7 @@ final class MetaArena {
 		this.quadBuf = MetaNative.buffer(enc, (long) pages * PAGE_BYTES);
 		this.infoBuf = MetaNative.buffer(enc, (long) pages * INFO_BYTES);
 		this.modelBuf = MetaNative.buffer(enc, (long) MetaPalette.MAX_BLOCKS * MetaPalette.MODEL_BYTES);
+		this.modelSet = Minecraft.getInstance().getModelManager().getBlockStateModelSet();
 		this.biomeBuf = MetaNative.buffer(enc, (long) MetaPalette.MAX_BIOMES * MetaPalette.BIOME_BYTES);
 		this.heightBuf = MetaNative.buffer(enc, (long) HM * HM * 4);
 		this.heights = MetaNative.contents(this.heightBuf);
@@ -62,6 +67,17 @@ final class MetaArena {
 		for (int i = 0; i < pages; i++) this.free[i] = pages - 1 - i;
 		this.freeCount = pages;
 		MetaPalette.bind(MetaNative.contents(this.modelBuf), MetaNative.contents(this.biomeBuf));
+	}
+
+	void refreshModels(long enc) {
+		BlockStateModelSet current = Minecraft.getInstance().getModelManager().getBlockStateModelSet();
+		if (current == modelSet) return;
+		long replacement = MetaNative.buffer(enc, (long) MetaPalette.MAX_BLOCKS * MetaPalette.MODEL_BYTES);
+		MetaPalette.replaceModels(MetaNative.contents(replacement));
+		// Metal command buffers retain the previous table until their draws finish.
+		MetaNative.release(modelBuf);
+		modelBuf = replacement;
+		modelSet = current;
 	}
 
 	void resetHeights() {

@@ -98,8 +98,12 @@ static float imLodChunkAmount(float2 rel, device const uint *fade) {
 }
 // END LOD edge dither math
 
-static bool imLodNearVisible(float3 rel, float2 pixel, constant ImFrame &f, device const uint *fade) {
-    float amount = max(imLodEdgeAmount(rel.xz, f.lodFog.z, f.lodFog.w), imLodChunkAmount(rel.xz, fade));
+static bool imLodNearVisible(float3 rel, float2 pixel, float sky, constant ImFrame &f, device const uint *fade) {
+    float band = imLodEdgeAmount(rel.xz, f.lodFog.z, f.lodFog.w);
+    // The distant Overworld mesh can close dark passages. Keep the real
+    // surface there while the distance band is active. Chunk arrival still fades.
+    if ((uint(f.env.w + 0.5) & 512u) != 0u && sky < 0.4) band = 0.0;
+    float amount = max(band, imLodChunkAmount(rel.xz, fade));
     return amount <= 0.0 || imLodEdgeNoise(pixel) >= amount;
 }
 
@@ -734,19 +738,24 @@ static ImSurf imSurface(uint cls, float3 col, float3 tex) {
 }
 
 // The sun's highlight (Reimagined's GGX): N the shading normal, V toward the eye, L toward the light.
-static float imHighlight(float3 N, float3 V, float3 L, float nl, float smooth) {
+static float imHighlight(float3 N, float3 V, float3 L, float nl, float smooth, float f0 = 0.05, bool authored = false) {
 	float sm = sqrt(saturate(smooth * 0.9 + 0.1));
 	float rp = 1.35 - sm;
 	float r = rp * rp;
 	r *= r;
+	if (authored) {
+		float roughness = max((1.0 - smooth) * (1.0 - smooth), 0.02);
+		r = roughness * roughness;
+	}
 	float3 H = normalize(L + V);
 	float lh = saturate(dot(H, L));
 	float nh = saturate(dot(N, H));
 	float nh2 = nh * nh;
 	float den = nh2 * r - nh2 + 1.0;
 	float D = r / (3.14159265 * den * den);
-	const float f0 = 0.05;
-	float F = exp2((-5.55473 * lh - 6.98316) * lh) * (1.0 - f0) + f0;
+	float edge = 1.0 - lh;
+	float edge2 = edge * edge;
+	float F = mix(f0, 1.0, authored ? edge2 * edge2 * edge : exp2((-5.55473 * lh - 6.98316) * lh));
 	return min(nl * D * F / max(lh * lh, 1e-3), 32.0);
 }
 
@@ -1173,6 +1182,7 @@ struct ImPre {
 	float3 Lt;     // toward the torch light (the face's normal leaned up the block light's slope)
 	float2 texel;  // the atlas texel (the coated textures' and the sculk's per-texel numbers)
 	float4 packSpec;
+	float packAo;
 	float farSun;  // (fix7) past the shadow maps, how much of the sun reaches it by MetaLODS' height map (1: all; the deferred pass)
 	bool lod;      // (s1119) a MetaLODS pixel (the deferred pass): the shadow maps hold no LOD casters, so their open-air test is skipped
 };
@@ -1187,6 +1197,7 @@ static inline ImPre imNoPre() {
 	m.texel = float2(0.0);
 	m.farSun = 1.0;
 	m.packSpec = IM_MISSING_SPEC;
+	m.packAo = 1.0;
 	m.lod = false;
 	return m;
 }
@@ -1197,6 +1208,7 @@ static ImPre imMaterial(float3 p, float2 light, uint mat, float3 tex, float2 uv,
 	m.on = true;
 	m.farSun = 1.0;
 	m.packSpec = IM_MISSING_SPEC;
+	m.packAo = 1.0;
 	m.lod = false;
 	bool slanted;
 	float3 n = imFaceNormal(p, slanted);
@@ -1245,21 +1257,31 @@ static ImPre imMaterial(float3 p, float2 light, uint mat, float3 tex, float2 uv,
 static float2 imPackParallax(float2 uv, float2 ray, float4 rect, texture2d<float> normals) {
 	constexpr sampler nearest(filter::nearest, address::clamp_to_edge);
 	float2 size = float2(normals.get_width(), normals.get_height());
-	float2 lo = rect.xy + 0.5 / size, hi = max(lo, rect.zw - 0.5 / size);
-	float2 position = uv * size;
+	float2 first = round(rect.xy * size);
+	float2 last = max(first + 1.0, round(rect.zw * size));
+	float2 position = clamp(uv * size, first + 1e-4, last - 1e-4);
 	float2 direction = ray * size;
-	float2 stride = 1.0 / max(abs(direction), 1e-5);
+	// Shorten the ray before tracing when the face ends. Clamping after a miss
+	// would project the same border texel across a strip inside the face.
+	float2 reach = select(position - first, last - position, direction >= 0.0);
+	float2 edge = reach / max(abs(direction), 1e-6);
+	float limit = min(min(edge.x, edge.y), 30.0 / max(abs(direction.x) + abs(direction.y), 1e-6));
+	direction *= min(1.0, limit * 0.999);
+	float2 stride = select(float2(1e20), 1.0 / max(abs(direction), 1e-6), abs(direction) >= 1e-6);
 	float2 next = select(fract(position), 1.0 - fract(position), direction >= 0.0) * stride;
 	int2 step = select(int2(-1), int2(1), direction >= 0.0);
 	int2 cell = int2(floor(position));
 	float entered = 0.0;
 	for (int i = 0; i < 32; i++) {
 		float2 center = (float2(cell) + 0.5) / size;
-		if (any(center < lo - 1e-6) || any(center > hi + 1e-6)) break;
 		float depth = 1.0 - normals.sample(nearest, center, level(0.0)).a;
 		float exit = min(next.x, next.y);
 		float hit = max(entered, depth);
-		if (hit <= min(exit, 1.0)) return clamp(uv + ray * (hit + 1e-6), lo, hi);
+		if (hit <= min(exit, 1.0)) {
+			// Stay inside the intersected column so the three maps read the same texel.
+			float2 at = clamp(position + direction * hit, float2(cell) + 1e-4, float2(cell) + 0.9999);
+			return at / size;
+		}
 		if (exit >= 1.0) break;
 		entered = exit;
 		if (next.x <= next.y) {
@@ -1270,54 +1292,53 @@ static float2 imPackParallax(float2 uv, float2 ray, float4 rect, texture2d<float
 			next.y += stride.y;
 		}
 	}
-	return clamp(uv + ray * entered, lo, hi);
+	return uv;
 }
 
-static void imPackMaterial(thread ImPre &m, float3 p, thread float3 &albedo, thread float3 &tex, float2 uv, float4 rect,
+static void imPackMaterial(thread ImPre &m, float3 p, float3 tint, thread float3 &albedo, thread float3 &tex, float2 uv, float4 rect, bool displace,
 	texture2d<float> atlas, texture2d<float> normals, texture2d<float> specular, constant ImFrame &f) {
 	if (!IM_FC_PBRPACK || f.pbrPack.x < 0.5) return;
 	constexpr sampler nearest(filter::nearest, address::clamp_to_edge);
-	// Specular maps also describe crossed foliage and other slanted faces.
-	if (m.slanted) {
-		m.packSpec = specular.sample(nearest, uv, level(0.0));
-		return;
-	}
 	float3 dp1 = dfdx(p), dp2 = dfdy(p);
 	float2 duv1 = dfdx(uv), duv2 = dfdy(uv);
 	float4 pn = normals.sample(nearest, uv, level(0.0));
 	float2 packedUv = uv;
 	if (any(pn < 0.999)) {  // all white cannot encode a valid normal
-		float3 T = cross(dp2, m.n) * duv1.x + cross(m.n, dp1) * duv2.x;
-		float3 B = cross(dp2, m.n) * duv1.y + cross(m.n, dp1) * duv2.y;
-		float inv = rsqrt(max(max(dot(T, T), dot(B, B)), 1e-30));
-		float3 Tn = T * inv, Bn = B * inv;
-		uint parallax = uint(f.pbrPack.y);
-		bool trace = IM_FC_PARALLAX && (parallax & 1u) != 0u && length(p) < 24.0 && all(rect.zw > rect.xy);
-		if (trace && pn.a < 0.999) {
-			float3 view = -normalize(p);
-			float2 ray = -float2(dot(view, normalize(T)), dot(view, normalize(B))) * (rect.zw - rect.xy)
-				* (0.25 / max(dot(view, m.n), 0.25));
-			packedUv = imPackParallax(uv, ray, rect, normals);
-			if (any(packedUv != uv)) {
-				float3 displaced = atlas.sample(nearest, packedUv, level(0.0)).rgb;
-				albedo *= displaced / max(tex, float3(0.004));
-				tex = displaced;
-				pn = normals.sample(nearest, packedUv, level(0.0));
+		float3 cv = cross(dp2, m.n), cu = cross(m.n, dp1);
+		float det = dot(dp1, cv);
+		if (!m.slanted && abs(det) > 1e-10) {
+			// Invert the screen-position differential. The signed determinant
+			// keeps UV directions correct for Metal's downward screen Y and for mirrored faces.
+			float3 T = (cv * duv1.x + cu * duv2.x) / det;
+			float3 B = (cv * duv1.y + cu * duv2.y) / det;
+			float inv = rsqrt(max(max(dot(T, T), dot(B, B)), 1e-30));
+			uint parallax = uint(f.pbrPack.y);
+			bool trace = IM_FC_PARALLAX && displace && (parallax & 1u) != 0u
+				&& length(p) < 24.0 && all(rect.zw > rect.xy);
+			if (trace && pn.a < 0.999) {
+				float3 view = -normalize(p);
+				float2 ray = -float2(dot(view, T), dot(view, B)) * (0.25 / max(dot(view, m.n), 0.25));
+				packedUv = imPackParallax(uv, ray, rect, normals);
+				if (any(packedUv != uv)) {
+					tex = atlas.sample(nearest, packedUv, level(0.0)).rgb;
+					albedo = tex * tint;
+					pn = normals.sample(nearest, packedUv, level(0.0));
+				}
 			}
+			float2 xy = pn.rg * 2.0 - 1.0;
+			float3 bump = (T * xy.x + B * xy.y) * inv + m.n * max(sqrt(saturate(1.0 - dot(xy, xy))), 1e-4);
+			if (trace && (parallax & 2u) != 0u) {
+				float2 pixel = 1.0 / float2(normals.get_width(), normals.get_height());
+				float2 lo = rect.xy + pixel * 0.5, hi = max(lo, rect.zw - pixel * 0.5);
+				float xl = normals.sample(nearest, clamp(packedUv - float2(pixel.x, 0.0), lo, hi), level(0.0)).a;
+				float xr = normals.sample(nearest, clamp(packedUv + float2(pixel.x, 0.0), lo, hi), level(0.0)).a;
+				float yl = normals.sample(nearest, clamp(packedUv - float2(0.0, pixel.y), lo, hi), level(0.0)).a;
+				float yr = normals.sample(nearest, clamp(packedUv + float2(0.0, pixel.y), lo, hi), level(0.0)).a;
+				bump = m.n + 0.125 * (T * ((xl - xr) / pixel.x) + B * ((yl - yr) / pixel.y));
+			}
+			m.N = normalize(bump);
 		}
-		float2 xy = pn.rg * 2.0 - 1.0;
-		float3 bump = float3(xy.x, -xy.y, sqrt(saturate(1.0 - dot(xy, xy))));
-		if (trace && (parallax & 2u) != 0u) {
-			float2 pixel = 1.0 / float2(normals.get_width(), normals.get_height());
-			float2 lo = rect.xy + pixel * 0.5, hi = max(lo, rect.zw - pixel * 0.5);
-			float xl = normals.sample(nearest, clamp(packedUv - float2(pixel.x, 0.0), lo, hi), level(0.0)).a;
-			float xr = normals.sample(nearest, clamp(packedUv + float2(pixel.x, 0.0), lo, hi), level(0.0)).a;
-			float yl = normals.sample(nearest, clamp(packedUv - float2(0.0, pixel.y), lo, hi), level(0.0)).a;
-			float yr = normals.sample(nearest, clamp(packedUv + float2(0.0, pixel.y), lo, hi), level(0.0)).a;
-			bump = float3((float2(xl - xr, yl - yr) * (rect.zw - rect.xy)) / pixel * 0.125, 1.0);
-		}
-		m.N = normalize(Tn * bump.x + Bn * bump.y + m.n * max(bump.z, 1e-4));
-		albedo *= mix(1.0, pn.b, 0.8);
+		m.packAo = pn.b;
 	}
 	m.packSpec = specular.sample(nearest, packedUv, level(0.0));
 }
@@ -1345,7 +1366,6 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	uint kind = (mat >> 8) & 255u;  // (the translucent pass: 1 water, 2 glass and other see-through blocks)
 	// (mat bit 16: an opaque fragment. With the air pass on (f.pbrPack.w) its haze is laid on later, once per pixel: air.metal)
 	bool airLater = (mat & 0x10000u) != 0u && f.pbrPack.w > 0.5;
-	if (!pre.on && kind == 0u) imPackMaterial(m, p, albedo, tex, uv, rect, atlas, pbrN, pbrS, f);
 	float3 N = m.N;
 	float4 pS = m.packSpec;
 	bool packed = imHasPackSpec(pS);
@@ -1407,7 +1427,9 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		surf.d = pS.r;
 		surf.g = pS.r;
 		surf.metal = metalP;
-		surf.f0 = metalP > 0.5 ? 0.9 : max(pS.g, 0.02);
+		// LabPBR permits treating all indexed metals as albedo-F0 metals.
+		surf.f0 = metalP > 0.5 ? imLuma(base) : pS.g;
+		surf.hl = 1.0;
 	}
 	// (obsidian and crying obsidian: dark gems, kept to a sheen; diamond, emerald, amethyst: bright ones, kept shiny)
 	float gemDark = 1.0 - smoothstep(0.15, 0.4, imLuma(tex));
@@ -1523,6 +1545,7 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// under water: light scattered through the water reaches everything in a blue-green glow (Reimagined's sea floor is never
 	// black, even in the shade of kelp); dim at night
 	if (f.water.z > 0.5 && f.flags.x == 0) ambient += float3(0.035, 0.12, 0.11) * mix(0.12, 1.0, f.nightMiddle.w);  // (turquoise, not cold blue)
+	ambient *= m.packAo;
 
 	// torches: warm, weaker in full daylight
 	// (no block light and full daylight: the grid's eight reads skipped, most of an open landscape by day)
@@ -1575,20 +1598,22 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 	// the sun's highlight (on top of the light, before the tone curve: a bright one blooms); a metal's in its own colour
 	if (pbr && surf.g > 0.0) {
 		float nlh = saturate(dot(N, f.lightDir.xyz)) * step(0.0, dot(n, f.lightDir.xyz));
-		float hlt = imHighlight(N, V, f.lightDir.xyz, nlh, surf.g) * surf.hl;
+		float f0 = packed ? surf.f0 : 0.05;
+		float boost = packed ? 1.0 : mix(0.3, 1.0, max(surf.metal, smoothstep(0.04, 0.2, surf.f0)));
+		float hlt = imHighlight(N, V, f.lightDir.xyz, nlh, surf.g, f0, packed) * surf.hl;
 		if (cls == IM_MAT_FOLIAGE) {
 			float fr = 1.0 - saturate(dot(N, V));
 			fr *= fr;
 			hlt *= (1.0 - fr * fr) * 0.5;  // (fields of grass at a low angle: a sheen, not a glare)
 		}
 		float3 tint = mix(float3(1.0), base / max(max(max(base.r, base.g), base.b), 0.02), surf.metal);
-		hlt *= mix(0.3, 1.0, max(surf.metal, smoothstep(0.04, 0.2, surf.f0)));  // (a dielectric's: a glint, not a white wash)
+		hlt *= boost;
 		radiance += f.lightColor.rgb * (hlt * sun) * tint * f.minLight.w;
 		// (the torch's: weaker than the sun's, by how bright the torch light is here)
 		float tl = imLuma(torch);
 		if (tl > 0.002) {
 			float nlt = saturate(dot(N, Lt));
-			float hl2 = imHighlight(N, V, Lt, nlt, surf.g) * surf.hl * mix(0.3, 1.0, max(surf.metal, smoothstep(0.04, 0.2, surf.f0)));
+			float hl2 = imHighlight(N, V, Lt, nlt, surf.g, f0, packed) * surf.hl * boost;
 			if (cls == IM_MAT_FOLIAGE) hl2 *= 0.3;
 			if (cls == IM_MAT_GEM) hl2 *= mix(1.0, 0.7, gemDark);  // (obsidian beside a torch: a glint, not a glaze)
 			radiance += torch * (hl2 * 0.35) * tint * f.minLight.w;
@@ -1600,7 +1625,8 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 			if (hlv > 0.0) {
 				float3 hcol = f.held.rgb / max(max(max(f.held.r, f.held.g), f.held.b), 1e-3) * max(max(f.blockColor.r, f.blockColor.g), f.blockColor.b);
 				float nv = saturate(dot(N, V));
-				float hs = imHighlight(N, V, V, nv, surf.g) * surf.hl * mix(0.4, 1.0, max(surf.metal, smoothstep(0.04, 0.2, surf.f0)));
+				float hs = imHighlight(N, V, V, nv, surf.g, f0, packed) * surf.hl
+					* (packed ? 1.0 : mix(0.4, 1.0, max(surf.metal, smoothstep(0.04, 0.2, surf.f0))));
 				if (cls == IM_MAT_FOLIAGE) hs *= 0.3;
 				radiance += hcol * imBlockCurve(hlv) * (hs * 0.45) * tint * f.minLight.w;
 			}
@@ -1699,6 +1725,10 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		float fm = max(fresnel - ff, 0.0) / (1.0 - ff);
 		float intense = surf.metal;  // (Reimagined: only metals reflect strongly head-on; gems and obsidian mostly at an angle)
 		fm = mix(fm * fm, fm * 0.75 + 0.25, intense);
+		if (packed) {
+			float grazing2 = fresnel * fresnel;
+			fm = mix(surf.f0, 1.0, grazing2 * grazing2 * fresnel);
+		}
 		fm *= sqrt(surf.d);
 		if (fm > 0.01) {
 			float3 R = reflect(-V, N);

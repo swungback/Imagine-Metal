@@ -530,7 +530,8 @@ public final class ImagineFrame {
 		// 128 (s1121) the far shadow map holds the LOD casters: LOD pixels take the open-air test too)
 		int envBits = (Settings.shaftVeilFix ? 1 : 0) | (Shadows.plantsValid() ? 2 : 0) | (Settings.shadowFarFix ? 4 : 0) | (Settings.waterTrace ? 0 : 8)
 			| (Settings.waterSurfaceFog ? 16 : 0) | (Settings.waterWideWindow ? 32 : 0) | (Settings.waterUnderSurface ? 64 : 0)
-			| (imaginemetal.metalods.MetaLods.lodOpenAir() ? 128 : 0) | (Settings.generatedEmissionSss ? 0 : 256);
+			| (imaginemetal.metalods.MetaLods.lodOpenAir() ? 128 : 0) | (Settings.generatedEmissionSss ? 0 : 256)
+			| (dim == 0 && imaginemetal.metalods.MetaSettings.caveHandoff ? 512 : 0);
 		put(cave, night, Settings.shaftVeilFix && !Settings.shaftsFull ? 0.35f : 0f, envBits);
 		for (int c = 0; c < 2; c++) for (int i = 0; i < 16; i++) BUF.putFloat(Shadows.MATRIX[c][i]);
 		// shadow: near cascade normal offset, valid, far cascade normal offset

@@ -13,6 +13,7 @@ import net.minecraft.world.level.block.Blocks;
 public final class LodStreams {
     private final ServerLevel world;
     private final Method engine, plan, inChannel, bedY, waterY, platesBox, platesReady;
+    private final @Nullable Method corridor;
     private final java.util.Map<String, Object> pending = new java.util.concurrent.ConcurrentHashMap<>();
     private java.util.Iterator<java.util.Map.Entry<String,Object>> pendingScan;
     private long nextPoll;
@@ -40,6 +41,9 @@ public final class LodStreams {
         this.engine = entry.getMethod("engineIfPresent", ServerLevel.class);
         this.plan = river.getMethod("plan", int.class, int.class);
         this.inChannel = column.getMethod("inChannel");
+        Method corridorMethod;
+        try { corridorMethod = column.getMethod("inCorridor"); } catch (NoSuchMethodException e) { corridorMethod = null; }
+        this.corridor = corridorMethod;
         this.bedY = column.getMethod("bedY");
         this.waterY = column.getMethod("waterSurfaceY");
         this.platesBox = river.getMethod("platesTouchingBox", int.class,int.class,int.class,int.class);
@@ -127,6 +131,17 @@ public final class LodStreams {
         if (this.failed || this.closed) return base;
         Object previous = this.adapted.get(base);
         if (previous != null) return previous instanceof Rle r ? r : base;
+        // Several neighboring mesh jobs can reach the same seed column at once.
+        // Share its plan work without locking out other columns.
+        synchronized (base) {
+            previous = this.adapted.get(base);
+            if (previous != null) return previous instanceof Rle r ? r : base;
+            if (this.failed || this.closed) return base;
+            return applyUncached(base, level, cx, cz, minY, sky, ids);
+        }
+    }
+
+    private Rle applyUncached(Rle base, int level, int cx, int cz, int minY, int sky, MetaGen.Ids ids) {
         try {
             Object active = this.engine.invoke(null, this.world);
             if (active == null) return base;
@@ -201,21 +216,12 @@ public final class LodStreams {
         }
     }
 
-    private @Nullable Method corridor;
-    private boolean corridorLooked;
-
     /** One plan answer into the grid: CHANNEL (water over its bed), CORRIDOR (the strip beside it), else NONE. */
     private void query(Object active, int bx, int bz, int minY, int h, int cell, byte[] kind, int[] bedB, int[] waterB, int i)
         throws ReflectiveOperationException {
         Object p = this.plan.invoke(active, bx, bz);
         boolean ch = (boolean)this.inChannel.invoke(p);
-        if (!ch) {
-            if (!this.corridorLooked) {
-                this.corridorLooked = true;
-                try { this.corridor = this.inChannel.getDeclaringClass().getMethod("inCorridor"); } catch (NoSuchMethodException e) { this.corridor = null; }
-            }
-            if (this.corridor == null || !(boolean)this.corridor.invoke(p)) return;
-        }
+        if (!ch && (this.corridor == null || !(boolean)this.corridor.invoke(p))) return;
         int by = (int)this.bedY.invoke(p), wy = (int)this.waterY.invoke(p);
         if (wy < minY || wy >= minY + h * cell) return;
         if (ch) {

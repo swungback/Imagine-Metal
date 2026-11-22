@@ -280,7 +280,11 @@ int im_pbr_upload(Ctx *ctx, int w, int h, const void *n, const void *s) {
 		td.usage = MTLTextureUsageShaderRead;
 		id<MTLTexture> tn = [ctx->device newTextureWithDescriptor:td];
 		id<MTLTexture> ts = [ctx->device newTextureWithDescriptor:td];
-		if (!tn || !ts) return 0;
+		if (!tn || !ts) {
+			[tn release];
+			[ts release];
+			return 0;
+		}
 		MTLRegion r = MTLRegionMake2D(0, 0, (NSUInteger) w, (NSUInteger) h);
 		[tn replaceRegion:r mipmapLevel:0 withBytes:n bytesPerRow:(NSUInteger) w * 4];
 		[ts replaceRegion:r mipmapLevel:0 withBytes:s bytesPerRow:(NSUInteger) w * 4];

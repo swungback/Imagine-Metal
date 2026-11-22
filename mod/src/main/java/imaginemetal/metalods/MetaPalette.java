@@ -63,10 +63,13 @@ public final class MetaPalette {
 		for (int i = 1; i < BIOMES.size(); i++) writeBiome(i, BIOMES.get(i));
 	}
 
-	/** Every model entry written again (a resource reload moved the sprites). */
-	static synchronized void rewriteModels() {
-		if (models == 0) return;
+	/** A replacement table for the new atlas. Existing mesh IDs stay valid. */
+	static synchronized void replaceModels(long modelTable) {
+		MetaGen.refreshLooks();
+		models = modelTable;
+		MemoryUtil.memSet(modelTable, 0, (long) MAX_BLOCKS * MODEL_BYTES);
 		for (int i = 1; i < STATES.size(); i++) writeModel(i, STATES.get(i));
+		System.out.println("[MetaLODS] refreshed " + (STATES.size() - 1) + " block models after resource reload");
 	}
 
 	static int kind(int id) {

@@ -2460,7 +2460,7 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 		return sampleNearest(atlas, atlasSampler, in.texCoord0, 1.0f / float2(t.TextureSize), 1.0f) * getColor(in);
 #endif
 #ifdef IM_SHADE
-    if (!imLodNearVisible(in.imPos, in.pos.xy, imf, imChunkFade)) discard_fragment();
+    if (!imLodNearVisible(in.imPos, in.pos.xy, in.imLight.y, imf, imChunkFade)) discard_fragment();
 #endif
 	float2 pixelSize = 1.0f / float2(t.TextureSize);
 #ifdef IM_SHADE
@@ -2616,8 +2616,17 @@ static float4 ownFsBody(VOut in, constant Globals &g, constant Terrain &t, const
 		float4 qs = float4(in.imQL.y & 255u, (in.imQL.y >> 8) & 255u, (in.imQL.y >> 16) & 255u, in.imQL.y >> 24);
 		imLightQ = saturate(float2(mix(mix(qb.x, qb.y, st.y), mix(qb.w, qb.z, st.y), st.x), mix(mix(qs.x, qs.y, st.y), mix(qs.w, qs.z, st.y), st.x)) / 240.0);
 	}
+	ImPre material = imNoPre();
+	if (IM_FC_PBRPACK && imf.pbrPack.x > 0.5 && imKind == 0u) {
+		material = imMaterial(in.imPos, imLightQ, in.imMat, texel.rgb, in.texCoord0, in.imRect, atlas, imPbrN, imf);
+		float3 packColor = color.rgb, packTexel = texel.rgb;
+		imPackMaterial(material, in.imPos, getColor(in).rgb, packColor, packTexel, in.texCoord0, in.imRect,
+			!CUTOUT, atlas, imPbrN, imPbrS, imf);
+		color.rgb = packColor;
+		texel.rgb = packTexel;
+	}
 	color.rgb = imShade(color.rgb, texel.rgb, in.imPos, imLightQ, in.imMat | (imKind << 8) | (CUTOUT && CUTOUT_LIMIT < 0.2 ? 0u : 0x10000u), in.pos.xy, imf, imShadowMap, imShadowCmp, imLightVol, imLightSampler, imLightFilt, imLightOpen, imSeeds, imPbrN, imPbrS,
-		in.texCoord0, in.imRect, atlas, imHistColor, imHistDepth, imHistSampler, imUnderDepth, imNoPre()); // (Imagine Metal)
+		in.texCoord0, in.imRect, atlas, imHistColor, imHistDepth, imHistSampler, imUnderDepth, material);
 	if (IM_FC_PORTALS && imPortal && imf.extra.x > 0.5 && imf.portalRect.z > imf.portalRect.x) color = imPortalLook(in.texCoord0, in.imPos, texel, atlas, imf);
 	// (the translucent pass has no material bytes, so a flame drawn in it (a resource pack's 3D torch, the copper torch: sprites with
 	// soft edges land in that layer) didn't glow: its opaque, hot, saturated texels glow as a flame's do; glass is see-through)
@@ -2689,7 +2698,7 @@ static inline float3 imOctDec(float2 e) {
 fragment ImGOut own_fs_g(VOut in [[stage_in]], constant Globals &g [[buffer(22)]], constant Terrain &t [[buffer(23)]],
 	texture2d<float> atlas [[texture(16)]], sampler atlasSampler [[sampler(14)]], constant ImFrame &imf [[buffer(30)]], device const uint *imChunkFade [[buffer(25)]],
 	texture2d<float> imPbrN [[texture(27)]], texture2d<float> imPbrS [[texture(28)]]) {
-    if (!imLodNearVisible(in.imPos, in.pos.xy, imf, imChunkFade)) discard_fragment();
+    if (!imLodNearVisible(in.imPos, in.pos.xy, in.imLight.y, imf, imChunkFade)) discard_fragment();
 	float2 pixelSize = 1.0f / float2(t.TextureSize);
 	float imLod = imf.taa.w > 0.01 ? imf.taa.w : 1.0;
 	// (fix9b: a bushy leaf plane one detail level sharper: seen slanted its texture fell two levels and read blurry, Jack 00.46.08)
@@ -2712,7 +2721,7 @@ fragment ImGOut own_fs_g(VOut in [[stage_in]], constant Globals &g [[buffer(22)]
 	}
 	ImPre m = imMaterial(in.imPos, imLightQ, in.imMat & 255u, texel.rgb, in.texCoord0, in.imRect, atlas, imPbrN, imf);
 	float3 packColor = color.rgb, packTexel = texel.rgb;
-	imPackMaterial(m, in.imPos, packColor, packTexel, in.texCoord0, in.imRect, atlas, imPbrN, imPbrS, imf);
+	imPackMaterial(m, in.imPos, getColor(in).rgb, packColor, packTexel, in.texCoord0, in.imRect, !CUTOUT, atlas, imPbrN, imPbrS, imf);
 	float3 n = m.n;
 	uint axis = n.x > 0.5 ? 0u : n.x < -0.5 ? 1u : n.y > 0.5 ? 2u : n.y < -0.5 ? 3u : n.z > 0.5 ? 4u : 5u;
 	// (the torch lean: Lt's part along the face, as imMaterial put it together: up to 0.7 beside the normal's 0.75)
@@ -2726,7 +2735,12 @@ fragment ImGOut own_fs_g(VOut in [[stage_in]], constant Globals &g [[buffer(22)]
 	ImGOut o;
 	o.g1 = float4(saturate(packColor), float(flags) / 255.0);
 	o.g2 = float4(packTexel, float(in.imMat & 255u) / 255.0);
-	o.g3 = float4((floor(saturate(imLightQ) * 4095.0 + 0.5) * 16.0 + code) / 65535.0, imOctEnc(m.slanted ? n : m.N));
+	float2 oct = saturate(imOctEnc(m.slanted ? n : m.N));
+	if (imf.pbrPack.x > 0.5) {
+		uint ao = uint(saturate(m.packAo) * 255.0 + 0.5);
+		oct = (floor(oct * 4095.0 + 0.5) * 16.0 + float2(ao >> 4, ao & 15u)) / 65535.0;
+	}
+	o.g3 = float4((floor(saturate(imLightQ) * 4095.0 + 0.5) * 16.0 + code) / 65535.0, oct);
 	o.g4 = in.pos.z;
 	o.g5 = m.packSpec;
 	return o;
@@ -2828,11 +2842,20 @@ fragment float4 im_defer_fs(ImDeferOut in [[stage_in]], float4 imDst [[color(0)]
 	m.on = true;
 	m.lod = lodPix;
 	m.packSpec = lodPix ? IM_MISSING_SPEC : g5;
+	m.packAo = 1.0;
 	m.slanted = (flags & 1u) != 0u;
 	float3 an = float3(axis < 2u ? 1.0 : 0.0, axis == 2u || axis == 3u ? 1.0 : 0.0, axis >= 4u ? 1.0 : 0.0) * ((axis & 1u) != 0u ? -1.0 : 1.0);
 	// Water reuses g3.ba for thickness, so reconstruct BOTH lighting normals
 	// from its face axis. Keeping N pointing up reflected side/bottom faces as tops.
-	m.N = mat == 0x80u ? an : imOctDec(g3.ba);
+	float2 oct = g3.ba;
+	if (!lodPix && imf.pbrPack.x > 0.5) {
+		float2 encoded = floor(oct * 65535.0 + 0.5);
+		float2 normalBits = floor(encoded / 16.0);
+		float2 aoBits = encoded - normalBits * 16.0;
+		oct = normalBits / 4095.0;
+		m.packAo = dot(aoBits, float2(16.0, 1.0)) / 255.0;
+	}
+	m.N = mat == 0x80u ? an : imOctDec(oct);
 	m.n = m.slanted ? m.N : an;
 	float3 tv = axis < 2u ? float3(0.0, lean.x, lean.y) : axis < 4u ? float3(lean.x, 0.0, lean.y) : float3(lean.x, lean.y, 0.0);
 	m.Lt = m.slanted ? m.n : normalize(m.n * 0.75 + tv);
@@ -3033,7 +3056,7 @@ fragment void own_fs_alpha(VOut in [[stage_in]], constant Globals &g [[buffer(22
 #endif
 	) {
 #ifdef IM_SHADE
-    if (!imLodNearVisible(in.imPos, in.pos.xy, imf, imChunkFade)) discard_fragment();
+    if (!imLodNearVisible(in.imPos, in.pos.xy, in.imLight.y, imf, imChunkFade)) discard_fragment();
 #endif
 	float2 pixelSize = 1.0f / float2(t.TextureSize);
 #ifdef IM_SHADE

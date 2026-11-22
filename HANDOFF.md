@@ -1,3 +1,141 @@
+# 2026-11-21–22 — s1121 renderer audit
+
+Started from `9d64084`. The Nether cavern release and original final7 rollback both match their recorded SHA256.
+The session files are in `claude-scratch/codex-s1121-renderer-audit`. ColdTp uses disposable copies. Region timestamps
+identified the reported terrain as `New World (11)`, whose display name is also New World.
+
+Installed `claude-scratch/codex-s1121-verified-release/imagine-metal-s1121-renderer-audit.jar` as
+`minecraft/mods/imagine-metal-0.1.0.jar`. Both copies have SHA256
+`5872fbe6607b98977dbb8145dd67719d2ca4aab5967cef39c8868e7098746f99`.
+Rollback to `claude-scratch/codex-s1121-nether/imagine-metal-s1121-nether-caverns.jar`
+(`caf50d5dec5a538a450b755f8e91dd946ad4824678aba5ffb72690006aab98e2`) or
+`claude-scratch/s1121/imagine-metal-s1121-final7.jar`
+(`2fa996a159be365cf7642f41fb895ab4e6d076854b80add73dbf257b712fe1f6`).
+ColdTp is disabled. The original pack list and renderer settings are restored, including rd 6, 1080 output
+and 67% render scale. Test copies are archived in the session's `disposable-saves`.
+
+## SPBR-22_6
+
+ColdTp used 1728×1080 at 67%, time 5000. The stock launcher probe found 4,059 pack maps in a 4096×4096
+atlas. Pack mode retained LODs. At the fixed village pose, the matched pack and generated windows both showed
+386,515 LOD quads. On the material panel, the diamond ore crop's mean luma went from 146.05 to 129.42 when
+its zero-emission map took over. SPBR glowstone went from 175.35 to 202.59. Switching off generated glow
+and SSS in pack mode changed the diamond and glowstone crops' mean luma by at most 0.02.
+
+The stock shader's cotangent vectors were reversed in all four tested rotations and their mirrored variants.
+The green-channel flip cancelled the basis error for green only. The signed differential corrects both normal
+and parallax directions. SPBR cobblestone had 50 recessed edge samples out of 64. At the old trace's grazing
+limit, 4,232 of 50,944 rays starting in recessed texels escaped the face and hit the clamped edge path.
+Neither the barrel side nor top rays escaped. The corrected trace shortens the ray before reaching a face edge.
+It applies direct vertex tint to displaced texels and leaves the cutout silhouette aligned with its depth prepass.
+AO is carried in the G-buffer on pack pixels and applied to ambient light. Pack highlights and reflections use
+authored F0, including zero, and the highlight decodes perceptual smoothness. Indexed metals use the LabPBR
+albedo-F0 fallback. The supplied normal and specular maps still fall back independently.
+
+The LOD color problem reproduced when changing resource packs in-world. At (-166.5, 75, -242.5), yaw -90,
+pitch 18, an SPBR removal switched the atlas from 4096×4096 to 4096×2048 while the LOD model table kept
+its former sprite coordinates. After rebuilding the cached looks and replacing the table when the baked models
+change, the far-hillside color difference across that reload fell from 14.99 to 2.99 mean RGB levels on a 0–255
+scale. Reloading SPBR again returned that patch to 0.57 mean RGB levels of the startup capture. Geometry kept
+its block IDs and existing tiles. `lod-atlas-reload.jpg` shows the matched scene and rd 12 real-only reference.
+A green-pixel crop on the near peninsula still averaged RGB (124.7, 143.4, 103.8) at rd 6 with LODs and
+(117.9, 137.5, 105.5) at rd 12 real only. Differences in lighting, fog and blend radius remain in this comparison.
+
+Each old 4096² PBR upload retained 128 MiB after the next atlas bind. The native replacement releases those
+textures after handing ownership to the in-flight command buffers. Generated bevel atlas writes now use the
+padded sprite origins too. Metal library compile and the LOD fixture suite passed.
+
+The candidate rendered grass, foliage, stone, oak faces, three barrel orientations, iron, gold, copper,
+diamond and glowstone in the SPBR matrix. `cobble-barrel-close.jpg` compares the grazing shot and both normal
+options. The matrix added a temporary specular-only silver ore, normal-only sapphire ore, and no-map
+amythest ore from Ice and Fire. With generated effects off in pack mode their crops moved by 0.25, 8.40,
+and 13.17 mean RGB levels respectively. The silver strip included authored zero and nonzero emission.
+`fallback-close.jpg` records the comparison. The fixture pack is out of the instance.
+
+## Grading preview
+
+`grading-preview.jpg` contains fixed-pose daylight, Steppe ravine and river comparisons. Preview exposure
+0.90 → 0.98 moved village mean luma by 3.99/255. Saturation 1.04 → 0.98 and vibrance 0.08 → 0.04
+reduced the crop's mean maximum-minus-minimum RGB by 6.01/255. The haze-only setting was 1.0 → 0.7.
+The combined preview lifted the river crop by 4.32/255 and widened its p90–p10 luminance range by 3.16.
+The ravine contrast toe at 65% did little from the open rim, where the contrast toe for cave interiors is inactive.
+In the torch-lit interior fixture, the same toe preview moved average luma from 24.46 to 28.00/255 and
+the 10th percentile from 8.21 to 11.14. Restoring the toe returned the mean to 24.45.
+`grading-cave-contrast.jpg` shows the two settings.
+The preview used a scratch jar and the release grade stays at its current values.
+
+## Cave handoff
+
+At (-91.5, 65, -8.5), yaw -90, pitch 28, time 5000 and clear weather, the installed renderer had 1,294
+pixels more than 12 luma above the 5×5 median in the marked cave crop. The counts were 84 with edge dither off,
+84 with LODs off, 91 at rd 12 real only, and 1,279 after restoring rd 6 and edge dither. The water trace,
+water surface effects, shafts, SSAO and PBR toggles did not recreate the speckle in the LOD-off sequence.
+
+The stable distance-band fade now keeps low-skylight real Overworld surfaces. A masked LOD fragment keeps
+a surviving low-skylight real G-buffer pixel even if the LOD's filled passage is closer. The chunk arrival
+dissolve and other dimensions use their existing ownership rules. Toggle `-Dmetalods.caveHandoff=false` or
+ColdTp `caveHandoff=false`. With the fix on/off/on the counts were 82/1,285/85. The stable outdoor grass
+crop changed by 0.46 mean RGB levels with that toggle. See `cave-candidate.jpg`.
+
+## Black hole End
+
+ColdTp at (1.5, 120 and 1864, -0.5), yaw -112, pitch 41, planet phase 2.0. The flat cutoff at altitude
+persisted with the handoff dither off. The late sky pass treated depths up to 0.00001 as clear. With the actual
+4096-block far plane and 0.05 near plane, valid reverse-Z depth reaches that threshold at about 2,252 blocks
+forward. The sky was being drawn over the farthest islands. It now tests the exact zero clear value.
+At y 1864 this restored 24,296 pixels from below 35 to above 50 luma in the sampled region, with zero pixels
+going the other way and zero median change in the remaining dark sky. The LOD-off control showed no recovered
+terrain. The matched alternate-angle rd 12 view restored 10,791 pixels. ColdTp restored rd 6. The low view
+retained readable end stone and shadows. See `end-ring-depth.jpg`.
+
+The motion fixture repeated two actual Enderman walks per mode under MetalFX with entity jitter compensation,
+MetalFX without it, built-in TAA, and temporal AA off. The torso's median absolute position residuals against
+the same approximately 71 px/s walk were 1.23, 1.39, 1.26, and 1.09 px respectively. The recorder repeated
+588 of 4,382 video frames. The metrics use the 3,794 timed source frames, with 3,792 tracked. The residual
+occurred across modes; the capture did not isolate the reported walking jitter to a renderer cause.
+Entity compensation and scaler settings stay at their existing defaults. See `enderman-motion.mp4`,
+`enderman-motion.mp4.csv`, and `motion-metrics.txt`.
+
+## Frame-time and loading
+
+ColdTp replayed the same east-facing river route on two independent copies with empty LOD caches.
+The material switches at 38–49 seconds originally triggered new specialized pipelines and frames of
+541–861 ms, of which 4–54 ms was on the render CPU. The candidate keeps the material switches as uniform
+branches when pack maps are available and compiles those paths out when there are no maps. With the
+candidate there were no material pipeline changes in that window, and the worst slow frame was 81.6 ms.
+`-Dimaginemetal.specializeMaterialSwitches=true` restores the former specialization behavior.
+
+JFR in the first 35 seconds after teleport estimated LOD allocations of 21.38 → 19.58 GB.
+GC pauses numbered 115 → 122, totaled 2.03 → 2.09 seconds, and peaked at 87.3 → 90.8 ms. These are
+single cold runs. Inclusive worker samples before/after were terrain noise 28.6/26.4%, structure placement
+16.8/19.6%, structure heights 8.7/11.1%, Streams 4.2/3.3%, and `MetaWorld.edge` including `fillEdge`
+3.3/2.6%. Structure-template cache monitor waits accounted for 60.0/56.6 seconds across the six workers,
+during vanilla and Lithostitched template loads. The candidate skips seed and Streams adaptation when
+real captures already furnish the full edge and shares the Streams plan for a seed column among concurrent
+requests. The last Streams counters were 2,189/2,022 adapted columns at 4.3 ms each. The stationary rd 6
+view drew 362,284/362,303 quads. The generation, tree placement and terrain noise algorithms are unchanged.
+
+At the returned LOD-on pose before the off switch, a 10-second window showed p50/p99 17.4/41.2 → 20.5/35.5 ms
+across the matched routes. With LODs off, the last two corresponding windows were near 16.6 ms median,
+35–38 ms p99 and 16.4–17.1 ms average GPU time. One remaining 118.3 ms frame with LODs off occurred in
+a window with a 113.1 ms drawable wait. Cold structure generation, GC and drawable waits remain measurable.
+See `perf-before-after-windows.txt`, `perf-before-cold-profile.txt`, `perf-after-cold-profile.txt` and
+`short-flight-comparison.jpg`. Pacing and heap flags were held constant. Test screenshots were 1728×1080 at 67%.
+
+## Release verification
+
+Gradle `:mod:build` passed offline with JDK 25, including the native library. The LOD checks passed with the
+422,927-quad mesh digest match. The smoke jar differed from the release only in the ColdTp classes.
+The cached 32-block outbound route held at least 99.68% ready, used 88 disk reads and completed 93 mesh jobs
+with zero new seed tiles or evictions. Five seed tiles and 49 more meshes completed by the return. The
+matched stills and dissolve counters check coverage and rebuilds. They do not establish uninterrupted tree
+motion across every intermediate frame.
+
+At the two verified Nether poses, the release drew the same 184,737–261,308 quads as the rollback, including
+49,275–63,671 downward faces. The wall, pillar and cavern undersides matched the rd 6 and rd 12 real-chunk
+views in `nether-release-comparison.jpg`. Render distance returned to 6. The separate 1.20.1 Forge port
+has no changes on this branch.
+
 # 2026-11-21 — Nether cavern LODs and screenshot triage
 
 Installed `claude-scratch/codex-s1121-nether/imagine-metal-s1121-nether-caverns.jar` (SHA256

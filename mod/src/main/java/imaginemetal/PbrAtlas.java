@@ -122,8 +122,9 @@ public final class PbrAtlas {
 			for (TextureAtlasSprite sp : regions.values()) {
 				Identifier name = sp.contents().name();
 				int tw = sp.contents().width(), th = sp.contents().height();
+				int startX = Math.round(sp.getU0() * width), startY = Math.round(sp.getV0() * height);
 				var res = rm.getResource(Identifier.fromNamespaceAndPath(name.getNamespace(), "textures/" + name.getPath() + ".png"));
-				if (res.isEmpty() || tw < 2 || th < 2 || sp.getX() + tw > width || sp.getY() + th > height) {
+				if (res.isEmpty() || tw < 2 || th < 2 || startX + tw > width || startY + th > height) {
 					left++;
 					continue;
 				}
@@ -141,7 +142,7 @@ public final class PbrAtlas {
 							float lc = (float) Math.sqrt(c0 * c0 + c1 * c1 + c2 * c2) / 255f;
 							int up = enc(y + 1 < th ? dif(lc, px[(y + 1) * tw + x]) : 0f), right = enc(x + 1 < tw ? dif(lc, px[y * tw + x + 1]) : 0f);
 							int down = enc(y > 0 ? dif(lc, px[(y - 1) * tw + x]) : 0f), lft = enc(x > 0 ? dif(lc, px[y * tw + x - 1]) : 0f);
-							MemoryUtil.memPutInt(buf + ((long) (sp.getY() + y) * width + sp.getX() + x) * 4, up | right << 8 | down << 16 | lft << 24);
+							MemoryUtil.memPutInt(buf + ((long) (startY + y) * width + startX + x) * 4, up | right << 8 | down << 16 | lft << 24);
 						}
 					baked++;
 				} catch (Throwable ignored) {
