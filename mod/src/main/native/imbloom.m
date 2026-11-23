@@ -20,7 +20,7 @@ typedef struct {
 	float clipInv[16];
 	float prevClip[16];   // the last frame's transform, from this frame's camera-relative world (the shafts' history)
 	float taa[4];         // TAA: xy the jitter in uv, z 1 = the history is usable
-	float taaPrev[4];     // TAA: xy the last frame's jitter in uv, z 1 = steadier far away
+	float taaPrev[4];     // TAA: xy the last frame's jitter in uv, z 1 = steadier far away, w 1 = previous MetalFX coverage usable
 } ImBloomParams;
 
 #import <MetalFX/MetalFX.h>
@@ -53,6 +53,8 @@ typedef struct {
 	// signs in x and y (debug switches until the right ones are tested).
 	id<MTLFXTemporalScaler> fx;
 	id<MTLTexture> fxMotion, fxOut, fxReactive;  // (fxReactive: mobs' pixels, from the frame's alpha mark; nil before macOS 14)
+	id<MTLTexture> fxPreviousFrame;  // ping-ponged with taaCur, for previous entity coverage
+	int fxWasActive, fxPreviousValid;
 	id<MTLRenderPipelineState> fxMotionPso, fxCopyPso;
 	// (s1120) the resolve that also writes the motion (and the reactive mask): the separate motion pass folded into it; nil:
 	// not made (yet), fxFoldFailed: couldn't be, the separate pass as before
@@ -383,6 +385,7 @@ static int imbResolveFx(ImBloom *b, id<MTLCommandBuffer> cmd, id<MTLTexture> tar
 	[r setFragmentTexture:(aoT ? aoT : b->views[0]) atIndex:3];
 	[r setFragmentTexture:(hc ? hc : b->views[0]) atIndex:4];
 	[r setFragmentTexture:depth atIndex:5];
+	if (b->fxReactive) [r setFragmentTexture:b->fxPreviousFrame ?: src atIndex:6];
 	[r setFragmentSamplerState:(hs ? hs : b->linear) atIndex:1];
 	[r setFragmentSamplerState:b->linear atIndex:0];
 	[r setFragmentBytes:p length:sizeof *p atIndex:0];
@@ -690,12 +693,26 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 			// reads it by the screen's uv)
 			// (s1120: MetalFX's set-up first, so the resolve can write its motion and reactive mask in the same pass)
 			BOOL fxNow = post && taaOn && b->fxOn && imbFxReady(b, b->taaCur, dst, depth);
+			if (fxNow != b->fxWasActive) b->taaValid = 0;
+			b->fxWasActive = fxNow;
+			if (fxNow && b->fxReactive) {
+				if (!b->fxPreviousFrame || b->fxPreviousFrame.width != src.width || b->fxPreviousFrame.height != src.height) {
+					[b->fxPreviousFrame release];
+					b->fxPreviousFrame = imbTex(b, MTLPixelFormatRGBA16Float, src.width, src.height, @"Imagine Metal previous entity coverage");
+					b->fxPreviousValid = 0;
+				}
+			} else {
+				b->fxPreviousValid = 0;
+			}
 			BOOL folded = NO;
 			if (fxNow) {
 				// (the motion's jitter in taa.xy: the resolve itself reads only taa.w)
 				ImBloomParams q = p;
 				q.taa[0] = b->taaJitter[0];
 				q.taa[1] = b->taaJitter[1];
+				q.taaPrev[3] = b->fxPreviousValid && b->taaValid ? 1.0f : 0.0f;
+				q.taaPrev[0] = b->taaPrevJ[0];
+				q.taaPrev[1] = b->taaPrevJ[1];
 				folded = imbResolveFx(b, cmd, b->taaCur, &q, src, shafts, aoT, fogOk ? hc : nil, depth, fogOk ? hs : nil, frame, frameLen) == 1;
 			}
 			if (!folded) imbPass3(cmd, post ? b->taaCur : dst, MTLLoadActionDontCare, post ? b->resolve16 : b->resolve, b->views[0], b->linear, &p, @"Imagine Metal HDR resolve", src,
@@ -706,8 +723,10 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 				// world as it stands: what moves by itself, mobs, isn't followed yet); Apple's scaler; its picture onto the screen
 				p.taa[0] = b->taaJitter[0];
 				p.taa[1] = b->taaJitter[1];
-				p.taa[2] = 0.0f;
+				p.taaPrev[3] = b->fxPreviousValid && b->taaValid ? 1.0f : 0.0f;
 				p.taa[3] = (float) src.width / (float) dst.width;
+				p.taaPrev[0] = b->taaPrevJ[0];
+				p.taaPrev[1] = b->taaPrevJ[1];
 				MTLRenderPassDescriptor *rp;
 				id<MTLRenderCommandEncoder> r;
 				if (!folded) {
@@ -727,6 +746,7 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 				[r setCullMode:MTLCullModeNone];
 				[r setFragmentTexture:b->taaCur atIndex:0];
 				[r setFragmentTexture:depth atIndex:1];
+				if (b->fxReactive) [r setFragmentTexture:b->fxPreviousFrame ?: b->taaCur atIndex:2];
 				[r setFragmentBytes:&p length:sizeof p atIndex:0];
 				[r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 				[r endEncoding];
@@ -760,6 +780,14 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 				[r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 				[r endEncoding];
 				b->taaValid = 1;
+				if (b->fxReactive && b->fxPreviousFrame) {
+					id<MTLTexture> rendered = b->taaCur;
+					b->taaCur = b->fxPreviousFrame;
+					b->fxPreviousFrame = rendered;
+					b->fxPreviousValid = 1;
+				}
+				b->taaPrevJ[0] = b->taaJitter[0];
+				b->taaPrevJ[1] = b->taaJitter[1];
 			} else if (post) {
 				id<MTLTexture> prev = b->taaHist[b->taaIdx], next = b->taaHist[b->taaIdx ^ 1];
 				// (xy: where the terrain was drawn off to this frame, in uv; z: 1 = blend with the history (TAA on and a history to

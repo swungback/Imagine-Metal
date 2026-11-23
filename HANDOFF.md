@@ -1,3 +1,40 @@
+# 2026-11-23 — Moving mob ghost trails
+
+Jack clarified that the reported motion artifact is a faint copy trailing mobs, including underwater mobs
+seen from above. With SPBR-22_6, Fresh Animations, Extensions and both compatibility patches, re-analysis
+of the matched Enderman walks found 15.2% residual silhouette contrast 2–5 pixels behind the moving head
+with MetalFX. Entity jitter compensation off gave 14.5%, built-in TAA 6.7%, and temporal AA off 2.8%.
+The previous test measured position jitter and missed this trailing contrast.
+
+The depth-based motion mostly follows the camera. The old MetalFX mask reduced history on the current mob
+only. When the mob moved, pixels it had just left lost that protection. The water composite also mixed
+the alpha marker with the water opacity and could leave it at the unrefracted position. The new mask
+compares current coverage with the reprojected previous frame and rejects history when coverage changes.
+Built-in TAA stores coverage with its existing history. Near water carries the marker from its refraction
+sample. MetalFX adds one render-sized RGBA16F texture and keeps the folded resolve/motion pass.
+
+ColdTp replayed the End walk at (0.5, 90, -30.5), yaw 0, pitch 3, phase 2.0. MetalFX trailing contrast
+fell to 4.4%. Built-in TAA measured 7.5% and temporal AA off stayed at 2.8%. In a shallow pool at
+(0.5, 208, -30.5), yaw 0, pitch 56, daylight time 2800, the moving squid's trailing edge fell from 9.0%
+to 6.9% with MetalFX. Built-in TAA measured 4.0% and 3.8%. The underwater comparison is noisier because of
+surface reflections, and the deeper pool did not give a clean enough silhouette to score. The matched
+fixed-camera clips leave moving-camera and deeper-water cases open. The drained-pool squid control cleared
+in one captured frame with both builds.
+
+Matched pool windows ending about 24 and 34 seconds after teleport had 22.7/63.6 and 19.9/49.1 ms p50/p99 on
+the previous release, compared with 22.6/63.7 and 20.5/49.5 ms on the candidate. Output was 1728×1080 at
+67% scale and rd 6. Test switches were `im.metalfx`, `im.taa` and `im.entityJitter`. Evidence is in
+`claude-scratch/codex-s1121-ghost-trails-shallow` and `claude-scratch/codex-s1121-ghost-trails-candidate`,
+including recorded clips, source-frame timing CSVs, `enderman-trail-comparison.png` and the edge metrics.
+Gradle `:mod:build` and `ci/metalods/check.sh` passed. The runtime capture used a temporary overlay
+with only ColdTp and recorder class changes relative to the release.
+
+Installed `claude-scratch/codex-s1121-ghost-trails-release/imagine-metal-s1121-ghost-trails.jar` at
+`minecraft/mods/imagine-metal-0.1.0.jar`, SHA256
+`2af75c62af587d97a1e791e25dd30cbceca19477c0e7368d814b237b75df9490`. Test packs and settings were
+restored and ColdTp is disabled. The immediate rollback is the renderer-audit release below. The Nether
+cavern and original final7 rollback jars still match the recorded hashes.
+
 # 2026-11-21–22 — s1121 renderer audit
 
 Started from `9d64084`. The Nether cavern release and original final7 rollback both match their recorded SHA256.

@@ -2909,6 +2909,7 @@ fragment float4 own_fs_tr(VOut in [[stage_in]], float4 imDst [[color(0)]], const
 		imHistSampler, imTint, imWaterN, imUnderDepth, imLightFilt, imLightOpen);
 	float a = saturate(c.a);
 	float3 dst = imDst.rgb;
+	float behindAlpha = imDst.a;
 	float3 behind;
 	float foam = 0.0;
 	if (imWaterN.z > 0.25 && imf.toggles.w > 0.5 && imf.water.z < 0.5) {
@@ -2928,8 +2929,9 @@ fragment float4 own_fs_tr(VOut in [[stage_in]], float4 imDst [[color(0)]], const
 			uint2 p1 = uint2(clamp(uv1 * sz, float2(0.0), sz - 1.0));
 			float du1 = all(p1 == pi) ? du0 : imUnderDepth.read(p1);
 			// (only toward something that's under the water too: never toward a thing in front of it)
-			if (du1 < in.pos.z) dst = imUnder.read(p1).rgb;
-			else dst = imUnder.read(pi).rgb;
+			float4 sample = imUnder.read(du1 < in.pos.z ? p1 : pi);
+			dst = sample.rgb;
+			behindAlpha = sample.a;
 			// (foam only on a real shore: where the bed comes up shallow, not along every line where the surface meets a wall (thin
 			// bright lines round blocks in a lush cave's pools); patchy, faint, and only under the open sky)
 			float edge = smoothstep(0.02, 0.08, thick) * (1.0 - smoothstep(0.08, 0.4, thick));
@@ -2938,7 +2940,9 @@ fragment float4 own_fs_tr(VOut in [[stage_in]], float4 imDst [[color(0)]], const
 			// (off: from the water's depth alone a shore and a wall can't be told apart, and every pool's edge kept a white line)
 			foam = 0.0 * edge * fn * skyF;
 		} else {
-			dst = imUnder.read(pi).rgb;
+			float4 sample = imUnder.read(pi);
+			dst = sample.rgb;
+			behindAlpha = sample.a;
 		}
 		behind = imWaterTransmitted(dst, getColor(in).rgb, thick, true);
 		float vol = imWaterVolumeAlpha(thick);
@@ -2958,7 +2962,10 @@ fragment float4 own_fs_tr(VOut in [[stage_in]], float4 imDst [[color(0)]], const
 		float cover = saturate((0.95 - imDst.a) / 0.95);
 		if (cover > 0.0) col = mix(col, pow(max(imDst.rgb, 0.0), 2.2), cover);
 	}
-	return float4(pow(col, 1.0 / 2.2), a + imDst.a * (1.0 - a));
+	float alpha = a + imDst.a * (1.0 - a);
+	// Preserve entity coverage from the same sample as the refracted color for temporal resolve.
+	if (imWaterN.z > 0.25 && behindAlpha > 0.9575 && behindAlpha < 0.9625) alpha = 0.96;
+	return float4(pow(col, 1.0 / 2.2), alpha);
 }
 #endif
 

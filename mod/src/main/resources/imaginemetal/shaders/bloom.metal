@@ -834,22 +834,38 @@ fragment float4 im_bloom_motion(ImBloomOut in [[stage_in]], depth2d<float> depth
 	return imbMotion(in.uv, depth, p);
 }
 
-// (with the reactive mask, macOS 14+) the same motion, and how little MetalFX should trust its history at each pixel: a mob's
-// (alpha 0.96 from EntityShade) mostly not, since it moved by itself and its motion here is only the camera's. Waving plants
-// (0.98) and the terrain (1) keep it.
+static bool imbEntityCoverage(float alpha) {
+	return alpha > 0.95 && alpha < 0.97;
+}
+
+// Reject history when a mob entered or vacated a pixel. Stable coverage keeps the gentler mask that
+// lets MetalFX accumulate sub-pixel detail on multiframe silhouettes.
+static float imbEntityReactive(float2 uv, float2 motion, float alpha, texture2d<float> previous,
+	constant ImBloomParams &p, float2 size) {
+	bool covered = imbEntityCoverage(alpha);
+	if (p.taaPrev.w > 0.5) {
+		float2 puv = uv - p.taa.xy + motion / size + p.taaPrev.xy;
+		if (all(puv >= 0.0) && all(puv < 1.0)) {
+			bool wasCovered = imbEntityCoverage(previous.read(uint2(puv * size)).a);
+			if (wasCovered != covered) return 1.0;
+		}
+	}
+	return covered ? 0.4 : 0.0;
+}
+
+// MetalFX's optional reactive mask uses the entity coverage left in resolved alpha.
 struct ImFxMotionOut {
 	float4 motion [[color(0)]];
 	float reactive [[color(1)]];
 };
 
 fragment ImFxMotionOut im_bloom_motion_r(ImBloomOut in [[stage_in]], texture2d<float> frame [[texture(0)]], depth2d<float> depth [[texture(1)]],
-	constant ImBloomParams &p [[buffer(0)]]) {
+	texture2d<float> previous [[texture(2)]], constant ImBloomParams &p [[buffer(0)]]) {
 	ImFxMotionOut o;
 	o.motion = imbMotion(in.uv, depth, p);
-	float a = frame.read(uint2(clamp(in.uv, 0.0, 0.9999) * float2(frame.get_width(), frame.get_height()))).a;
-	// (fix9: 0.4, was 0.8: with the history nearly ignored, each frame's own sub-pixel offset showed on mobs as a shimmer, Jack's
-	// "animals jittering" (18:33); at 0.4 MetalFX still lets most of a moving mob's history go, so it doesn't smear)
-	o.reactive = a > 0.95 && a < 0.97 ? 0.4 : 0.0;
+	float2 size = float2(frame.get_width(), frame.get_height());
+	float a = frame.read(uint2(clamp(in.uv, 0.0, 0.9999) * size)).a;
+	o.reactive = imbEntityReactive(in.uv, o.motion.xy, a, previous, p, size);
 	return o;
 }
 
@@ -875,12 +891,12 @@ struct ImResolveFxrOut {
 	float reactive [[color(2)]];
 };
 
-fragment ImResolveFxrOut im_bloom_resolve_fxr(IMB_RESOLVE_ARGS) {
+fragment ImResolveFxrOut im_bloom_resolve_fxr(IMB_RESOLVE_ARGS, texture2d<float> previous [[texture(6)]]) {
 	ImResolveFxrOut o;
 	o.color = imbResolve(in, src, s, hdr, shafts, aoT, pic, depth, ms, p, f, lvol);
 	o.motion = imbMotion(in.uv, depth, p);
 	float a = float(half(o.color.a));
-	o.reactive = a > 0.95 && a < 0.97 ? 0.4 : 0.0;
+	o.reactive = imbEntityReactive(in.uv, o.motion.xy, a, previous, p, float2(depth.get_width(), depth.get_height()));
 	return o;
 }
 
@@ -912,11 +928,12 @@ fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur 
 	float2 cp = cuv * csz;  // (in its pixels; their centres at .5)
 	int2 ci = clamp(int2(floor(cp)), int2(0), int2(csz) - 1);
 	ImTaaOut o;
+	float entity = imbEntityCoverage(cur.read(uint2(ci)).a) ? 1.0 : 0.0;
 	if (p.taa.z < 0.5) {
 		// (no history: this frame alone, read between its pixels)
 		float3 c0 = cur.sample(s, cuv).rgb;
 		o.screen = float4(c0 + imbDither8(in.pos.xy), 1.0);
-		o.history = float4(c0, 1.0);
+		o.history = float4(c0, entity);
 		return o;
 	}
 	// the 3x3 of the frame's pixels around that place: this pixel's colour rebuilt from them (each counted by how near its
@@ -998,6 +1015,8 @@ fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur 
 			// (and where the history lay well outside the box, something changed there that the camera's motion doesn't explain:
 			// this frame takes over, from one box size out. Before, any pull at all cut the history's share)
 			a = max(a, 0.5 * saturate((outside - 1.0) / 2.5) * (1.0 - 0.6 * farS));
+			bool wasEntity = hist.read(uint2(puv * osz)).a > 0.5;
+			if (wasEntity != (entity > 0.5)) a = 1.0;
 			res = mix(h, c, a);
 			// (a light sharpen against what's left of the softness, on the screen only: fed back into the history it sharpened
 			// the already sharpened picture every frame, the finest grain growing until the colour box stopped it, a crawling
@@ -1009,6 +1028,6 @@ fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur 
 		}
 	}
 	o.screen = float4(shown + imbDither8(in.pos.xy), 1.0);
-	o.history = float4(res, 1.0);
+	o.history = float4(res, entity);
 	return o;
 }
