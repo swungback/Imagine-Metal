@@ -88,13 +88,26 @@ going the other way and zero median change in the remaining dark sky. The LOD-of
 terrain. The matched alternate-angle rd 12 view restored 10,791 pixels. ColdTp restored rd 6. The low view
 retained readable end stone and shadows. See `end-ring-depth.jpg`.
 
-The motion fixture repeated two actual Enderman walks per mode under MetalFX with entity jitter compensation,
-MetalFX without it, built-in TAA, and temporal AA off. The torso's median absolute position residuals against
-the same approximately 71 px/s walk were 1.23, 1.39, 1.26, and 1.09 px respectively. The recorder repeated
-588 of 4,382 video frames. The metrics use the 3,794 timed source frames, with 3,792 tracked. The residual
-occurred across modes; the capture did not isolate the reported walking jitter to a renderer cause.
-Entity compensation and scaler settings stay at their existing defaults. See `enderman-motion.mp4`,
-`enderman-motion.mp4.csv`, and `motion-metrics.txt`.
+The first motion clip used SPBR above Fresh Animations Extensions. SPBR's 64×32 Enderman texture then
+served the Extensions model's 64×64 UVs. 224 of 456 side-face arm and leg UV samples mapped to transparent
+texels. The matching Extensions texture had zero transparent samples in those faces. The broken silhouette
+makes the original clip unsuitable for judging limb animation.
+
+On Nov 23, repeated the matched ColdTp walk at (0.5, 90, -30.5), yaw 0, pitch 3, phase 2.0 at 1728×1080
+and 67% scale using the verified release with a temporary probe overlay. From lower to higher priority, the
+tested order was SPBR-22_6, Fresh Animations, FA All Extensions, SPBR x FA Patch, SPBR x FA-Extensions Patch.
+MC 26.3 loaded both local patches despite the older pack metadata, and Imagine Metal loaded 4,059 maps.
+The two patches themselves supply no Enderman textures. The priority order preserves Extensions' matching
+skin and restores the limbs in motion.
+
+Across two walks per mode, the model silhouette's median absolute position residuals were 0.77 px with
+MetalFX and entity compensation, 0.73 px with compensation off, 0.82 px with built-in TAA, and 0.81 px
+with temporal AA off. Head-only tracking gave 0.74, 0.61, 0.71 and 0.75 px. There were 2,854 timed
+source frames and 1,462 repeated video frames, with 2,309 source frames tracked by the silhouette estimator.
+The straight walk did not isolate the reported jitter to a renderer mode. This measures screen-space
+translation and leaves limb animation jitter open. Evidence is in `claude-scratch/codex-s1121-enderman-compat`,
+including `enderman-pack-comparison.png`, `enderman-motion.mp4` and the tracking reports. Restored the
+original pack selection and renderer settings, disabled ColdTp, and verified the installed release hash above.
 
 ## Frame-time and loading
 
