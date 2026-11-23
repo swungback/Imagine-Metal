@@ -131,6 +131,8 @@ public final class Settings {
 	public static volatile boolean shadowOpenAir = Engine.flag("imaginemetal.shadowOpenAir", true);
 	/** Dry biomes toward Reimagined's desert: colder, darker shade, warmer sand, less vibrance on beige. -Dimaginemetal.desertLook=false. */
 	public static volatile boolean desertLook = Engine.flag("imaginemetal.desertLook", true);
+	/** A gentle Overworld vibrance lift with slightly stronger biome lighting tints. */
+	public static volatile boolean vibrantOverworld = Engine.flag("imaginemetal.vibrantOverworld", true);
 	/** Our clouds drawn after the opaque world, behind what's in front of them (Sky.drawCloudsLate). -Dimaginemetal.cloudsLate=false. */
 	public static volatile boolean cloudsLate = Engine.flag("imaginemetal.cloudsLate", true);
 	// ---- Build C2: each change behind its own switch (Settings > Advanced > Debug), none saved; a -D starts with it off ----

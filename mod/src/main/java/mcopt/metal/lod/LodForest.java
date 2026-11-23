@@ -6,6 +6,7 @@ import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -30,6 +31,7 @@ import net.minecraft.world.level.levelgen.WorldgenRandom;
 import net.minecraft.world.level.levelgen.XoroshiroRandomSource;
 import net.minecraft.world.level.levelgen.placement.FeaturePlacer;
 import net.minecraft.world.level.levelgen.placement.PlacedFeature;
+import net.minecraft.world.level.levelgen.structure.StructureStart;
 import net.minecraft.world.level.material.FluidState;
 import org.jspecify.annotations.Nullable;
 
@@ -76,7 +78,8 @@ final class LodForest {
 	/** How far (chunks) a structure's start may lie from a chunk its pieces reach (jigsaw: up to 128 blocks from its centre). */
 	static final int STRUCT_REACH = 8;
 	private static final int SURFACE = GenerationStep.Decoration.SURFACE_STRUCTURES.ordinal();
-	private final ConcurrentHashMap<Long, List<net.minecraft.world.level.levelgen.structure.StructureStart>> starts = new ConcurrentHashMap<>();
+	private final ConcurrentHashMap<Long, List<StructureStart>> starts = new ConcurrentHashMap<>();
+	private final ConcurrentHashMap<Long, CompletableFuture<List<StructureStart>>> pendingStarts = new ConcurrentHashMap<>();
 	private final java.util.Map<net.minecraft.world.level.levelgen.structure.Structure, Integer> surfaceIndex = new java.util.IdentityHashMap<>();
 	private final ThreadLocal<net.minecraft.world.level.biome.Climate.Sampler> climate;
 	final java.util.concurrent.atomic.AtomicLong structuresMade = new java.util.concurrent.atomic.AtomicLong(), structureNanos = new java.util.concurrent.atomic.AtomicLong();
@@ -313,15 +316,37 @@ final class LodForest {
 	 * per structure set whose placement chooses this chunk, its single structure or a weighted pick (the large-feature seed,
 	 * trying the next while one fails), Structure.generate with the world's seed and the set's biome check. Cached per chunk.
 	 */
-	List<net.minecraft.world.level.levelgen.structure.StructureStart> starts(int cx, int cz) {
+	List<StructureStart> starts(int cx, int cz) {
 		long key = chunkKey(cx, cz);
-		var got = this.starts.get(key);
-		if (got != null) return got;
-		List<net.minecraft.world.level.levelgen.structure.StructureStart> out = List.of();
+		var cached = this.starts.get(key);
+		if (cached != null) return cached;
+
+		var claim = new CompletableFuture<List<StructureStart>>();
+		var pending = this.pendingStarts.putIfAbsent(key, claim);
+		if (pending != null) return pending.join();
+		try {
+			cached = this.starts.get(key);
+			if (cached == null) {
+				cached = this.generateStarts(cx, cz);
+				if (this.starts.size() > 400_000) this.starts.clear();
+				this.starts.put(key, cached);
+			}
+			claim.complete(cached);
+			return cached;
+		} catch (RuntimeException | Error failure) {
+			claim.completeExceptionally(failure);
+			throw failure;
+		} finally {
+			this.pendingStarts.remove(key, claim);
+		}
+	}
+
+	private List<StructureStart> generateStarts(int cx, int cz) {
+		List<StructureStart> out = List.of();
 		LodBaseHeights.enter();  // (s1119: the ground-height walks kept, see LodBaseHeights)
 		try {
 			var state = this.level.getChunkSource().getGeneratorState();
-			net.minecraft.world.level.ChunkPos pos = new net.minecraft.world.level.ChunkPos(cx, cz);
+			net.minecraft.world.level.ChunkPos pos = null;
 			for (Holder<net.minecraft.world.level.levelgen.structure.StructureSet> set : state.possibleStructureSets()) {
 				var placement = set.value().placement();
 				if (placement instanceof net.minecraft.world.level.levelgen.structure.placement.ConcentricRingsStructurePlacement) continue;
@@ -330,7 +355,8 @@ final class LodForest {
 				boolean any = false;
 				for (var e : list) any |= e.structure().value().step().ordinal() == SURFACE;
 				if (!any) continue;
-				net.minecraft.world.level.levelgen.structure.StructureStart made = null;
+				if (pos == null) pos = new net.minecraft.world.level.ChunkPos(cx, cz);
+				StructureStart made = null;
 				if (list.size() == 1) made = this.tryStart(list.get(0), state, pos);
 				else {
 					List<net.minecraft.world.level.levelgen.structure.StructureSet.StructureSelectionEntry> left = new ArrayList<>(list);
@@ -364,8 +390,6 @@ final class LodForest {
 		} finally {
 			LodBaseHeights.exit();
 		}
-		if (this.starts.size() > 400_000) this.starts.clear();
-		this.starts.put(key, out);
 		return out;
 	}
 

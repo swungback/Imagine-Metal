@@ -290,9 +290,15 @@ public final class ImagineFrame {
 			float bw = day * (1f - rain);
 			if (bw > 0f) {
 				float lum = 0.2126f * up[0] + 0.7152f * up[1] + 0.0722f * up[2];
+				// Increase the chroma of the biome tint around its luminance so shade keeps its contrast.
+				float biomeChroma = Settings.vibrantOverworld ? 0.12f : 0f;
+				float shadeLuma = 0.2126f * Haze.look[3] + 0.7152f * Haze.look[4] + 0.0722f * Haze.look[5];
+				float sunLuma = 0.2126f * Haze.look[0] + 0.7152f * Haze.look[1] + 0.0722f * Haze.look[2];
 				for (int i = 0; i < 3; i++) {
-					up[i] = mix(up[i], lum * Haze.look[3 + i], Haze.look[6] * bw);
-					light[i] *= mix(1f, Haze.look[i], bw);
+					float shadeTint = Haze.look[3 + i];
+					up[i] = mix(up[i], lum * (shadeTint + (shadeTint - shadeLuma) * biomeChroma), Haze.look[6] * bw);
+					float sunTint = Haze.look[i];
+					light[i] *= mix(1f, sunTint + (sunTint - sunLuma) * biomeChroma, bw);
 				}
 				// (Build C1, the desert look: the shade there a fifth darker again, so lit and shaded sand read clearly apart, as
 				// in Reimagined's desert, where the shade is under half the lit sand's brightness; ours was four fifths of it)
@@ -488,7 +494,7 @@ public final class ImagineFrame {
 		// (z: the generated normals' bevels are baked, bound at texture 27: PbrAtlas.bake)
 		// (w, Build C1: the desert look's share of the grade and the sand, imGrade and imShade: how much the camera is in a dry
 		// biome, as of the last frame)
-		put(1.04f, 0.08f, PbrAtlas.bevel && !PbrAtlas.on ? 1f : 0f, Settings.desertLook && dim == 0 ? Math.clamp(Haze.dry, 0f, 1f) : 0f);
+		put(1.04f, dim == 0 && Settings.vibrantOverworld ? 0.115f : 0.08f, PbrAtlas.bevel && !PbrAtlas.on ? 1f : 0f, Settings.desertLook && dim == 0 ? Math.clamp(Haze.dry, 0f, 1f) : 0f);
 		BUF.putInt(dim).putInt(Settings.debug).putInt(Live.isOff() ? 0 : 1).putInt(frame++);  // (z 0: plain lighting, shaders off live)
 		// how far underground the player is (by the sky light at their eyes, eased so walking into a cave fades) and how much it's
 		// night: the picture's grade (Bloom's resolve) darkens the dark parts more in both

@@ -1,3 +1,73 @@
+# 2026-11-23–24 — Overworld grade and LOD stability
+
+Installed `claude-scratch/codex-s1121-stability-release/imagine-metal-s1121-stability.jar` as
+`minecraft/mods/imagine-metal-0.1.0.jar`, SHA256
+`e20fa0df45e86e7042535e3e2512aa8f841277126ab4128a14b82dbce9bf8882`. Immediate rollback is the
+ghost-trails release below. Verified the Nether cavern and original final7 hashes. ColdTp is disabled.
+The original pack selection, JVM arguments, rd 6 and 1728×1080 at 67% are restored. The Forge port
+remains separate.
+
+## Grade
+
+Previewed the previous and revised grade with SPBR-22_6 and the compatible Fresh Animations stack,
+on matched ridge, river and Steppe shade views, before enabling it. The Overworld vibrance term went
+from 0.080 to 0.115, and biome sun and shade tint chroma went up 12% around their former luminance.
+Exposure and base saturation retain their values. The grade applies to the Overworld. Preview mean
+RGB channel spread rose by 0.78–1.66 on a 0–255 scale and mean brightness moved by at most 0.12.
+No sampled pixels gained a clipped channel. A disposable jungle and Pale Garden retint fixture at rd 12
+gave +0.81 and +0.39 mean channel spread, at most 0.10 mean luma change, and zero clipped samples.
+Use `-Dimaginemetal.vibrantOverworld=false` or ColdTp `im.vibrantOverworld=false` for the previous grade.
+See `claude-scratch/codex-s1121-vibrance-preview/vibrance-preview.jpg` and
+`claude-scratch/codex-s1121-stability-final-check/biome-grade.jpg`.
+
+## LOD loading, frame times and handoff
+
+On the existing structure-start cache, concurrent misses could run the same chunk's generation several
+times. The workers now share an in-progress result for that start chunk, alongside the completed cache.
+The generation seed, weighted-list order, templates, and resulting placement are the existing paths.
+Chunks with no eligible set skip creation of the structure generation position.
+
+ColdTp used two copies of the same save with independent empty LOD caches. At 30 seconds after teleport,
+ready count was 253/1251 on the rollback and 397/1251 on the candidate. At 55 seconds the counts were
+805/1251 and 1215/1251. The first few LOD columns arrived around 8 and 13 seconds respectively.
+For the matched 35-second JFR window, template-cache monitor time fell from 38.0 to 7.1 worker-seconds.
+The shared starts added 74.2 worker-seconds parked behind in-progress generation. GC cost was
+112 pauses totaling 2051 ms with a 93.4 ms maximum versus 117 totaling 1912 ms with an 84.0 ms maximum.
+Estimated LOD allocation rose from 17.02 to 21.34 GB while the candidate completed more tiles. Cold
+generation still produces GC spikes. Evidence is in `codex-s1121-stability-candidate` and
+`codex-s1121-stability-baseline-drawable-verified` under `claude-scratch`.
+
+The LOD-off drawable test used the same fixed pose. The existing experimental background acquire path
+(`-Dmcopt.metal.presentQueue=acquire`) changed the final 10-second window from 34.2 to 21.6 ms p99
+with 32.1 to 0.0 ms maximum render-thread drawable wait. In-flight GPU waiting rose from 2.9 to
+14.1 ms per frame. The recorder reads before presentation, so scanout skips and cadence were not verified.
+The installed build retains the direct presentation default.
+
+The warm 43-block river flight used continuous input out and back. Selected coverage stayed at 100%
+in the recorded movement counters, with zero fly-window evictions, 14 additional generated tiles, 74 disk
+reads, 265 mesh jobs and 94 mesh fades. The video and sequential review show no large terrain pop on that
+route. Those counters include real captures and background work. Dense forest fly-through coverage and
+attribution for the remaining rebuilds are open. Compare `warm-lod-flight.mp4` and the rd 12 real-only
+frame in `claude-scratch/codex-s1121-stability-final-check`.
+
+At rd 12 the direct grass tint survey found 493 loaded positions, including 269 surfaces with grass.
+Every unblended tint matched the LOD biome palette. Biome blend radius 2 changed 51 samples, with
+less than 0.3 mean RGB levels per channel in the palette comparison. This does not account for the
+earlier difference in the shaded screenshot crop. Keep the existing tint model. The rendered lighting
+difference is still open.
+
+## Deep-water mob motion
+
+Matched camera strafe with squid about 2.2 blocks below the surface in a five-block pool. MetalFX,
+built-in TAA and temporal-off were captured, plus the MetalFX reflection trace control. Water pattern
+and reflection changes in the crop were of the same order as the squid removal signal, even with
+the reflection trace switched off. The clip did not isolate a silhouette strongly enough to score
+a ghost trail in any mode. The existing verified shallow-water improvement remains installed.
+See `deep-water-candidate.txt`, `deep-water-baseline.txt` and the capture clips. No deeper-water
+renderer change was verified in this pass.
+
+Gradle `:mod:build` and `ci/metalods/check.sh` passed, including the 422,927-quad digest match.
+
 # 2026-11-23 — Moving mob ghost trails
 
 Jack clarified that the reported motion artifact is a faint copy trailing mobs, including underwater mobs
