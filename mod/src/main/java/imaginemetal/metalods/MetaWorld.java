@@ -225,9 +225,10 @@ final class MetaWorld {
 	record Result(@Nullable Col col, int version, MetaMesher.@Nullable Mesh mesh, int edges, long @Nullable [] generated, long realChunk, int realChanges) {
 	}
 
-	/** (fix15) Diagnostics: CPU by thread group, GC, what the workers do; a one-time dump of Streams' plan around the player. */
+	/** Export Streams' plan around the player for diagnostic fixtures. */
+	private static final boolean DUMP_STREAMS_PLAN = Boolean.getBoolean("metalods.dumpStreamsPlan");
 	private final @Nullable MetaDiag diag = MetaSettings.stats ? new MetaDiag() : null;
-	private Path diagDir;
+	private final Path diagDir;
 	private volatile int planDump;  // 0 not yet, 1 running, 2 done
 
 	MetaWorld(ClientLevel level, Path dir, MetaArena arena, @Nullable ServerLevel server) {
@@ -1839,7 +1840,7 @@ final class MetaWorld {
                 this.store.cacheHits.get(), this.store.cacheMisses.get(), this.store.cacheErrors.get()));
             if(this.streams!=null)System.out.println("[MetaLODS] "+this.streams.stats());
             if(this.diag!=null)System.out.println(this.diag.line(this.workers.size()));
-            if(this.streams!=null && this.planDump==0) {
+            if (DUMP_STREAMS_PLAN && this.streams != null && this.planDump == 0) {
                 this.planDump=1;
                 int px=(int)Math.floor(this.camX)-192,pz=(int)Math.floor(this.camZ)-192;
                 Path out=this.diagDir.resolve("streams-plan-"+px+"_"+pz+".csv");

@@ -1,8 +1,10 @@
 package imaginemetal.metalods;
 
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.Holder;
 import net.minecraft.core.SectionPos;
 import net.minecraft.world.level.LightLayer;
+import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.DataLayer;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -21,7 +23,7 @@ import org.jspecify.annotations.Nullable;
 final class MetaChunks {
 	/** What the render thread copies out of a chunk. */
 	record Snapshot(int chunkX, int chunkZ, int minSectionY, @Nullable PalettedContainer<BlockState>[] sections, @Nullable DataLayer[] sky,
-		@Nullable DataLayer[] block, int[] biomes) {
+		@Nullable DataLayer[] block, @Nullable Holder<Biome>[] biomes) {
 	}
 
 	private MetaChunks() {
@@ -48,14 +50,15 @@ final class MetaChunks {
 			blk[i] = b != null ? b.copy() : null;
 		}
 		// Empty chunks are authoritative too: removing the last block must replace cached geometry.
-		int[] biomes = new int[16];
+		// Keep registry holders here so capture never waits for the shared LOD palette.
+		Holder<Biome>[] biomes = (Holder<Biome>[]) new Holder<?>[16];
 		for (int qz = 0; qz < 4; qz++) {
 			for (int qx = 0; qx < 4; qx++) {
 				int y = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, qx * 4 + 2, qz * 4 + 2);
 				try {
-					biomes[qx + qz * 4] = MetaPalette.biome(chunk.getNoiseBiome((cx << 2) + qx, y >> 2, (cz << 2) + qz));
-				} catch (RuntimeException e) {
-					biomes[qx + qz * 4] = 0;
+					biomes[qx + qz * 4] = chunk.getNoiseBiome((cx << 2) + qx, y >> 2, (cz << 2) + qz);
+				} catch (RuntimeException ignored) {
+					// The worker uses palette entry zero for a missing biome.
 				}
 			}
 		}
@@ -64,6 +67,16 @@ final class MetaChunks {
 
 	/** The chunk's voxels (16 x 16 x height from minY) and their LODs at levels 0 to 4. */
 	static MetaStore.@Nullable RealChunk build(Snapshot s, int minY, int height, boolean skyLight) {
+		int[] biomes = new int[s.biomes().length];
+		for (int i = 0; i < biomes.length; i++) {
+			Holder<Biome> biome = s.biomes()[i];
+			if (biome == null) continue;
+			try {
+				biomes[i] = MetaPalette.biome(biome);
+			} catch (RuntimeException ignored) {
+				// Preserve the default tint for a failed lookup.
+			}
+		}
 		Rle.Builder b = new Rle.Builder(16, height);
 		int[] col = new int[height];
 		BlockState lastState = null;
@@ -71,7 +84,7 @@ final class MetaChunks {
 		int airTop = skyLight ? 15 : 0;
 		for (int z = 0; z < 16; z++) {
 			for (int x = 0; x < 16; x++) {
-				int biome = s.biomes()[(x >> 2) + (z >> 2) * 4] << 16;
+				int biome = biomes[(x >> 2) + (z >> 2) * 4] << 16;
 				for (int iy = 0; iy < height; iy++) {
 					int y = minY + iy;
 					int sec = (y >> 4) - s.minSectionY(), ly = y & 15;

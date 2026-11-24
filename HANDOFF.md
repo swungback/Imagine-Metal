@@ -1,3 +1,182 @@
+# 2026-11-24 — Minecraft 26.3 playtest release on s1121
+
+Started from `ef32151`. Installed `claude-scratch/codex-s1121-playtest-final-release-GU0eZZ/imagine-metal-s1121-playtest.jar`
+as `minecraft/mods/imagine-metal-0.1.0.jar`, SHA256
+`59cc62059504711b251f2b32b56b7ffa937168fd135c1a5d654f0cf614370f68`.
+The normal pack list, renderer config, JVM flags, fullscreen and RD 6 were verified
+byte for byte against the initial files. ColdTp is disabled in the live config.
+The separate Forge 1.20.1 port awaits the playtest.
+
+Verified rollback jars under the instance root:
+
+- `claude-scratch/codex-s1121-stability-release/imagine-metal-s1121-stability.jar`
+  (`ef32151`, `e20fa0df45e86e7042535e3e2512aa8f841277126ab4128a14b82dbce9bf8882`)
+- `claude-scratch/codex-s1121-nether/imagine-metal-s1121-nether-caverns.jar`
+  (`caf50d5dec5a538a450b755f8e91dd946ad4824678aba5ffb72690006aab98e2`)
+- `claude-scratch/s1121/imagine-metal-s1121-final7.jar`
+  (`2fa996a159be365cf7642f41fb895ab4e6d076854b80add73dbf257b712fe1f6`)
+
+With the game closed, copy the chosen rollback to
+`minecraft/mods/imagine-metal-0.1.0.jar`. Keep a single active Imagine Metal jar.
+The Gradle build updates the LOD capture and diagnostic classes.
+The native library, shaders, material tables, and temporal resolve code match byte for byte.
+Direct presentation remains the default. Streams plan CSV export now requires
+`-Dmetalods.dumpStreamsPlan=true`. LOD statistics still print without that switch.
+
+ColdTp only opened disposable copies. The baseline used the normal pack list and set both
+`imaginemetal.pbr` and `imaginemetal.pbrPack` false in the copy. The tests used output 1728×1080
+and 67% internal scale (1158×724). The later forest, presentation, and release checks used
+fullscreen. The live instance was already set to fullscreen, RD 6 and 67% scale.
+
+## Foliage and grass
+
+Compared real trees at the same poses with `im.vibrantOverworld` on and off, with clear weather
+at time 3500 and 10500. The save confirmed Dark Forest (851, 63, 79), Jungle (-1133, 72, -1009)
+and Pale Garden (2163, 74, -2417). In light and dark canopy samples the on/off mean luma moved
+by at most 0.61 on a 0–255 scale. The pale oak canopy stayed gray in both. Its direct fixed
+gray-canopy crop changed by +0.24 luma by day and +0.07 under oblique sun. At the river,
+disabling shadows lifted the near leaf crop by 9.4 luma. Keep the gentle Overworld grade.
+
+At (-166.5, 75, -242.5), yaw -90, pitch 18 and time 5000, a peninsula green crop averaged
+139.51 luma with RD 6 and 126.43 with RD 12 real only. Disabling LOD far fog in RD 6 moved
+the crop to 134.76. Disabling far shadows or LOD open-air lighting changed the crop by
+0.10 or less. Forcing average texture sampling changed mean luma by at most 0.03 across
+three crops. With edge dither off, the RD 6 crop matched RD 12 real with LOD fog active
+within 0.09 on common green pixels. SSAO off changed those matched samples by at most
+0.03. The mixed band was 10.69–17.14 luma higher than RD 6 with dither off across those
+same crop pairs. The underlying difference between the two drawn surfaces remains in that
+band. The tests support the existing tint palette. Disabling the dissolve globally would
+remove the handoff for genuinely different geometry, so keep the ownership rules. The
+first general air-haze probe used an incorrect field name. The exact-release smoke
+corrected it with `im.haze`. Air haze off moved the green crop +0.17 luma at RD 6 and
+-0.05 at RD 12. With dither disabled, RD 6 and RD 12 with LODs still active were within
+0.03 luma. See `codex-s1121-playtest-stock-smoke-aXJocr`.
+
+See `codex-s1121-playtest-captures-nQCcFz/natural-biomes.jpg` and
+`grass-mip-comparison.jpg`, and `codex-s1121-playtest-baseline-mVkc8t/grass-lighting-metrics.txt`.
+
+## Deeper water
+
+Used an artificial six-block pool with an evenly lit bed. The squid's center path was
+4.2 blocks below the surface, with the camera at (0.5, 208, -29.5), yaw 0, pitch 67 and time
+5400. A 0.7-second strafe repeated in MetalFX, built-in TAA, and temporal AA off. The first
+matrix suppressed the reflection term in a scratch shader while keeping refraction. The
+second matrix used the normal water reflection path. Clouds were suppressed in both.
+Measured squid-body contrast was 57.5–70.0 green levels. On removal the silhouette fell below
+the measurement threshold in the first updated frame, 10–26 ms after the server event.
+The moving comparison showed no repeatable second silhouette. The result covers this depth
+and route. A naturally reflective water scene with the player's original artifact is still
+needed to identify any residual trail. See `codex-s1121-playtest-water-TF7DKW/moving-water-comparison.jpg`,
+`water.mp4`, and `water-metrics.txt`. The release shaders retain the verified Enderman and
+shallow-water temporal coverage fix.
+
+## Forest and frame times
+
+Recorded full out-and-back spectator flights at y 89, yaw 35, pitch 10 and clear time 5000
+from (851.5, 79.5) to (814.69, 132.08), returning within 0.61 blocks of the origin before
+braking. Both ef32151 and the candidate completed both exact routes. With empty LOD caches
+the strongest birch canopy arrival in the baseline appeared 56 ms after real chunk [48, 8]
+arrived, with zero L0/L1 replacements within 160 ms. The first route started with
+9/1287 LODs ready and produced 123 distinct client chunk arrivals and 24 selected L0/L1
+replacements. Ready coverage was about 1% at the pop, so this was real terrain replacing a
+hole. The complementary dissolve requires ready fallback terrain. Faster coverage or a
+different transition for an empty column remains open, while the current handoff protects
+existing real cave and cavern geometry.
+
+A warm replay reopened the candidate's saved cache and let selected coverage reach
+1286/1286 with an empty queue. The same flight took 13.29 seconds with minimum
+coverage 99.69% and zero additional evictions. The route window added 273 mesh jobs,
+166 selected replacements including 140 traced L0/L1 replacements, 110 fades, 22 seed
+tiles and 147 disk reads. It also logged 223 real chunk arrivals and 48 changed
+captures. The start/turn/return poses match the cold routes. Four outbound/return
+frame pairs matched position within 0.15 blocks and showed continuous canopy
+coverage. The cold empty-to-real pop was absent in the warm comparison. See the
+full `route-warm.mp4` and `route-warm-paired.jpg`.
+
+The fullscreen cold capture logged a roughly 600 ms frame around t=31 s. A nearly
+coincident JFR event shows the render thread blocked for 556 ms in
+`MetaPalette.assignBiome` during `MetaChunks.capture`. The monitor's previous owner
+was the MetaLODS disk worker. The final build copies the same biome holders on the
+render thread and resolves them to palette IDs on an ingest worker. The chunk still
+uses the same 16 quart lookups, the palette tints and the missing-biome fallback.
+The final replay recorded zero render-thread chunk-capture monitor waits versus one
+556.52 ms wait before the change. The t=34 s window's maximum MetaLODS render-thread
+time fell from 557.4 to 46.9 ms. The final cold run still had a 701 ms frame, with
+569.6 ms on the render CPU and 4.9 ms maximum MetaLODS time in that window. It
+coincided with the first real chunks after a 27.7-second server backlog. Nearby JFR
+CPU samples include Diorama map and fog building. They do not attribute the entire
+frame to it. The remaining cold real-chunk work needs a separate matched attribution
+before changing gameplay settings.
+
+The baseline generated a 384×384 Streams diagnostic on normal world entry, and its
+147,456 plan queries produced a header-only forest CSV. The candidate's replay emitted
+neither the plan dump log nor the CSV. Paired 35-second cold JFR windows (one run per
+build) measured 90 vs 80 pauses, 1506 vs 1629 ms total, and 82.8 vs 88.8 ms max.
+LOD allocation estimates were 5.95 vs 5.09 GB. Parks involving shared structure starts
+totaled 25.11 vs 20.20 worker-seconds. Structure-template-manager monitor waiting was
+8.82 vs 19.12 worker-seconds. Palette monitor waiting was 2.05 vs 20.25 worker-seconds.
+The candidate's cold replay also showed visible canopy arrivals in an uncovered area. The
+route's initial real-world loading and queue timing varied across the runs. The removed diagnostic work is
+verified independently of median or tail frame-time improvements. The final release
+cold JFR window recorded 92 pauses totaling 2035 ms, maximum 110.4 ms, and about
+2.82 GB of sampled LOD allocation while fewer cold LOD jobs had completed.
+
+The candidate's fullscreen LOD-on/off replay held the same output, route and recording.
+In the 35-second cold windows both modes recorded 80 GC pauses. Total pause time
+was 1629 vs 1489 ms and the longest pause was 88.8 vs 107.2 ms. Sampled allocation
+was 5.09 vs 0 GB on LOD threads and 10.94 vs 18.69 GB on other threads, with different
+real-chunk startup progress. At the ten-second window ending around t=34 s, frame
+p50/p99 was 16.7/125.9 vs 16.8/42.0 ms, render CPU averaged 8.6 vs 7.4 ms, and GPU
+17.1 vs 16.1 ms. In the window around t=74 s, p50/p99 was 16.7/51.9 vs 16.8/37.4 ms,
+render CPU 8.2 vs 4.2 ms, and GPU 17.7 vs 16.7 ms. Cold real-world loading and GC
+still cause hitches with LODs off. See `fullscreen-lod-profile.txt` and the JFR reports.
+
+With fullscreen, RD 6, LODs off and recording enabled, direct presentation's final
+10-second window had 17.5/42.4 ms p50/p99, 12.5 ms render CPU and 18.8 ms GPU.
+Background acquisition removed the render thread's 1.5 ms average/18.3 ms maximum
+drawable wait in that window, but p99 was 50.3 ms. In the final 29 seconds of
+actual display timestamps, direct vs acquire showed 1586 vs 1513 displayed frames
+and 33.33 vs 50.00 ms p99 display gaps. The background run logged 228 staging skips
+and 539 dropped queue handoffs. Keep direct presentation.
+
+Evidence is in `codex-s1121-playtest-forest-route-OnbqLH`,
+`codex-s1121-playtest-candidate-r8cyI4`, and
+`codex-s1121-playtest-captures-nQCcFz/drawable-comparison.txt`.
+
+## Release verification
+
+Offline Gradle `:mod:build` passed with JDK 25. The archive integrity check and
+`ci/metalods/check.sh` passed, including the 422,927-quad digest match. The normal
+pack-stack smoke ran the exact release bytes. ColdTp in the dimension and pack
+captures used a scratch overlay for scripted movement, capture and event logging.
+
+The observed Nether cavern at (25.5, 56, 45.5), yaw -45, pitch 3, retained the same
+roof, pillar and visible underside shape across RD 6 with LODs and RD 12 real-only.
+The retake at RD 6 drew 215,491 quads with 57,106 downward faces. RD returned to 6.
+See `codex-s1121-playtest-final-retake-KlBZob/nether-final-pair.jpg`. The Black Hole
+End at (0.5, 113, -105.5), yaw -60, pitch 7 kept a readable end-stone crop at phases
+2.0 and 1.0 (153.17 and 50.67 mean luma). At y 1864, the matched altitude view
+showed the distant island ring with 164,881 sampled island pixels above 50 luma.
+See the final dimensions captures in `codex-s1121-playtest-final-validation-C4levQ`.
+
+SPBR-22_6 loaded 4059 maps at 4096×4096. From lower to higher priority the
+material regression used SPBR-22_6, Fresh Animations, FA All Extensions,
+SPBR x FA Patch, then SPBR x FA-Extensions Patch. With PBR on, the fixed panel
+switched from Generated to Pack + fallback. Diamond ore luma moved 120.15 to 96.03,
+glowstone 165.03 to 199.46, and the stone crop 107.05 to 106.78. The parallax-off
+control retained the pack material response. Two Enderman walks on the End platform
+showed complete limbs. See `codex-s1121-playtest-final-retake-KlBZob/spbr-panel-final.jpg`,
+`enderman-final-pack.jpg`, and `spbr-panel.mp4`.
+
+## Evidence recovery
+
+The first scratch foliage recorder accidentally reused the previous
+`codex-s1121-stability-final-check/stability.mp4` and source-frame CSV paths.
+Those original full files were overwritten. The replacement recording is filed as
+`codex-s1121-playtest-baseline-mVkc8t/foliage-accidental-recording.mp4`.
+The original warm-flight extract, screenshots, timing reports, and the other
+paired stability sessions are intact.
+
 # 2026-11-23–24 — Overworld grade and LOD stability
 
 Installed `claude-scratch/codex-s1121-stability-release/imagine-metal-s1121-stability.jar` as
