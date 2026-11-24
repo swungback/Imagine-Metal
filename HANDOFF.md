@@ -1,3 +1,85 @@
+# 2026-11-25 — Native-resolution floating text and MetalFX clarity on s1121
+
+Started from `bf5508e`. The release jar is
+`claude-scratch/codex-s1121-native-labels-release-9F5Wi5/imagine-metal-s1121-playtest.jar`,
+SHA256 `cbdc9b5181836e11029b0ffa088736a131a21166839d281bd495510e15b2e4ec`.
+The immediate rollback is
+`claude-scratch/codex-s1121-playtest-final-release-GU0eZZ/imagine-metal-s1121-playtest.jar`
+(`bf5508e`, SHA256 `59cc62059504711b251f2b32b56b7ffa937168fd135c1a5d654f0cf614370f68`).
+The ef32151, verified Nether cavern and final7 archives below still match their recorded hashes.
+
+The screen-space HUD already draws at output resolution. Its title had the same
+44,280 white glyph pixels at 67% and 100% in the baseline. Entity name tags and
+TextDisplay labels share Minecraft's text renderer with world text. The new pass
+selects labels at submission and draws them after the world resolve with the
+original text pipelines. Regular labels test against scene depth. See-through
+labels retain their original mode. Physical block signs stay in the world pass.
+The path runs with a scaled HDR world and is enabled by default.
+Use `-Dimaginemetal.nativeWorldLabels=false` to compare.
+
+ColdTp used disposable copies at 1728×1080 fullscreen and 67%. Final baseline
+used the normal pack stack with Generated PBR and SPBR off. Camera (-166.5, 75,
+-242.5), yaw -90, pitch 12, clear time 5000. A fixed 51×11 label crop's horizontal
+high-pass luma rose from 7.46 to 28.90 and had 51 pixels over 230 in all RGB channels
+versus zero before. A solid wall hid the regular label in both paths and the
+see-through label remained visible in both. Clear glass preserved visibility on
+the release. The prototype's sampled GPU spans were 21.6 ms with the pass off
+and 21.1–21.6 ms with it on. With the tested labels present, the renderer added
+one depth copy and one pass for each required text mode. See
+`codex-s1121-native-labels-check-5Bpfgy/floating-labels.png`.
+
+Before editing the world resolve, MetalFX retained more static far terrain detail
+than built-in TAA at 67%. Both were softer than the 100% render. At the same pose
+the final MetalFX output sharpen raised the fixed distant-terrain high-pass luma
+from 2.325 to 2.634 (+13%) with PBR off. The independent repeated strafe rose
+from 0.997 to 1.091 (+9%) at matched positions; its cadence was capped around 10 fps
+in that recording and is unsuitable for a motion smoothness verdict. The sharpen
+runs in the existing output copy and leaves temporal history and HUD alone.
+`-Dimaginemetal.metalfxSharpness=0` restores the previous MetalFX output. The default
+is 0.38 at 67%, fading to zero at 100%. See `release-clarity-metrics.txt` in the
+release check and `codex-s1121-metalfx-clarity-check-w0hq12/motion-detail.txt`.
+The prior Enderman and shallow-water squid trail reductions are still in the
+temporal resolve. The multiplayer motion report needs the original route or a clip
+that shows the effect while moving.
+
+The Nether view at (25.5, 56, 45.5), yaw -45, pitch 3 retained the cavern roof,
+pillars and visible underside at RD 6 with LODs versus RD 12 real chunks.
+The RD 6 sample logged 178,969 drawn quads including 48,095 downward faces.
+The Black Hole End at (0.5, 113, -105.5), yaw -60, pitch 7 retained bright,
+readable terrain and the disk at phase 2. Render distance returned to 6.
+See `codex-s1121-native-labels-release-check-hDDNYo/dimension-check.jpg`.
+
+The SPBR regression loaded 4,059 maps at 4096×4096 in Pack + fallback, with
+SPBR-22_6, Fresh Animations, FA All Extensions, SPBR x FA Patch and
+SPBR x FA-Extensions Patch in ascending priority. The material panel rendered,
+TextDisplay labels used the new pass, and the two Enderman walks drew complete limbs.
+See `codex-s1121-native-labels-release-check-hDDNYo/spbr-floating-labels.png`.
+
+A third copy used the ordinary pack order and Generated PBR
+(`imaginemetal.pbr=true`, `imaginemetal.pbrPack=false`). It confirmed the tagged
+armor stand and both TextDisplay labels at the same pose and after repeated
+camera strafes. See `codex-s1121-native-labels-live-config-Xu7el9/generated-labels.png`.
+Offline `:mod:build` and the archive integrity check passed. Only the ColdTp
+classes differ between the staged release and the capture overlay.
+
+The Generated PBR Enderman replay used two walks per mode at (0.5, 90, -30.5),
+yaw 0, pitch 3, End phase 2.0. Median head-position residual from a linear fit
+was 0.83 px with MetalFX and default sharpen, 0.62 px with sharpen set to zero,
+0.95 px with built-in TAA, and 0.81 px with temporal AA disabled. The sharp MetalFX
+walks had source frame-gap p95 of 28–43 ms versus 19–21 ms in the other walks, so
+the small differences do not isolate the sharpen or a calibration issue. Median
+trailing contrast at 2–5 pixels was 2.9%, 3.5%, 5.1%, and 1.8% respectively.
+The current-to-previous camera vectors are de-jittered and expressed in render
+pixels. The jitter phase count is 18 at 67%. Mob animation displacement is
+missing from the vectors and the existing reactive mask handles the silhouette.
+Keep the existing MetalFX signs and history behavior. See
+`codex-s1121-enderman-aa-check-5jDk1A/motion-metrics.txt` and `trail-metrics.txt`.
+
+Installed the release as `minecraft/mods/imagine-metal-0.1.0.jar` and verified
+the hash above. The live pack and renderer files match their initial hashes,
+including fullscreen 1728×1080 at 67%, RD 6 and ColdTp disabled. Wait for Jack's
+26.3 playtest before starting the separate Forge 1.20.1 port.
+
 # 2026-11-24 — Minecraft 26.3 playtest release on s1121
 
 Started from `ef32151`. Installed `claude-scratch/codex-s1121-playtest-final-release-GU0eZZ/imagine-metal-s1121-playtest.jar`

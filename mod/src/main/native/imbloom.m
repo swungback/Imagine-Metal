@@ -62,8 +62,11 @@ typedef struct {
 	int fxFoldFailed;
 	MTLPixelFormat fxCopyFormat, fxDepthFormat;
 	int fxOn, fxFailed, fxSaid;
-	float fxSign[4];
+	float fxSign[4], fxSharpness;
 	float fog[3];             // im_bloom_fog: Reimagined's bloom fog strength, 1 = eyes under water, the rainbow's strength
+	id<MTLRenderPipelineState> labelDepth;
+	id<MTLDepthStencilState> labelDepthWrite;
+	MTLPixelFormat labelDepthFormat;
 	id<MTLRenderPipelineState> ao;
 	id<MTLTexture> aoTex;     // the ambient occlusion at half size
 	float aoStrength, aoClip[48];
@@ -224,13 +227,14 @@ void im_bloom_taa(ImBloom *b, float jx, float jy, float on) {
 
 // (the MetalFX build) on: Apple's temporal scaler does the TAA and the scaling up this frame; the signs MetalFX is given the
 // jitter (jx, jy) and the motion (mx, my) with.
-void im_bloom_fx(ImBloom *b, int on, float jx, float jy, float mx, float my) {
+void im_bloom_fx(ImBloom *b, int on, float jx, float jy, float mx, float my, float sharpness) {
 	if (!b) return;
 	b->fxOn = on;
 	b->fxSign[0] = jx;
 	b->fxSign[1] = jy;
 	b->fxSign[2] = mx;
 	b->fxSign[3] = my;
+	b->fxSharpness = sharpness;
 }
 
 static id<MTLRenderPipelineState> imbFxPipeline(ImBloom *b, NSString *fn, MTLPixelFormat format, MTLPixelFormat format1) {
@@ -500,6 +504,42 @@ double im_gpu_ms(void) {
 	imGpuSum = 0.0;
 	imGpuN = 0;
 	return n > 0 ? s / n * 1000.0 : 0.0;
+}
+
+int im_bloom_label_depth(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst, float jitterX, float jitterY) {
+	if (!b || !src || !dst) return 1;
+	if (!b->labelDepth || b->labelDepthFormat != dst.pixelFormat) {
+		[b->labelDepth release];
+		MTLRenderPipelineDescriptor *pd = [[MTLRenderPipelineDescriptor new] autorelease];
+		pd.vertexFunction = [[b->lib newFunctionWithName:@"im_bloom_vs"] autorelease];
+		pd.fragmentFunction = [[b->lib newFunctionWithName:@"im_bloom_label_depth"] autorelease];
+		pd.depthAttachmentPixelFormat = dst.pixelFormat;
+		b->labelDepth = [b->device newRenderPipelineStateWithDescriptor:pd error:nil];
+		b->labelDepthFormat = dst.pixelFormat;
+	}
+	if (!b->labelDepthWrite) {
+		MTLDepthStencilDescriptor *dd = [[MTLDepthStencilDescriptor new] autorelease];
+		dd.depthCompareFunction = MTLCompareFunctionAlways;
+		dd.depthWriteEnabled = YES;
+		b->labelDepthWrite = [b->device newDepthStencilStateWithDescriptor:dd];
+	}
+	id<MTLCommandBuffer> cmd = mc_frame_cmd(enc);
+	if (!cmd || !b->labelDepth || !b->labelDepthWrite) return 1;
+	MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+	rp.depthAttachment.texture = dst;
+	rp.depthAttachment.loadAction = MTLLoadActionDontCare;
+	rp.depthAttachment.storeAction = MTLStoreActionStore;
+	id<MTLRenderCommandEncoder> r = [cmd renderCommandEncoderWithDescriptor:rp];
+	if (!r) return 1;
+	r.label = @"Imagine Metal label depth";
+	[r setRenderPipelineState:b->labelDepth];
+	[r setDepthStencilState:b->labelDepthWrite];
+	[r setFragmentTexture:src atIndex:0];
+	float jitter[2] = { jitterX, jitterY };
+	[r setFragmentBytes:jitter length:sizeof jitter atIndex:0];
+	[r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+	[r endEncoding];
+	return 0;
 }
 
 int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst, float strength, float threshold, float knee, float haze,
@@ -777,6 +817,8 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 				[r setRenderPipelineState:b->fxCopyPso];
 				[r setCullMode:MTLCullModeNone];
 				[r setFragmentTexture:b->fxOut atIndex:0];
+				float sharpness = b->fxSharpness * fminf(fmaxf((1.0f - p.taa[3]) / 0.33f, 0.0f), 1.0f);
+				[r setFragmentBytes:&sharpness length:sizeof sharpness atIndex:0];
 				[r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 				[r endEncoding];
 				b->taaValid = 1;

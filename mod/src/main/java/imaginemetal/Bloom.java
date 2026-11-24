@@ -111,6 +111,18 @@ public final class Bloom {
 	private Bloom() {
 	}
 
+	static boolean ready() {
+		return state != 0 && !failed;
+	}
+
+	static boolean copyLabelDepth(GpuTexture src, GpuTexture dst) {
+		Object encoder = MetalBridge.encoder(((FrontendCommandEncoder) RenderSystem.getDevice().createCommandEncoder()).backend());
+		if (encoder == null) return false;
+		MetalBridge.flushClear(encoder, src);
+		return ImNative.bloomLabelDepth(MetalBridge.enc(encoder), state, MetalBridge.textureHandle(src), MetalBridge.textureHandle(dst),
+			ImagineFrame.jitterX * 0.5f, ImagineFrame.jitterY * 0.5f) == 0;
+	}
+
 	public static void render() {
 		long t0 = Perf.start();
 		try {
@@ -170,7 +182,7 @@ public final class Bloom {
 				ImNative.bloomTaa(state, ImagineFrame.jitterX * 0.5f, ImagineFrame.jitterY * 0.5f, Settings.taa && Reflections.valid ? (Settings.taaFarSteady ? 2f : 1f) : 0f);
 				// (the MetalFX build: Apple's temporal scaler in place of our TAA pass; the signs are debug switches until tested)
 				ImNative.bloomFx(state, Settings.metalfx ? 1 : 0, Settings.metalfxFlipJX ? -1f : 1f, Settings.metalfxFlipJY ? -1f : 1f,
-					Settings.metalfxFlipMX ? -1f : 1f, Settings.metalfxFlipMY ? -1f : 1f);
+					Settings.metalfxFlipMX ? -1f : 1f, Settings.metalfxFlipMY ? -1f : 1f, Settings.metalfxSharpness);
 				long clips = stack.nmalloc(4, 192);
 				Reflections.CLIP.get(MemoryUtil.memFloatBuffer(clips, 16));
 				Reflections.CLIP_INV.get(MemoryUtil.memFloatBuffer(clips + 64, 16));

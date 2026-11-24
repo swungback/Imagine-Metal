@@ -49,6 +49,8 @@ public final class Settings {
 	public static volatile boolean shootingStars = Engine.flag("imaginemetal.shootingStars", true);
 	public static volatile boolean wet = Engine.flag("imaginemetal.wet", true);
 	public static volatile boolean intenseDeepDark = Engine.flag("imaginemetal.intenseDeepDark", true);
+	/** Draw floating labels at output resolution when the world is scaled. */
+	public static volatile boolean nativeWorldLabels = Engine.flag("imaginemetal.nativeWorldLabels", true);
 	public static volatile boolean taa = Engine.flag("imaginemetal.taa", true);
 	/**
 	 * The world's render scale in percent (Hdr.scale; live): the share of the screen's size, on each axis, the world is drawn
@@ -92,6 +94,8 @@ public final class Settings {
 	 * jitter (J) and the motion (M) with on each axis, debug switches until the right ones are known from a test.
 	 */
 	public static volatile boolean metalfx = Engine.flag("imaginemetal.metalfx", true);
+	/** Strength of the display-only sharpen when MetalFX upscales the world. */
+	public static volatile float metalfxSharpness = Config.number("imaginemetal.metalfxSharpness", 0.38f, 0f, 1f);
 	public static volatile boolean metalfxFlipJX = Engine.flag("imaginemetal.metalfxFlipJX", false);
 	public static volatile boolean metalfxFlipJY = Engine.flag("imaginemetal.metalfxFlipJY", false);
 	public static volatile boolean metalfxFlipMX = Engine.flag("imaginemetal.metalfxFlipMX", false);

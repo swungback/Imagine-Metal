@@ -71,6 +71,17 @@ vertex ImBloomOut im_bloom_vs(uint vid [[vertex_id]]) {
 	return o;
 }
 
+struct ImLabelDepth {
+	float depth [[depth(any)]];
+};
+
+fragment ImLabelDepth im_bloom_label_depth(ImBloomOut in [[stage_in]], depth2d<float> scene [[texture(0)]],
+	constant float2 &jitter [[buffer(0)]]) {
+	int2 size = int2(scene.get_width(), scene.get_height());
+	int2 pixel = clamp(int2((in.uv + jitter) * float2(size)), int2(0), size - 1);
+	return {scene.read(uint2(pixel))};
+}
+
 static inline float3 imbLinear(float3 c) {
 	return pow(max(c, 0.0), 2.2);
 }
@@ -900,10 +911,26 @@ fragment ImResolveFxrOut im_bloom_resolve_fxr(IMB_RESOLVE_ARGS, texture2d<float>
 	return o;
 }
 
-// The scaler's picture onto the screen (the game's 8-bit image), with the dither the TAA's output had.
-fragment float4 im_bloom_fxcopy(ImBloomOut in [[stage_in]], texture2d<float> src [[texture(0)]]) {
-	float4 c = src.read(uint2(in.pos.xy));
-	return float4(saturate(c.rgb) + imbDither8(in.pos.xy), 1.0);
+// Sharpen the displayed world after temporal history has been resolved and before the HUD draws.
+fragment float4 im_bloom_fxcopy(ImBloomOut in [[stage_in]], texture2d<float> src [[texture(0)]],
+	constant float &sharpness [[buffer(0)]]) {
+	int2 pos = int2(in.pos.xy);
+	float3 color = src.read(uint2(pos)).rgb;
+	if (sharpness > 0.0) {
+		constexpr float3 lumaWeights = float3(0.2126, 0.7152, 0.0722);
+		int2 last = int2(src.get_width(), src.get_height()) - 1;
+		float4 neighbors = float4(
+			dot(src.read(uint2(max(pos - int2(1, 0), 0))).rgb, lumaWeights),
+			dot(src.read(uint2(min(pos + int2(1, 0), last))).rgb, lumaWeights),
+			dot(src.read(uint2(max(pos - int2(0, 1), 0))).rgb, lumaWeights),
+			dot(src.read(uint2(min(pos + int2(0, 1), last))).rgb, lumaWeights));
+		float luma = dot(color, lumaWeights);
+		float lo = min(luma, min(min(neighbors.x, neighbors.y), min(neighbors.z, neighbors.w)));
+		float hi = max(luma, max(max(neighbors.x, neighbors.y), max(neighbors.z, neighbors.w)));
+		float detail = (luma - dot(neighbors, float4(0.25))) * sharpness;
+		color += clamp(detail, max(lo - luma, -0.035), min(hi - luma, 0.035));
+	}
+	return float4(saturate(color) + imbDither8(in.pos.xy), 1.0);
 }
 
 struct ImTaaOut {

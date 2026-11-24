@@ -21,6 +21,8 @@ final class ImNative {
 	private static final MethodHandle BLOOM_NEW = fn("im_bloom_new", FunctionDescriptor.of(JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_INT), false);
 	private static final MethodHandle BLOOM_RENDER = fn("im_bloom_render", FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG,
 		JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT, JAVA_LONG, JAVA_INT), false);
+	private static final MethodHandle BLOOM_LABEL_DEPTH = fn("im_bloom_label_depth",
+		FunctionDescriptor.of(JAVA_INT, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_LONG, JAVA_FLOAT, JAVA_FLOAT), false);
 	private static final MethodHandle BLOOM_SHAFTS = fn("im_bloom_shafts", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT,
 		JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT), false);
 	private static final MethodHandle BLOOM_FOG = fn("im_bloom_fog", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT), false);
@@ -164,6 +166,14 @@ final class ImNative {
 		}
 	}
 
+	static int bloomLabelDepth(long enc, long state, long src, long dst, float jitterX, float jitterY) {
+		try {
+			return (int) BLOOM_LABEL_DEPTH.invokeExact(enc, state, src, dst, jitterX, jitterY);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
 	static int bloomRender(long enc, long state, long src, long dst, float strength, float threshold, float knee, float haze, float toe, long err,
 		int errCap) {
 		try {
@@ -189,12 +199,12 @@ final class ImNative {
 		}
 	}
 
-	private static final MethodHandle BLOOM_FX = fn("im_bloom_fx", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT, JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT), false);
+	private static final MethodHandle BLOOM_FX = fn("im_bloom_fx", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT, JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT), false);
 
 	/** (the MetalFX build) Apple's temporal scaler this frame, and the signs it is given the jitter and the motion with. */
-	static void bloomFx(long state, int on, float jx, float jy, float mx, float my) {
+	static void bloomFx(long state, int on, float jx, float jy, float mx, float my, float sharpness) {
 		try {
-			BLOOM_FX.invokeExact(state, on, jx, jy, mx, my);
+			BLOOM_FX.invokeExact(state, on, jx, jy, mx, my, sharpness);
 		} catch (Throwable t) {
 			throw new IllegalStateException(t);
 		}

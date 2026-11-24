@@ -9,6 +9,8 @@ import imaginemetal.ImagineFrame;
 import imaginemetal.LightVolume;
 import imaginemetal.PassTimes;
 import imaginemetal.Shadows;
+import imaginemetal.WorldLabels;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import org.joml.Vector4f;
@@ -29,11 +31,13 @@ abstract class LevelRendererMixin {
 		// (the Nether: the picture is cleared to its haze, so the void past the land matches the fogged land at its edge)
 		ImagineFrame.netherClear(fogColor);
 		Hdr.begin();
+		WorldLabels.begin();
 	}
 
 	/** (In case the level's passes threw before the resolve: the main target gets its own colour back.) */
 	@Inject(method = "render", at = @At("RETURN"))
 	private void imaginemetal$hdrEnd(CallbackInfo ci) {
+		WorldLabels.end();
 		Hdr.end();
 		PassTimes.tag(PassTimes.HUD);  // (the hand and the GUI come after the level)
 	}
@@ -85,12 +89,19 @@ abstract class LevelRendererMixin {
 		LightVolume.render();
 	}
 
+	@Inject(method = "executeAlwaysOnTop", at = @At("HEAD"))
+	private void imaginemetal$saveLabelDepth(CallbackInfo ci) {
+		WorldLabels.captureDepth();
+	}
+
 	/** Bloom and the HDR resolve, once the level's passes have drawn the world (the hand and the HUD come after, so they don't glow). */
 	@Inject(method = "render", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/framegraph/FrameGraphBuilder;execute(Lcom/mojang/blaze3d/resource/GraphicsResourceAllocator;Lcom/mojang/blaze3d/framegraph/FrameGraphBuilder$Inspector;)V", shift = At.Shift.AFTER))
 	private void imaginemetal$bloom(CallbackInfo ci) {
 		imaginemetal.Sky.lateEnd();  // (Build C1: the clouds drawn after the opaque world: did that happen this frame?)
 		Reflections.capture();
 		imaginemetal.Sky.drawEndLate();
+		WorldLabels.captureDepth();
 		Bloom.render();
+		WorldLabels.draw(Minecraft.getInstance().gameRenderer.mainRenderTarget().getColorTextureView());
 	}
 }

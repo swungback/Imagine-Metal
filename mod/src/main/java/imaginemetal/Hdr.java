@@ -151,6 +151,14 @@ public final class Hdr {
 		return target != null;
 	}
 
+	static boolean scaled() {
+		return savedDepth != null;
+	}
+
+	static GpuTexture worldDepth() {
+		return depth;
+	}
+
 	/** The HDR image (between begin and end). */
 	static GpuTexture texture() {
 		return texture;
