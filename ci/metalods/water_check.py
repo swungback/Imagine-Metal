@@ -24,6 +24,7 @@ typedef float float4 __attribute__((ext_vector_type(4)));
 float3 make3(float x,float y,float z){return {x,y,z};}
 float clamp(float x,float a,float b){return max(a,min(b,x));}
 float saturate(float x){return clamp(x,0.f,1.f);}
+float smoothstep(float a,float b,float x){float t=saturate((x-a)/(b-a));return t*t*(3.f-2.f*t);}
 float dot(float3 a,float3 b){return a.x*b.x+a.y*b.y+a.z*b.z;}
 float length(float3 a){return std::sqrt(dot(a,a));}
 float mix(float a,float b,float t){return a+(b-a)*t;}
@@ -31,7 +32,7 @@ float3 mix(float3 a,float3 b,float t){return a+(b-a)*t;}
 float3 max(float3 a,float b){return {max(a.x,b),max(a.y,b),max(a.z,b)};}
 float3 pow(float3 a,float b){return {std::pow(a.x,b),std::pow(a.y,b),std::pow(a.z,b)};}
 float3 exp(float3 a){return {std::exp(a.x),std::exp(a.y),std::exp(a.z)};}
-struct ImFrame{float4 lodFog, sunDir, flags, fogParams;};
+struct ImFrame{float4 lightColor, nightMiddle, lodFog, sunDir, flags, fogParams, dayUp;};
 bool close(float a,float b){return std::abs(a-b)<2e-6;}
 '''
 main=r'''
