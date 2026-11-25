@@ -94,6 +94,8 @@ public final class Settings {
 	 * jitter (J) and the motion (M) with on each axis, debug switches until the right ones are known from a test.
 	 */
 	public static volatile boolean metalfx = Engine.flag("imaginemetal.metalfx", true);
+	/** Preserve reactive coverage for blended armor on the HDR target. */
+	public static volatile boolean translucentArmorCoverage = Engine.flag("imaginemetal.translucentArmorCoverage", true);
 	/** Strength of the display-only sharpen when MetalFX upscales the world. */
 	public static volatile float metalfxSharpness = Config.number("imaginemetal.metalfxSharpness", 0.38f, 0f, 1f);
 	public static volatile boolean metalfxFlipJX = Engine.flag("imaginemetal.metalfxFlipJX", false);

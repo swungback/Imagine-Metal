@@ -99,6 +99,9 @@ final class MetalRenderPass implements RenderPassBackend {
 		this.recording = record ? p : null;
 		Native.pipeline(this.enc, p.state(this.hasDepth, MetalEncoder.passHdr), p.depthState, p.cull ? 1 : 0, p.wireframe ? 1 : 0, p.biasConstant(), p.biasSlope(), p.primitive);
 		if (p.imEntity) imaginemetal.EntityShade.bind(this.enc, MetalEncoder.passHdr);  // (Imagine Metal)
+		if (p.imArmorCoverage && MetalEncoder.passHdr) {
+			Native.armorCoverage(this.enc, imaginemetal.Settings.translucentArmorCoverage ? 0.96f : 1.0f);
+		}
 		Arrays.fill(this.pending, 0, p.uniforms.size(), null);
 		this.dirtyUpTo = p.uniforms.size();
 	}
@@ -117,6 +120,9 @@ final class MetalRenderPass implements RenderPassBackend {
 		}
 		Native.pipeline(this.enc, p.state(this.hasDepth, MetalEncoder.passHdr), p.depthState, p.cull ? 1 : 0, p.wireframe ? 1 : 0, p.biasConstant(), p.biasSlope(), p.primitive);
 		if (p.imEntity) imaginemetal.EntityShade.bind(this.enc, MetalEncoder.passHdr);  // (Imagine Metal)
+		if (p.imArmorCoverage && MetalEncoder.passHdr) {
+			Native.armorCoverage(this.enc, imaginemetal.Settings.translucentArmorCoverage ? 0.96f : 1.0f);
+		}
 	}
 
 	/** Called by the encoder when the frontend ends the pass. */

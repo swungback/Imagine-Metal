@@ -1,6 +1,8 @@
 package mcopt.metal;
 
 import com.mojang.renderpearl.api.pipeline.BindGroupLayout;
+import com.mojang.renderpearl.api.pipeline.BlendFactor;
+import com.mojang.renderpearl.api.pipeline.BlendOp;
 import com.mojang.renderpearl.api.pipeline.ColorTargetState;
 import com.mojang.renderpearl.api.pipeline.DepthStencilState;
 import com.mojang.renderpearl.api.pipeline.PolygonMode;
@@ -51,6 +53,7 @@ final class MetalPipeline implements BackendRenderPipeline {
 	long withDepthHdr, withoutDepthHdr;
 	/** (Imagine Metal) its shaders were patched with our entity lighting (imaginemetal.EntityShade): bind its resources when set */
 	boolean imEntity;
+	final boolean imArmorCoverage;
 	final long depthState;
 	final List<BindGroupLayout.UniformDescription> uniforms;
 	final boolean cull;
@@ -73,6 +76,7 @@ final class MetalPipeline implements BackendRenderPipeline {
 
 	private MetalPipeline(MetalEncoder encoder, long withDepth, long withoutDepth, long pulled, long depthState, int depthCompare, CreateInfo info) {
 		this.encoder = encoder;
+		this.imArmorCoverage = armorCoverage(info.name());
 		this.withDepth = withDepth;
 		this.withoutDepth = withoutDepth;
 		this.pulled = pulled;
@@ -295,6 +299,13 @@ final class MetalPipeline implements BackendRenderPipeline {
 		return hasDepth ? this.withDepth : this.withoutDepth;
 	}
 
+	// MTLBlendFactorBlendAlpha is only needed for the HDR metadata channel.
+	private static final int MTL_BLEND_ALPHA = 13;
+
+	private static boolean armorCoverage(String name) {
+		return name.startsWith("shouldersurfing:pipeline/armor_") && name.contains("translucent");
+	}
+
 	private static long describe(MemoryStack stack, CreateInfo info, boolean hasDepth, boolean vertexInput, boolean hdr) {
 		IntBuffer d = stack.mallocInt(5 + info.vertexBuffers().size() * 3 + info.attribBindings().size() * 4 + info.colorTargetStates().size() * 9);
 		List<CreateInfo.VertexBuffer> buffers = vertexInput ? info.vertexBuffers() : List.of();
@@ -315,13 +326,19 @@ final class MetalPipeline implements BackendRenderPipeline {
 				continue;
 			}
 			// MTLColorWriteMask is ABGR-ordered (red = 8), renderpearl's is RGBA-ordered (red = 1).
-			int mask = (c.writeRed() ? 8 : 0) | (c.writeGreen() ? 4 : 0) | (c.writeBlue() ? 2 : 0) | (c.writeAlpha() ? 1 : 0);
+			boolean armorAlpha = hdrHere && armorCoverage(info.name()) && c.blendFunction().isPresent();
+			int mask = (c.writeRed() ? 8 : 0) | (c.writeGreen() ? 4 : 0) | (c.writeBlue() ? 2 : 0) | (c.writeAlpha() || armorAlpha ? 1 : 0);
 			var format = hdrHere && c.format() == com.mojang.renderpearl.api.GpuFormat.RGBA8_UNORM ? com.mojang.renderpearl.api.GpuFormat.RGBA16_FLOAT : c.format();
 			d.put(MetalConst.pixelFormat(format)).put(mask);
 			if (c.blendFunction().isPresent()) {
 				var b = c.blendFunction().get();
-				d.put(1).put(MetalConst.blendFactor(b.color().sourceFactor())).put(MetalConst.blendFactor(b.color().destFactor())).put(MetalConst.blendOp(b.color().op()))
-					.put(MetalConst.blendFactor(b.alpha().sourceFactor())).put(MetalConst.blendFactor(b.alpha().destFactor())).put(MetalConst.blendOp(b.alpha().op()));
+				d.put(1).put(MetalConst.blendFactor(b.color().sourceFactor())).put(MetalConst.blendFactor(b.color().destFactor())).put(MetalConst.blendOp(b.color().op()));
+				if (armorAlpha) {
+					// HDR alpha carries entity coverage. Scale only the source alpha term, leaving RGB blending intact.
+					d.put(MTL_BLEND_ALPHA).put(MetalConst.blendFactor(BlendFactor.ONE_MINUS_SRC_ALPHA)).put(MetalConst.blendOp(BlendOp.ADD));
+				} else {
+					d.put(MetalConst.blendFactor(b.alpha().sourceFactor())).put(MetalConst.blendFactor(b.alpha().destFactor())).put(MetalConst.blendOp(b.alpha().op()));
+				}
 			} else {
 				d.put(new int[] {0, 1, 0, 0, 1, 0, 0});
 			}

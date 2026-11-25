@@ -1,3 +1,81 @@
+# 2026-11-25 — Overworld zombie trail reproduction on s1121
+
+Jack and Oscar reported a trail behind a moving land mob. They reproduced it in
+the Overworld with an ordinary zombie from a spawn egg, with the leather helmet
+particularly visible. ColdTp ran in disposable copies with the normal packs,
+Generated PBR enabled, SPBR absent, fullscreen 1728×1080, 67%, and RD 6. The
+camera stayed at (0.5, 68, -24.5), yaw 0, pitch 5, under clear time 5500. The
+egg-spawned zombie walked naturally across the meadow on y 67 toward a stationary
+villager. Both replay builds equipped a helmet and extinguished the zombie to
+isolate the silhouette.
+
+On the installed build `746cea2`, normalized local contrast 2–5 pixels behind
+the moving helmet was 20.48% in MetalFX, 26.88% in built-in TAA, and 11.08%
+with temporal AA off. The corresponding teal-shirt measurements were 10.92%,
+10.96%, and 7.49%. These are median edge profiles after subtracting a captured
+background, with two repetitions per mode. This captures the moving afterimage
+while the player is stationary. See
+`codex-s1121-overworld-zombie-stock-vCsnfd/zombie-egg.mp4`,
+`helmet-metrics.txt`, and `zombie-metrics.txt`.
+
+A fixed and strafing Enderman on a high-contrast dry wall was a positive control
+for the measurement. On stock MetalFX it showed 2.60% with the camera fixed and
+2.12% while strafing. Built-in TAA showed 4.63% and 3.38%. Temporal AA off showed
+1.79% and 1.93%. The head silhouette cleared on the first updated recorded frame
+in all modes. See `codex-s1121-land-trail-baseline-omeIdD/land-metrics.txt`.
+
+The first output clamp left 19.24% MetalFX helmet contrast. The second spatial
+background correction left 20.19% overall. Across matching 50-pixel route bins
+and 12–36 ms source intervals, it moved the helmet from 22.26% to 19.29%, while
+the AA-off control moved from 11.94% to 12.83%. That candidate gave a clearer
+shirt but a visible helmet trail. Its reflective-water control cleared the
+squid on the first updated frame. Cadence was slower in some captures, including
+a 10 fps inactive interval that is unsuitable for comparing motion. See
+`codex-s1121-overworld-zombie-candidate-eaPPXh`,
+`codex-s1121-overworld-zombie-rebuild-BFDHl3`, and
+`codex-s1121-land-trail-water-regression-EHI2mH`.
+
+An experimental motion-vector path estimated each nearby mob's translation
+from consecutive client positions and adjusted motion on marked opaque pixels.
+Within the same replay it measured 20.33% MetalFX helmet contrast with the
+mob estimates and 20.73% with camera-only vectors. Body translation alone,
+with this position estimate and coverage, did not explain the residual.
+See `codex-s1121-overworld-zombie-motion-5azFrM/helmet-metrics.txt`.
+The experiment and its source are archived in `codex-s1121-mob-motion-release-Nm4OVc`.
+
+The diagnostic false-color reactive mask marked the zombie's body and omitted
+the helmet. See `codex-s1121-zombie-coverage-check-7oPOjK/zombie-coverage.png`.
+Shoulder Surfing's player-transparency setting swaps armor render types globally
+to blended pipelines, including fully opaque armor on a zombie. The original
+opaque entity patch deliberately did not write the metadata marker through
+blended pipelines.
+
+The release applies the entity-coverage value through the source alpha blend term
+of those HDR armor pipelines, preserving the RGB blend factors and opacity.
+The exact release replay toggled `im.translucentArmorCoverage` off and on with
+MetalFX, then turned temporal AA off for the reference. Helmet residual contrast
+was 20.52%, 10.75%, and 12.03% respectively. In nine matching movement and
+12–36 ms cadence bins it measured 18.81%, 10.91%, and 12.77%. Shirt contrast
+in those bins was 10.37%, 8.39%, and 8.00%. See
+`codex-s1121-zombie-armor-verify-hMdylf/zombie-trail-before-after.mp4` and
+`matched.txt`. The guard experiments and per-mob translation experiment were
+kept in their scratch folders. The final release changes only armor coverage.
+
+The separate SPBR Pack + fallback smoke loaded 4,059 maps at 4096×4096.
+Its order was SPBR-22_6, Fresh Animations, FA All Extensions, SPBR x FA Patch,
+and SPBR x FA-Extensions Patch. Two walks drew the full helmet, body, and limbs.
+See `codex-s1121-zombie-armor-spbr-sUCOu4/spbr-zombie.png`. Offline
+`:mod:build` and the archive integrity check passed.
+
+Installed `claude-scratch/codex-s1121-armor-trail-release-4q1JpK/imagine-metal-s1121-playtest.jar`
+as `minecraft/mods/imagine-metal-0.1.0.jar`, SHA256
+`d2eed13ed2c060ebb12facc22ba3c61f242e092005996774113c6a56e499a345`.
+The immediate rollback is the native-labels release below (`746cea2`,
+SHA256 `cbdc9b5181836e11029b0ffa088736a131a21166839d281bd495510e15b2e4ec`).
+The live configuration matched its starting hashes and ColdTp is disabled.
+The fix is verified for the reported Overworld helmet case. Continue to wait for
+Jack's playtest before starting the separate Forge port.
+
 # 2026-11-25 — Native-resolution floating text and MetalFX clarity on s1121
 
 Started from `bf5508e`. The release jar is

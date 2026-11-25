@@ -1576,6 +1576,10 @@ void mc_r_pipeline(Enc *enc, id<MTLRenderPipelineState> pso, id<MTLDepthStencilS
 	enc->primitive = (MTLPrimitiveType) primitive;
 }
 
+void mc_r_armor_coverage(Enc *enc, float alpha) {
+	[enc->render setBlendColorRed:0 green:0 blue:0 alpha:alpha];
+}
+
 void mc_r_buffer(Enc *enc, int index, id<MTLBuffer> buffer, uint64_t offset) {
 	[enc->render setVertexBuffer:buffer offset:offset atIndex:index];
 	[enc->render setFragmentBuffer:buffer offset:offset atIndex:index];

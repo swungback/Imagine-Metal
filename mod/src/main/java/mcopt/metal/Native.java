@@ -85,6 +85,7 @@ final class Native {
 	private static final MethodHandle R_VERTEX_BUFFER = fn("mc_r_vertex_buffer", true, null, JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_LONG);
 	private static final MethodHandle R_BYTES = fn("mc_r_bytes", true, null, JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_INT);
 	private static final MethodHandle R_TEXTURE = fn("mc_r_texture", true, null, JAVA_LONG, JAVA_INT, JAVA_LONG, JAVA_LONG);
+	private static final MethodHandle R_ARMOR_COVERAGE = fn("mc_r_armor_coverage", true, null, JAVA_LONG, JAVA_FLOAT);
 	private static final MethodHandle R_SCISSOR = fn("mc_r_scissor", true, null, JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT);
 	private static final MethodHandle R_INDEX = fn("mc_r_index", true, null, JAVA_LONG, JAVA_LONG, JAVA_INT);
 	private static final MethodHandle R_USE = fn("mc_r_use", true, null, JAVA_LONG, JAVA_LONG);
@@ -207,6 +208,14 @@ final class Native {
 	static void vertexBuffer(long enc, int index, long buffer, long offset) { if (FrameCapture.FULL && FrameCapture.active()) FrameCapture.buffer(true, index, buffer, offset); try { R_VERTEX_BUFFER.invokeExact(enc, index, buffer, offset); } catch (Throwable t) { throw rethrow(t); } }
 	static void bytes(long enc, int index, long bytes, int length) { if (FrameCapture.FULL && FrameCapture.active()) FrameCapture.bytes(index, bytes, length); try { R_BYTES.invokeExact(enc, index, bytes, length); } catch (Throwable t) { throw rethrow(t); } }
 	static void texture(long enc, int index, long texture, long sampler) { if (FrameCapture.FULL && FrameCapture.active()) FrameCapture.texture(index, texture, sampler); try { R_TEXTURE.invokeExact(enc, index, texture, sampler); } catch (Throwable t) { throw rethrow(t); } }
+	static void armorCoverage(long enc, float alpha) {
+		try {
+			R_ARMOR_COVERAGE.invokeExact(enc, alpha);
+		} catch (Throwable t) {
+			throw rethrow(t);
+		}
+	}
+
 	static void scissor(long enc, int x, int y, int w, int h) { if (FrameCapture.FULL && FrameCapture.active()) FrameCapture.scissor(x, y, w, h); try { R_SCISSOR.invokeExact(enc, x, y, w, h); } catch (Throwable t) { throw rethrow(t); } }
 	static void index(long enc, long buffer, int intIndices) { if (FrameCapture.FULL && FrameCapture.active()) FrameCapture.index(buffer, intIndices); try { R_INDEX.invokeExact(enc, buffer, intIndices); } catch (Throwable t) { throw rethrow(t); } }
 	static void useResource(long enc, long buffer) { if (FrameCapture.FULL && FrameCapture.active()) FrameCapture.use(buffer); try { R_USE.invokeExact(enc, buffer); } catch (Throwable t) { throw rethrow(t); } }
