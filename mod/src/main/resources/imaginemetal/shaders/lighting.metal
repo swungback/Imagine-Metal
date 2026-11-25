@@ -861,12 +861,16 @@ static float imLodFogAmount(float3 p, constant ImFrame &f) {
 	if (f.lodFog.x <= 0.0 || dist <= 24.0 || f.sunDir.w < 0.5 || f.flags.y != 0 || f.flags.z == 0) return 0.0;
 	float yw = f.fogParams.y + p.y;
 	float hf = clamp(exp2(-(max(yw, 40.0) - 64.0) / 48.0), 0.35, 2.2);
-	return (1.0 - exp(-(dist - 24.0) / 700.0 * f.lodFog.x * hf)) * saturate(f.fogParams.z);
+	// Clear daylight gives distant ridges a separate aerial layer while keeping the handoff continuous.
+	float aerial = f.flags.x == 0 ? smoothstep(120.0, 460.0, dist) * f.nightMiddle.w * (1.0 - f.lightColor.w) : 0.0;
+	return (1.0 - exp(-(dist - 24.0) / mix(700.0, 510.0, aerial) * f.lodFog.x * hf)) * saturate(f.fogParams.z);
 }
 static float3 imLodFogColor(float3 p, constant ImFrame &f) {
 	float dist = length(p);
 	float3 hd = normalize(float3(p.x, max(p.y, 0.02 * dist), p.z));
-	return pow(imPresent(imSkyColor(hd, f, false), f), 1.0 / 2.2);
+	float3 horizon = pow(imPresent(imSkyColor(hd, f, false), f), 1.0 / 2.2);
+	float aerial = f.flags.x == 0 ? smoothstep(110.0, 380.0, dist) * f.nightMiddle.w * (1.0 - f.lightColor.w) : 0.0;
+	return horizon * mix(float3(1.0), float3(0.90, 0.985, 1.045), aerial);
 }
 
 static float3 imAirFog(float3 p, float skyLight, constant ImFrame &f, thread float3 &trans) {
@@ -1592,6 +1596,26 @@ static float3 imShade(float3 albedo, float3 tex, float3 p, float2 light, uint ma
 		float3 tG = pow(max(torch, 0.0), g), mG = pow(max(f.minLight.rgb, 0.0), g);
 		float3 litG = pow(sqrt(dayG * dayG + tG * tG + mG * mG), 2.2);
 		lit = mix(lit, litG, f.nightMiddle.w);
+	}
+	// Lift warm green surfaces in clear overhead sunlight. The biome's grass tint, shaded foliage and gray leaves
+	// keep their own colors. Both real terrain and LODs use the same response.
+	if (cls == IM_MAT_FOLIAGE && f.flags.x == 0 && f.grade.y > 0.10 && f.water.z < 0.5) {
+		float greenness = smoothstep(0.06, 0.18, albedo.g - albedo.b);
+		float warmGreen = smoothstep(0.48, 0.80, albedo.r / max(albedo.g, 0.001));
+		float noonSun = smoothstep(0.72, 0.96, f.lightDir.y) * sun * f.nightMiddle.w * (1.0 - f.lightColor.w);
+		float surface = slanted ? 0.85 : smoothstep(0.20, 0.85, n.y);
+		lit *= mix(float3(1.0), float3(1.84, 1.94, 2.37), greenness * warmGreen * noonSun * surface);
+	}
+	// Keep distant rock faces legible in daylight. Apply the same distance ramp to real terrain and LODs
+	// so changing render distance does not change the shading of a surface at a fixed position.
+	if (f.flags.x == 0 && cls == IM_MAT_STONE && f.water.z < 0.5 && f.lodFog.x > 0.0) {
+		float distance = smoothstep(55.0, 103.0, length(p.xz));
+		float daylight = smoothstep(0.23, 0.65, f.lightDir.y) * f.nightMiddle.w * (1.0 - f.lightColor.w);
+		daylight *= smoothstep(0.13, 0.75, sky) * f.fogParams.z;
+		float wall = 1.0 - smoothstep(0.12, 0.87, abs(n.y));
+		float facing = smoothstep(-0.45, 0.40, dot(n, f.lightDir.xyz));
+		float fill = mix(0.47, 0.76, facing);
+		lit *= mix(1.0, fill, distance * daylight * wall);
 	}
 	float3 radiance = base * lit * face * f.minLight.w + sssGlow * f.minLight.w;
 

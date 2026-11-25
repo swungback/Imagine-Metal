@@ -205,12 +205,12 @@ int im_under_capture(Enc *enc, ImSsr *s, id<MTLTexture> color, id<MTLTexture> de
 			imt_rp(rp, IMT_TERRAIN);
 			id<MTLRenderCommandEncoder> r = [cmd renderCommandEncoderWithDescriptor:rp];
 			r.label = @"Imagine Metal air";
-			float ap[20];
-			memcpy(ap, air, 64);
-			ap[16] = (float) airTarget.width;
-			ap[17] = (float) airTarget.height;
-			ap[18] = air[16];  // (MetaLODS' far fog: where it starts, blocks; its density, 0 none)
-			ap[19] = air[17];
+			float ap[36];
+			memcpy(ap, air, 32 * sizeof(float));
+			ap[32] = (float) airTarget.width;
+			ap[33] = (float) airTarget.height;
+			ap[34] = air[32];  // (distant ambient occlusion strength)
+			ap[35] = air[33];  // (distant contact shadows)
 			[r setRenderPipelineState:airPso];
 			[r setCullMode:MTLCullModeNone];
 			[r setFragmentTexture:s->underDepth atIndex:0];

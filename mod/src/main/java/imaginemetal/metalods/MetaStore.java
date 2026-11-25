@@ -52,7 +52,7 @@ final class MetaStore {
 	private static final int MAGIC = 0x4D4C4F44;  // "MLOD"
 	final Path dir;
 	private final RegistryAccess access;
-	private final int cliffBiome;
+	private final int cliffBiome, mesaBiome;
 	private final ExecutorService io = Executors.newSingleThreadExecutor(r -> {
 		Thread t = new Thread(r, "MetaLODS disk");
 		t.setDaemon(true);
@@ -104,11 +104,12 @@ final class MetaStore {
 	/** The generated columns' folder: the generator's version, and h for heightfield ones (3D off). */
 	private final String genDir;
 
-	MetaStore(Path dir, RegistryAccess access, boolean overhangs, int cliffBiome) {
+	MetaStore(Path dir, RegistryAccess access, boolean overhangs, int cliffBiome, int mesaBiome) {
 		this.genDir = "gen" + GEN_VERSION + (overhangs ? "" : "h");
 		this.dir = dir;
 		this.access = access;
 		this.cliffBiome = cliffBiome;
+		this.mesaBiome = mesaBiome;
 		try {
 			Files.createDirectories(dir.resolve(REAL));
 			// (fix9b: the regions of the old real/ folder are known too: read from it, re-mipped by the new rule (readRegion))
@@ -142,75 +143,80 @@ final class MetaStore {
 		return this.dir.resolve(this.generationFolder(level)).resolve("L" + level).resolve(cx + "." + cz + ".bin");
 	}
 
-	private String generationFolder(int level) {
+	private String cliffFolder(int level) {
 		return this.dirFor(level) + (level == 0 && this.cliffBiome != 0 ? "-cliff1" : "");
 	}
 
-	@Nullable Rle loadGen(int level, int cx, int cz) {
-        GeneratedKey key=new GeneratedKey(level,cx,cz);
-        PendingGen pending=this.pendingGenerated.get(key);
-        if(pending!=null)return pending.data();
-		Path p = this.genPath(level, cx, cz);
-        // L2+ generator output did not change in gen9. Reuse those gen8
-        // columns instead of discarding a whole world's compatible far cache.
-        if (!Files.exists(p) && level >= 4) {
-            for (String old : new String[] {"gen9", "gen8"}) {
-                Path q = this.dir.resolve(this.genDir.replace("gen" + GEN_VERSION, old)).resolve("L" + level).resolve(cx + "." + cz + ".bin");
-                if (Files.exists(q)) {
-                    p = q;
-                    break;
-                }
-            }
-        }
-        int kind=0;
-        if(!Files.exists(p) && level<=1) {p=this.farPath(level,cx,cz);kind=2;}
-        if(!Files.exists(p)) {p=this.surfacePath(level,cx,cz);kind=1;}
-        boolean oldCliffCache = false;
-        if (!Files.exists(p) && level == 0 && this.cliffBiome != 0) {
-            // Only old seed columns sampling the affected biome need rebuilding. Real captures and other levels are untouched.
-            Path file = Path.of("L0", cx + "." + cz + ".bin");
-            String folder = this.dirFor(0);
-            p = this.dir.resolve(folder).resolve(file);
-            kind = 0;
-            if (!Files.exists(p)) { p = this.dir.resolve(folder + "-far3").resolve(file); kind = 2; }
-            if (!Files.exists(p)) { p = this.dir.resolve(folder + "-surface").resolve(file); kind = 1; }
-            oldCliffCache = Files.exists(p);
-        }
-        if (!Files.exists(p) && level <= 3 && !MetaSettings.generate) {
-            String[] folders = level == 0 ? new String[]{"-t5", "-t4", "-t3"} : new String[]{"-s2", "-s1"};
-            Path file = Path.of("L" + level, cx + "." + cz + ".bin");
-            for (String folder : folders) {
-                String old = this.genDir + folder;
-                p = this.dir.resolve(old).resolve(file);
-                if (!Files.exists(p)) p = this.dir.resolve(old + "-far3").resolve(file);
-                if (!Files.exists(p)) p = this.dir.resolve(old + "-surface").resolve(file);
-                if (Files.exists(p)) break;
-            }
-            kind = 0;
-        }
-        if (!Files.exists(p)) { this.cacheMisses.incrementAndGet(); return null; }
-        try (DataInputStream in = open(p)) {
-            if (in.readInt() != MAGIC) throw new IOException("bad generated cache header");
-            Rle r = this.readRle(in);
-            if (oldCliffCache && MetaSettings.generate && this.containsCliffBiome(r)) {
-                this.cacheMisses.incrementAndGet();
-                return null;
-            }
-            this.cacheHits.incrementAndGet();
-            this.mark(key,kind);
-            return r;
-        } catch (IOException | RuntimeException e) {
-            if (this.cacheErrors.incrementAndGet() <= 3) System.out.println("[MetaLODS] can't read cached column " + p + ": " + e);
-            return null;
-        }
+	private String generationFolder(int level) {
+		return this.cliffFolder(level) + (this.mesaBiome == 0 ? "" : "-mesa1");
 	}
 
-    private boolean containsCliffBiome(Rle column) {
-        for (int i = 0; i < column.runs.length; i += 2) {
-            if (Voxel.biome(column.runs[i]) == this.cliffBiome) return true;
-        }
-        return false;
-    }
+	private record CachedSeed(Path path, int kind) {}
+
+	private @Nullable CachedSeed findSeed(String folder, int level, Path file) {
+		Path path = this.dir.resolve(folder).resolve(file);
+		if (Files.exists(path)) return new CachedSeed(path, 0);
+		if (level <= 1) {
+			path = this.dir.resolve(folder + "-far3").resolve(file);
+			if (Files.exists(path)) return new CachedSeed(path, 2);
+		}
+		path = this.dir.resolve(folder + "-surface").resolve(file);
+		return Files.exists(path) ? new CachedSeed(path, 1) : null;
+	}
+
+	@Nullable Rle loadGen(int level, int cx, int cz) {
+		GeneratedKey key = new GeneratedKey(level, cx, cz);
+		PendingGen pending = this.pendingGenerated.get(key);
+		if (pending != null) return pending.data();
+		Path file = Path.of("L" + level, cx + "." + cz + ".bin");
+		CachedSeed seed = this.findSeed(this.generationFolder(level), level, file);
+		boolean oldMesa = seed == null && this.mesaBiome != 0;
+		if (oldMesa) seed = this.findSeed(this.cliffFolder(level), level, file);
+		boolean oldCliff = seed == null && level == 0 && this.cliffBiome != 0;
+		if (oldCliff) seed = this.findSeed(this.dirFor(level), level, file);
+		// Coarse terrain was unchanged in gen9 and gen10. Older unaffected biome columns can still be reused.
+		if (seed == null && level >= 4) {
+			for (String version : new String[] {"gen9", "gen8"}) {
+				seed = this.findSeed(this.genDir.replace("gen" + GEN_VERSION, version), level, file);
+				if (seed != null) break;
+			}
+		}
+		if (seed == null && level <= 3 && !MetaSettings.generate) {
+			String[] folders = level == 0 ? new String[]{"-t5", "-t4", "-t3"} : new String[]{"-s2", "-s1"};
+			for (String folder : folders) {
+				seed = this.findSeed(this.genDir + folder, level, file);
+				if (seed != null) break;
+			}
+		}
+		if (seed == null) {
+			this.cacheMisses.incrementAndGet();
+			return null;
+		}
+		Path path = seed.path();
+		try (DataInputStream in = open(path)) {
+			if (in.readInt() != MAGIC) throw new IOException("bad generated cache header");
+			Rle r = this.readRle(in);
+			if (MetaSettings.generate && (oldMesa || oldCliff)
+			    && this.containsOldSurface(r, oldMesa ? this.mesaBiome : 0, oldCliff ? this.cliffBiome : 0)) {
+				this.cacheMisses.incrementAndGet();
+				return null;
+			}
+			this.cacheHits.incrementAndGet();
+			this.mark(key, seed.kind());
+			return r;
+		} catch (IOException | RuntimeException e) {
+			if (this.cacheErrors.incrementAndGet() <= 3) System.out.println("[MetaLODS] can't read cached column " + path + ": " + e);
+			return null;
+		}
+	}
+
+	private boolean containsOldSurface(Rle column, int first, int second) {
+		for (int i = 0; i < column.runs.length; i += 2) {
+			int biome = Voxel.biome(column.runs[i]);
+			if (biome != 0 && (biome == first || biome == second)) return true;
+		}
+		return false;
+	}
 
     private void mark(GeneratedKey key,int kind) {
         if(kind==1)this.surfaceColumns.add(key);else this.surfaceColumns.remove(key);
@@ -309,6 +315,13 @@ final class MetaStore {
 		if (r == null) return;
 		r.chunks.set((chunkX & 31) + (chunkZ & 31) * 32, c);
 		r.dirty = true;
+	}
+
+	boolean putRealIfAbsent(int chunkX, int chunkZ, RealChunk chunk) {
+		Region r = this.region(chunkX >> 5, chunkZ >> 5, true);
+		if (r == null || !r.chunks.compareAndSet((chunkX & 31) + (chunkZ & 31) * 32, null, chunk)) return false;
+		r.dirty = true;
+		return true;
 	}
 
 	/** Writes the regions changed since the last call (in the background). */

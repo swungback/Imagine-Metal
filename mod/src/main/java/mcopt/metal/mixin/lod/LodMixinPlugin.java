@@ -35,7 +35,7 @@ public final class LodMixinPlugin implements IMixinConfigPlugin {
 		if (mixinClassName.endsWith(".LodSodiumFadeMixin")) return ENABLED && FADE_INSTANT && net.fabricmc.loader.api.FabricLoader.getInstance().isModLoaded("sodium");
 		// (the surface rules' context accessor: also MetaLODS' generator, mcopt.metal.lod.MetaGen, which is always there; it only
 		// adds methods to the context class)
-		if (mixinClassName.endsWith(".LodMaterialContextAccess")) return true;
+		if (mixinClassName.endsWith(".LodMaterialContextAccess") || mixinClassName.endsWith(".LodVegetationPatchAccess")) return true;
 		return mixinClassName.contains(".LodTruth") ? TRUTH : ENABLED;
 	}
 

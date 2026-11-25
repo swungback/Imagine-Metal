@@ -3,6 +3,7 @@ package imaginemetal.metalods;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.Holder;
 import net.minecraft.core.SectionPos;
+import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.state.BlockState;
@@ -10,6 +11,7 @@ import net.minecraft.world.level.chunk.DataLayer;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.PalettedContainer;
+import net.minecraft.world.level.chunk.storage.SerializableChunkData;
 import net.minecraft.world.level.levelgen.Heightmap;
 import org.jspecify.annotations.Nullable;
 
@@ -63,6 +65,38 @@ final class MetaChunks {
 			}
 		}
 		return new Snapshot(cx, cz, minSec, states, sky, blk, biomes);
+	}
+
+	/** Palettes and light from an independent NBT decode. No live chunk is constructed or changed. */
+	@SuppressWarnings("unchecked")
+	static Snapshot saved(LevelHeightAccessor level, SerializableChunkData data) {
+		int n = level.getSectionsCount(), minSec = level.getMinSectionY();
+		PalettedContainer<BlockState>[] states = new PalettedContainer[n];
+		LevelChunkSection[] sections = new LevelChunkSection[n];
+		DataLayer[] sky = new DataLayer[n], block = new DataLayer[n];
+		for (var section : data.sectionData()) {
+			int i = section.y() - minSec;
+			if (i < 0 || i >= n) continue;
+			sections[i] = section.chunkSection();
+			if (sections[i] != null && !sections[i].hasOnlyAir()) states[i] = sections[i].getStates();
+			sky[i] = section.skyLight();
+			block[i] = section.blockLight();
+		}
+		Holder<Biome>[] biomes = (Holder<Biome>[]) new Holder<?>[16];
+		for (int qz = 0; qz < 4; qz++) {
+			for (int qx = 0; qx < 4; qx++) {
+				int x = qx * 4 + 2, z = qz * 4 + 2;
+				for (int i = n - 1; i >= 0; i--) {
+					if (states[i] == null) continue;
+					int y = 15;
+					while (y >= 0 && states[i].get(x, y, z).isAir()) y--;
+					if (y < 0) continue;
+					biomes[qx + qz * 4] = sections[i].getNoiseBiome(qx, y >> 2, qz);
+					break;
+				}
+			}
+		}
+		return new Snapshot(data.chunkPos().x(), data.chunkPos().z(), minSec, states, sky, block, biomes);
 	}
 
 	/** The chunk's voxels (16 x 16 x height from minY) and their LODs at levels 0 to 4. */

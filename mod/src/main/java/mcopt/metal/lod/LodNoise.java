@@ -143,6 +143,7 @@ final class LodNoise {
 	final int seaLevel, minY, maxY;
 	final WorldGenerationContext context;
 	private final ThreadLocal<Worker> workers;
+	private final @Nullable LodMesa mesa;
 	private final BlockState snow = Blocks.SNOW_BLOCK.defaultBlockState(), ice = Blocks.ICE.defaultBlockState(), water = Blocks.WATER.defaultBlockState();
 
 	/** Per thread: the sampler contexts hold caches and buffers. */
@@ -200,6 +201,7 @@ final class LodNoise {
 		this.minY = Math.max(level.getMinY(), settings.noiseSettings().minY());
 		this.maxY = Math.min(level.getMaxY(), settings.noiseSettings().minY() + settings.noiseSettings().height() - 1);
 		this.context = new WorldGenerationContext(gen, level);
+		this.mesa = LodMesa.of(level);
 		this.workers = ThreadLocal.withInitial(Worker::new);
 	}
 
@@ -709,6 +711,7 @@ final class LodNoise {
 		short[] ground = t.ground;
 		System.arraycopy(h, 0, ground, 0, t.cells());
 		int last = size - 1;
+		var mesaRandom = this.mesa == null ? null : net.minecraft.util.RandomSource.create(0L);
 		for (int z = 0; z < size; z++) {
 			for (int x = 0; x < size; x++) {
 				int i = z * size + x;
@@ -733,11 +736,16 @@ final class LodNoise {
 				access.mcopt$updateY(1, 64, waterHeight, top);
 				BlockState surface = rule.tryApply(bx, top, bz);
 				if (surface == null) surface = stone;
+				LodMesa mesa = this.mesa != null && this.mesa.matches(biomes[i]) ? this.mesa : null;
+				if (mesa != null) {
+					surface = wet ? mesa.band(surface) : mesa.surface(t, x, z, bx, top, bz, surface, pos, mesaRandom);
+				}
 				t.state[i] = surface;
 				// the block under the top block (a wall's second block down shows it)
 				access.mcopt$updateY(2, 64, waterHeight, top - 1);
 				BlockState below = rule.tryApply(bx, top - 1, bz);
 				if (below == null) below = stone;
+				if (mesa != null) below = mesa.band(below);
 				t.under[i] = below;
 				if (c == 1 && SOIL) {
 					// (fix21) down the column as the game's surface pass goes: the soil's own depth and a second layer (sandstone
@@ -748,6 +756,7 @@ final class LodNoise {
 						access.mcopt$updateY(d + 1, 64, waterHeight, top - d);
 						BlockState st = rule.tryApply(bx, top - d, bz);
 						if (st == null || st == stone) break;
+						if (mesa != null) st = mesa.band(st);
 						if (second == null && st == below) n1++;
 						else if (second == null || st == second) {
 							second = st;

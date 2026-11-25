@@ -52,6 +52,7 @@ final class MetaWorld {
     private long streamsRevision;
 	private final MetaArena arena;
 	private final @Nullable ServerLevel server;
+	private final @Nullable MetaSavedChunks savedChunks;
 	private volatile @Nullable MetaGen gen;
 	private volatile boolean genTried, genFailed;
 	private final Object genLock = new Object();
@@ -179,6 +180,7 @@ final class MetaWorld {
 	private volatile long genFirstNs, genLastNs;
 
 	static final class Col {
+		int nextSavedChunk;
 		final int level, cx, cz;
 		final long key;
 		int[] pages = new int[0];
@@ -245,7 +247,11 @@ final class MetaWorld {
         this.streams = server == null || this.nether ? null : mcopt.metal.lod.LodStreams.create(server);
 		this.overhangs = MetaSettings.overhangs;
 		var cliffBiome = mcopt.metal.lod.LodCliffs.biome(server);
-		this.store = new MetaStore(dir, level.registryAccess(), this.overhangs, cliffBiome == null ? 0 : MetaPalette.biome(cliffBiome));
+		var mesa = mcopt.metal.lod.LodMesa.of(server);
+		this.store = new MetaStore(dir, level.registryAccess(), this.overhangs,
+			cliffBiome == null ? 0 : MetaPalette.biome(cliffBiome), mesa == null ? 0 : MetaPalette.biome(mesa.biome()));
+		this.savedChunks = MetaSavedChunks.ENABLED && server != null && server.dimension().equals(net.minecraft.world.level.Level.OVERWORLD)
+			? new MetaSavedChunks(server, this.store, this.minY, this.height, this.skyLight, this::savedChunk) : null;
 		int n = MetaSettings.workerThreads();
 		for (int i = 0; i < n; i++) {
 			final int index = i;
@@ -695,6 +701,14 @@ final class MetaWorld {
 	}
 
 	// ======================================================= real chunks
+
+	private void savedChunk(net.minecraft.world.level.ChunkPos pos, MetaStore.RealChunk chunk) {
+		synchronized (this.publicationLock) {
+			if (this.closed || !this.store.putRealIfAbsent(pos.x(), pos.z(), chunk)) return;
+			long key = MetaStore.key(pos.x(), pos.z());
+			this.results.add(new Result(null, 0, null, 0, null, key, (1 << 25) - 1));
+		}
+	}
 
 	/** A real chunk's blocks and light (copied on the render thread), made into LODs on a worker. */
 	void ingest(MetaChunks.Snapshot s) {
@@ -1282,6 +1296,7 @@ final class MetaWorld {
 		return l == null ? 0f : (float) l.getSeaLevel();
 	}
 	private int detail, farDetail;
+	private int savedChunkBudget;
 	private boolean fineEndLods;
 	private final FrustumIntersection frustum = new FrustumIntersection();
 
@@ -1321,6 +1336,7 @@ final class MetaWorld {
 		this.beginChunkFades(nowMs);
 		this.pressure(camX, camZ, renderDistance);
 		this.draw.clear();
+		this.savedChunkBudget = 24;
 		this.areaAll = 0;
 		this.areaReady = 0;
 		this.colsAll = 0;
@@ -1593,6 +1609,20 @@ final class MetaWorld {
 	}
 
 	private void select(Col c) {
+		if (this.savedChunks != null && this.savedChunkBudget > 0 && c.level <= 2) {
+			int span = chunksPer(c.level), width = span * 16, x = c.cx * width, z = c.cz * width;
+			if (c.nextSavedChunk < span * span && this.distanceToColumn(x, z, width) < 576.0 && this.inView(x, z, width)) {
+				while (c.nextSavedChunk < span * span && this.savedChunkBudget > 0) {
+					int i = c.nextSavedChunk;
+					if (!this.savedChunks.request(c.cx * span + i % span, c.cz * span + i / span)) {
+						this.savedChunkBudget = 0;
+						break;
+					}
+					c.nextSavedChunk++;
+					this.savedChunkBudget--;
+				}
+			}
+		}
 		this.draw.add(c);
 		if (c.pages.length > 0) c.selectedFrame = this.frame;
 	}
@@ -1891,6 +1921,7 @@ final class MetaWorld {
 	void close() {
 		synchronized (this.publicationLock) { this.closed = true; this.cacheEpoch++; }
 		this.latestIngest.close();
+		if (this.savedChunks != null) this.savedChunks.close();
         if (this.diag != null) this.diag.close();
         if (this.streams != null) this.streams.close();
 		this.ingest.clear();
@@ -1915,6 +1946,10 @@ final class MetaWorld {
         }
 		synchronized (this.genCache) {
 			this.genCache.clear();
+		}
+		if (this.savedChunks != null) {
+			this.savedChunks.forget();
+			for (Col c : this.cols.values()) c.nextSavedChunk = 0;
 		}
 		this.latestIngest.clear(this.store::clear);
 		this.remeshAll();

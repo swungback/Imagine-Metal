@@ -202,6 +202,8 @@ public final class Settings {
 	/** (benchmark only) Water and glass reflections traced through the screen; false: the sky alone. */
 	public static volatile boolean waterTrace = true;
 	public static volatile boolean ssao = Engine.flag("imaginemetal.ssao", true);
+	public static volatile boolean lodScreenAo = Engine.flag("imaginemetal.lodScreenAo", true);
+	public static volatile boolean lodScreenShadows = Engine.flag("imaginemetal.lodScreenShadows", true);
 	public static volatile float ssaoStrength = Config.number("imaginemetal.ssaoStrength", 0.7f, 0f, 1f);
 	public static volatile boolean shafts = Engine.flag("imaginemetal.shafts", true);
 	public static volatile float shaftStrength = Config.number("imaginemetal.shaftStrength", 1f, 0f, 3f);

@@ -13,7 +13,8 @@
 // added. A pixel the air doesn't touch comes out as it went in.
 struct ImAirParams {
 	float4x4 clipInv;  // clip (Minecraft's, y up; depth 0..1 reversed) -> camera-relative world, this frame's terrain transform
-	float4 size;       // xy the target's size in pixels; z MetaLODS' far fog start (blocks), w its density (0: none)
+	float4x4 clip;
+	float4 size;       // xy output pixels, z distant ambient occlusion strength, w 1 = distant contact shadows
 };
 
 struct ImAirOut {
@@ -25,6 +26,57 @@ vertex ImAirOut im_air_vs(uint vid [[vertex_id]]) {
 	float2 q = float2((vid << 1) & 2, vid & 2);
 	o.pos = float4(q * 2.0 - 1.0, 0.0, 1.0);
 	return o;
+}
+
+// Perspective depth is reversed. Convert to camera-forward units so both effects use block-scale thresholds.
+static float imAirForwardDepth(float d, constant ImAirParams &a) {
+	return 1.0 / max(a.clipInv[2].w * d + a.clipInv[3].w, 1e-6);
+}
+
+static float imAirCrease(float nearA, float nearB) {
+	float front = max(nearA, nearB);
+	float back = -min(nearA, nearB);
+	float local = smoothstep(0.18, 0.68, front) * (1.0 - smoothstep(2.7, 5.5, front));
+	return local * (1.0 - smoothstep(0.32, 1.3, back));
+}
+
+static float imAirFarRelief(depth2d<float> depth, float3 p, float center, float2 pixel, float dist,
+	constant ImFrame &f, constant ImAirParams &a) {
+	float weight = smoothstep(54.0, 96.0, dist) * (1.0 - smoothstep(270.0, 410.0, dist)) * f.fogParams.z;
+	if (weight <= 0.001 || (a.size.z <= 0.0 && a.size.w <= 0.0)) return 1.0;
+	float shade = 0.0;
+	if (a.size.z > 0.0) {
+		int2 q = int2(pixel), limit = int2(a.size.xy) - 1;
+		int r = dist < 145.0 ? 2 : 1;
+		float x0 = imAirForwardDepth(depth.read(uint2(clamp(q - int2(r, 0), int2(0), limit))), a);
+		float x1 = imAirForwardDepth(depth.read(uint2(clamp(q + int2(r, 0), int2(0), limit))), a);
+		float y0 = imAirForwardDepth(depth.read(uint2(clamp(q - int2(0, r), int2(0), limit))), a);
+		float y1 = imAirForwardDepth(depth.read(uint2(clamp(q + int2(0, r), int2(0), limit))), a);
+		float crease = max(imAirCrease(center - x0, center - x1), imAirCrease(center - y0, center - y1));
+		shade += 0.48 * crease * a.size.z;
+	}
+	float sun = f.nightMiddle.w * (1.0 - f.lightColor.w);
+	if (a.size.w > 0.0 && sun > 0.05 && f.lightDir.y > 0.08) {
+		float3 origin = p - p * (0.32 / dist);
+		float4 projected = a.clip * float4(origin, 1.0);
+		float4 ray = a.clip * float4(f.lightDir.xyz, 0.0);
+		const float steps[6] = {1.25, 2.7, 4.8, 7.5, 11.5, 17.5};
+		for (uint i = 0; i < 6; i++) {
+			float4 q = projected + ray * steps[i];
+			if (q.w <= 0.05) break;
+			float2 ndc = q.xy / q.w + (f.taa.z > 0.5 ? f.taa.xy : float2(0.0));
+			float2 uv = ndc * 0.5 + 0.5;
+			if (any(uv <= 0.0) || any(uv >= 1.0)) break;
+			float d = depth.read(uint2(uv * a.size.xy));
+			float behind = q.w - imAirForwardDepth(d, a);
+			if (behind > 0.24 && behind < 3.7) {
+				shade += 0.25 * sun * smoothstep(0.24, 0.68, behind) * (1.0 - smoothstep(2.4, 3.7, behind))
+					* (1.0 - 0.08 * float(i));
+				break;
+			}
+		}
+	}
+	return 1.0 - weight * shade;
 }
 
 fragment float4 im_air_fs(ImAirOut in [[stage_in]], float4 dst [[color(0)]], depth2d<float> depth [[texture(0)]],
@@ -67,6 +119,11 @@ fragment float4 im_air_fs(ImAirOut in [[stage_in]], float4 dst [[color(0)]], dep
 	float3 T = float3(1.0);
 	float3 S = imAirFog(p, 1.0, f, T);
 	float3 o = max(dst.rgb, 0.0);
+	// Shade the opaque surface before blending the haze over it. Real terrain uses the same distances.
+	if (f.flags.x == 0 && f.lodFog.x > 0.0 && f.water.z < 0.5 && dist > 54.0 && dist < 410.0) {
+		float relief = imAirFarRelief(depth, p, 1.0 / w.w, in.pos.xy, dist, f, a);
+		o *= mix(relief, 1.0, smoothstep(0.98, 1.4, max(max(o.r, o.g), o.b)));
+	}
 	if (any(T < 0.9995) || any(S > 1e-5)) {
 		float3 y = pow(o, 2.2);
 		float4 t = f.tonemap;
