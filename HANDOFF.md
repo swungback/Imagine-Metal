@@ -1,3 +1,58 @@
+# 2026-11-25 (Claude, s1125) — LOD relief to the Iris + DH reference, installed
+
+Picked up Codex's session (it ran out of usage right after its distant-relief test run). Codex's work is committed as
+`97b8353` (saved chunks into LODs, Savanna Badlands, grass, distant rock, first depth-buffer relief pass). This entry is
+the commit on top of it.
+
+## What changed (shaders only; Java and native identical to Codex's build)
+
+- `air.metal`: the distant crease shading rebuilt after Complementary's DH SSAO (deferred1 `DoAmbientOcclusionDH`):
+  four paired depth samples at a world-scale 0.8-block radius, pairs on one face cancel, both sides in front = crease,
+  far-in-front counts as open (no halos), steep response, floor 0.35. Codex's version read a 1-2 pixel cross and only
+  caught the narrowest creases. Range now 28-60 blocks fade-in (where the near SSAO ends at 48) to 420-640 fade-out.
+  Applied as a linear-light multiplier (1/2.2 power on the display-encoded picture). Sun shadows: 8 steps of 2.5 blocks
+  with a dithered start, occluder within 5 blocks, a third of the light. Settings.lodScreenAo / lodScreenShadows unchanged.
+- `metalods.metal`: quarter-block grain on LOD faces where the texture has mipped away (mip 1 to 2.6; half-block cells
+  once quarter cells drop under a pixel), Complementary's dh_terrain `noiseTexture` strength. Why: LODs have no per-block
+  corner AO since Jack's 18 Nov OK (MetaMesher.BLOCK_AO off), and past ~100 blocks a block's texture is a 4x4 mip, so the
+  far faces were flat. Not on leaves or water. Real chunks untouched; hand-over (mip ~1.4 at 96 blocks) barely changes.
+
+## Numbers (matched ridge crop, ColdTp pose (122.5, 119.25, 241.5) yaw 13.5 pitch 28, time 5500, rd 6, 960x600 crops)
+
+| | luma | local contrast |
+|---|---|---|
+| Iris + DH + Reimagined | 100.4 | 8.66 |
+| before today (21ebb76) | 131.8 | 4.16 |
+| Codex relief (97b8353) | 101.5 | 5.85 |
+| this build | 103.4 | 7.99 |
+
+GPU cost, same pose, 20 s windows on/off x3 (`-Dmcopt.metal.gpuTimes`): ridge 16.7 -> 17.45 ms total (terrain encoder
+9.08 -> 9.50), valley 17.5 -> 17.7 (9.43 -> 9.75), with the 12-step shadows; the shipped 8-step version is a little less.
+Night, sunset, Nether (25.5 56 45.5) and End (0.5 113 -105.5) shots checked: no artifacts.
+Evidence: `claude-scratch/claude-s1125/` (metrics.py, perfab.py, run logs) and the test instance `instances/IM claude test`
+(screenshots-run2 = ridge/valley, screenshots-run4-reg = regression).
+
+## Mob shake (Jack 25 Nov 16:24: whole mob "violently shaking a lil", standing still too; trails are better)
+
+Not fixed. A still pig and sheep (NoAI, NoGravity, 6 blocks out) measured over 16 ticks per condition: mob-crop temporal
+std 3.7 (terrain 0.8) with the defaults, and about the same with entityJitter off, MetalFX sharpen 0, built-in TAA, and
+taaJitter off. So it is not the TAA jitter or the coverage rejection from 15c4c3a. A 3x3 coverage test for that rejection
+was tried and reverted (no change): `claude-scratch/claude-s1125/bloom-3x3-experiment.metal`. Caveat: in that setup the
+floating mobs drift smoothly by +-2-3 px over about a second, and Screenshot.grab repeats frames, so the setup itself is
+not clean. Asked Jack whether toggling "Mobs with TAA offset" or MetalFX in the settings changes what he sees.
+
+## Testing without a terminal (how this session ran the game)
+
+Terminal is click-only for computer use, so: a Prism instance `IM claude test` (copy of Imagine metal's config, mods as
+symlinks, the matched save from `iris test/.../New World (2)` plus Codex's metalods cache), drivers compiled in the device
+VM with JDK 25 (`~/jdk25`, classpath from renderer-work/gradle-home caches), launched with Prism's File > Launch > Launch
+(background menu; selecting an instance needs one full-screen click). Shader-only builds = Codex's jar with the changed
+.metal files zipped in (shaders compile at runtime).
+
+## Installed
+
+See the "Installed" line in the project doc / below once CI is green.
+
 # 2026-11-25 — Matched Iris test LOD comparison on s1121
 
 Compared the installed `iris test` stack (Vitrail 0.13.0-beta, Distant

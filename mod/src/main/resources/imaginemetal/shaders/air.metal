@@ -33,50 +33,64 @@ static float imAirForwardDepth(float d, constant ImAirParams &a) {
 	return 1.0 / max(a.clipInv[2].w * d + a.clipInv[3].w, 1e-6);
 }
 
-static float imAirCrease(float nearA, float nearB) {
-	float front = max(nearA, nearB);
-	float back = -min(nearA, nearB);
-	float local = smoothstep(0.18, 0.68, front) * (1.0 - smoothstep(2.7, 5.5, front));
-	return local * (1.0 - smoothstep(0.32, 1.3, back));
+// Distant crease shading, the way Complementary shades Distant Horizons' terrain (deferred1 DoAmbientOcclusionDH): around each
+// pixel, pairs of depth samples on opposite sides about 0.8 blocks out (a world-scale radius, so a block's step reads the same
+// near and far). A pair on one flat face cancels (one side nearer, the other as much farther); where both sides stand in front of
+// the pixel it sits in a crease, at the foot of a step or in a gap, and darkens. Samples far in front (another hill's edge) count
+// as open again, so silhouettes get no halo. The response is steep, as theirs: flat faces untouched, creases down to half.
+// The s1125 replacement for s1121's two-pixel cross, which caught only the narrowest creases (ridge relief 5.9 vs DH's 8.7).
+static float imAirCreaseAo(depth2d<float> depth, float center, float2 pixel, constant ImFrame &f, constant ImAirParams &a) {
+	float rpx = 0.4 * a.size.y * abs(a.clip[1][1]) / max(center, 1.0);  // (0.8 blocks in pixels)
+	if (rpx < 1.0) return 1.0;
+	float dith = imDither(pixel, f);
+	int2 limit = int2(a.size.xy) - 1;
+	float open = 0.0;
+	for (uint i = 0; i < 4; i++) {
+		float t = (float(i) + dith) * 0.25;
+		float ang = (fract(t * 1.41421356) + dith + 0.0382 * float(i)) * 6.2831853;
+		float2 o = float2(cos(ang), sin(ang)) * (t * rpx);
+		float d1 = 0.9 * (center - imAirForwardDepth(depth.read(uint2(clamp(int2(pixel + o), int2(0), limit))), a));
+		float d2 = 0.9 * (center - imAirForwardDepth(depth.read(uint2(clamp(int2(pixel - o), int2(0), limit))), a));
+		open += saturate(saturate(0.5 - d1) + saturate(0.5 - d2) + saturate(0.25 * d1 - 0.5) + saturate(0.25 * d2 - 0.5));
+	}
+	float s = smoothstep(0.0, 1.0, open * 0.25);
+	float ao = pow(max(s, 1e-4), 10.7 * a.size.z);  // (7.5 at the default AO strength 0.7, as theirs at 100 %)
+	return mix(0.35, ao, ao);  // (a full crease keeps a third of its light: theirs is half, in light before their tone curve, which ours is applied after)
 }
 
+// Returns a multiplier for linear light (the caller applies it to the display-encoded picture).
 static float imAirFarRelief(depth2d<float> depth, float3 p, float center, float2 pixel, float dist,
 	constant ImFrame &f, constant ImAirParams &a) {
-	float weight = smoothstep(54.0, 96.0, dist) * (1.0 - smoothstep(270.0, 410.0, dist)) * f.fogParams.z;
+	// (in where the near SSAO (bloom.metal, 20 to 48 blocks) runs out; out where a block is under two pixels and the haze is thick)
+	float weight = smoothstep(28.0, 60.0, dist) * (1.0 - smoothstep(420.0, 640.0, dist)) * f.fogParams.z;
 	if (weight <= 0.001 || (a.size.z <= 0.0 && a.size.w <= 0.0)) return 1.0;
-	float shade = 0.0;
-	if (a.size.z > 0.0) {
-		int2 q = int2(pixel), limit = int2(a.size.xy) - 1;
-		int r = dist < 145.0 ? 2 : 1;
-		float x0 = imAirForwardDepth(depth.read(uint2(clamp(q - int2(r, 0), int2(0), limit))), a);
-		float x1 = imAirForwardDepth(depth.read(uint2(clamp(q + int2(r, 0), int2(0), limit))), a);
-		float y0 = imAirForwardDepth(depth.read(uint2(clamp(q - int2(0, r), int2(0), limit))), a);
-		float y1 = imAirForwardDepth(depth.read(uint2(clamp(q + int2(0, r), int2(0), limit))), a);
-		float crease = max(imAirCrease(center - x0, center - x1), imAirCrease(center - y0, center - y1));
-		shade += 0.48 * crease * a.size.z;
-	}
+	float lit = 1.0;
+	if (a.size.z > 0.0) lit *= imAirCreaseAo(depth, center, pixel, f, a);
+	// Short sun shadows from the depth buffer (Complementary's GetLODShadows): steps toward the light, shadowed where something
+	// stands less than five blocks in front of the ray. The shadow maps already shade most of this; this adds the block-scale
+	// shadows the far map's texels are too coarse for, so it is kept to a third of the light.
 	float sun = f.nightMiddle.w * (1.0 - f.lightColor.w);
 	if (a.size.w > 0.0 && sun > 0.05 && f.lightDir.y > 0.08) {
 		float3 origin = p - p * (0.32 / dist);
 		float4 projected = a.clip * float4(origin, 1.0);
 		float4 ray = a.clip * float4(f.lightDir.xyz, 0.0);
-		const float steps[6] = {1.25, 2.7, 4.8, 7.5, 11.5, 17.5};
-		for (uint i = 0; i < 6; i++) {
-			float4 q = projected + ray * steps[i];
+		float start = 0.2 + imDither(pixel + 17.0, f);
+		float shadow = 1.0;
+		// (8 steps of 2.5 blocks, as theirs step: 12 of 2 cost about as much again as the creases for the same shadows)
+		for (uint i = 0; i < 8; i++) {
+			float4 q = projected + ray * (2.5 * (float(i) + start));
 			if (q.w <= 0.05) break;
 			float2 ndc = q.xy / q.w + (f.taa.z > 0.5 ? f.taa.xy : float2(0.0));
 			float2 uv = ndc * 0.5 + 0.5;
 			if (any(uv <= 0.0) || any(uv >= 1.0)) break;
 			float d = depth.read(uint2(uv * a.size.xy));
 			float behind = q.w - imAirForwardDepth(d, a);
-			if (behind > 0.24 && behind < 3.7) {
-				shade += 0.25 * sun * smoothstep(0.24, 0.68, behind) * (1.0 - smoothstep(2.4, 3.7, behind))
-					* (1.0 - 0.08 * float(i));
-				break;
-			}
+			shadow *= 1.0 - smoothstep(0.05, 0.3, behind) * (1.0 - smoothstep(4.0, 5.0, behind));
+			if (shadow < 0.01) break;
 		}
+		lit *= 1.0 - 0.35 * sun * (1.0 - shadow);
 	}
-	return 1.0 - weight * shade;
+	return mix(1.0, lit, weight);
 }
 
 fragment float4 im_air_fs(ImAirOut in [[stage_in]], float4 dst [[color(0)]], depth2d<float> depth [[texture(0)]],
@@ -120,9 +134,10 @@ fragment float4 im_air_fs(ImAirOut in [[stage_in]], float4 dst [[color(0)]], dep
 	float3 S = imAirFog(p, 1.0, f, T);
 	float3 o = max(dst.rgb, 0.0);
 	// Shade the opaque surface before blending the haze over it. Real terrain uses the same distances.
-	if (f.flags.x == 0 && f.lodFog.x > 0.0 && f.water.z < 0.5 && dist > 54.0 && dist < 410.0) {
+	if (f.flags.x == 0 && f.lodFog.x > 0.0 && f.water.z < 0.5 && dist > 28.0 && dist < 640.0) {
 		float relief = imAirFarRelief(depth, p, 1.0 / w.w, in.pos.xy, dist, f, a);
-		o *= mix(relief, 1.0, smoothstep(0.98, 1.4, max(max(o.r, o.g), o.b)));
+		// (a linear-light multiplier on a display-encoded picture: its 1/2.2 power; light given off past white keeps its glow)
+		o *= mix(pow(relief, 1.0 / 2.2), 1.0, smoothstep(0.98, 1.4, max(max(o.r, o.g), o.b)));
 	}
 	if (any(T < 0.9995) || any(S > 1e-5)) {
 		float3 y = pow(o, 2.2);

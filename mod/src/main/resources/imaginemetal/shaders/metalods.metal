@@ -233,6 +233,7 @@ fragment MLGOut ml_fs(MLOut in [[stage_in]], float4 oldG2 [[color(2)]], float4 o
 	uint kind = flat ? (m.flags & 7u) : ((m.flags >> 3) & 7u);
 	float3 avg = mlRgb(flat ? m.topAvg : m.sideAvg);
 	float4 tex = float4(avg, 1.0);
+	float texLod = 8.0;  // (s1125: the texture's mip here; with no texture, as if fully minified)
 	// (s1119: 14 is the Benchmark probe "LOD textures skipped": the average colour only)
 	if (r.z > r.x && f.params.z != 14.0) {
 		float2 t = fract(in.uv);
@@ -241,6 +242,7 @@ fragment MLGOut ml_fs(MLOut in [[stage_in]], float4 oldG2 [[color(2)]], float4 o
 		float2 texels = (r.zw - r.xy) * float2(atlas.get_width(), atlas.get_height());
 		float2 dx = dfdx(in.uv) * texels, dy = dfdy(in.uv) * texels;
 		float lod = 0.5 * log2(max(max(dot(dx, dx), dot(dy, dy)), 1e-8));
+		texLod = lod;
 		// Once the average has full weight, there is no texture contribution to read.
 		if (lod < 4.5) {
 			float2 st = mix(r.xy, r.zw, t);
@@ -287,6 +289,28 @@ fragment MLGOut ml_fs(MLOut in [[stage_in]], float4 oldG2 [[color(2)]], float4 o
 		uint hsh = uint(vq.x) * 73856093u ^ uint(vq.y) * 19349663u ^ uint(vq.z) * 83492791u;
 		hsh = (hsh ^ (hsh >> 13)) * 1274126177u;
 		color *= 0.93 + 0.14 * float(hsh >> 24) / 255.0;
+		// (s1125) Grain where the texture has gone. Past ~100 blocks a block covers a few pixels, its texture is read from a 4x4
+		// mip and the face is one flat colour; Complementary gives Distant Horizons' flat terrain a value noise in quarter-block
+		// cells instead (dh_terrain's noiseTexture), most of the grain on the far cliffs in Jack's Iris + DH reference (ridge
+		// local contrast 8.7 there, 6.6 here before this). Same strength as theirs; it comes in only as the texture's detail
+		// goes (mip 1 to 2.6), so the hand-over to real chunks (mip ~1.4 at 96 blocks) barely changes; half-block cells once
+		// quarter cells drop under a pixel, so it doesn't crawl. Not on leaves (their own holes) or water.
+		float grainW = leaves ? 0.0 : smoothstep(1.0, 2.6, texLod);
+		if (grainW > 0.0) {
+			float3 local = in.rel + f.camFrac.xyz - fn * 0.02;
+			int3 c4 = f.camBlock.xyz * 4 + int3(floor(local * 4.0));
+			int3 c2 = f.camBlock.xyz * 2 + int3(floor(local * 2.0));
+			uint h4 = uint(c4.x) * 2654435761u ^ uint(c4.y) * 2246822519u ^ uint(c4.z) * 3266489917u;
+			uint h2 = uint(c2.x) * 2654435761u ^ uint(c2.y) * 2246822519u ^ uint(c2.z) * 3266489917u;
+			h4 = (h4 ^ (h4 >> 15)) * 2246822519u; h4 ^= h4 >> 13;
+			h2 = (h2 ^ (h2 >> 15)) * 2246822519u; h2 ^= h2 >> 13;
+			// (two bytes averaged: a centred spread, as a smooth noise has, not as many extremes as a flat one)
+			float n4 = (float(h4 & 255u) + float((h4 >> 8) & 255u)) / 510.0;
+			float n2 = (float(h2 & 255u) + float((h2 >> 8) & 255u)) / 510.0;
+			float n = mix(n4, n2, smoothstep(1.8, 2.8, texLod));
+			float k = max(1.0 - 0.3 * dot(color, color), 0.0);
+			color *= pow(0.5 + n, 0.6 * k * grainW);
+		}
 	}
 	if (f.params.z == 1.0) {
 		// (debug: each level its own colour: 0 red, 1 orange, 2 yellow, 3 green, 4 cyan, 5 blue)
