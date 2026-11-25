@@ -32,6 +32,7 @@ public final class MetaGen {
 
 	private final LodNoise noise;
 	private final boolean nether;
+	private final @Nullable Holder<Biome> cliffBiome;
 	/** Levels 2 and up: the terrain without its caves (LodNoise.far), or null (then `noise` at every level). */
 	private final @Nullable LodNoise far;
 	/** The game's trees on the far terrain's ground (level-0 tiles made with `far`), or null. */
@@ -94,6 +95,7 @@ public final class MetaGen {
 	private MetaGen(LodNoise noise, @Nullable LodNoise far, @Nullable LodForest forest, @Nullable LodForest farForest) {
 		this.noise = noise;
 		this.nether = noise.level.dimension().equals(Level.NETHER);
+		this.cliffBiome = LodCliffs.biome(noise.level);
 		this.far = far;
 		this.farForest = farForest;
 		if (far != null) far.stageNanos = noise.stageNanos;  // (one stats line: the far one only fills levels 2+)
@@ -244,17 +246,24 @@ public final class MetaGen {
 				for (int x = 0; x < 32; x++) {
 					int i = (oz + z) * LodTile.SIZE + ox + x;
 					int n = this.cell(t, i, level, c, minY, h, ids, seg, pos, airSky, info);
-					if ((dv == null && t.blockVolume == null) || info[0] < 0) {
+					boolean cliff = this.cliffBiome != null && LodCliffs.applies(this.cliffBiome, t.biome[i], level);
+					if ((!cliff && dv == null && t.blockVolume == null) || info[0] < 0) {
 						b.cell(x, z, seg, n);
 						continue;
 					}
 					// the column as voxels, then the density's say
 					java.util.Arrays.fill(col, (airSky & 15) << 24);
 					for (int k = 0; k + 2 < n; k += 3) java.util.Arrays.fill(col, Math.max(0, seg[k]), Math.min(h, seg[k + 1]), seg[k + 2]);
+					if (dv == null && t.blockVolume == null) {
+						LodCliffs.paint(t, i, minY, info[0], col, ids);
+						b.column(x, z, col);
+						continue;
+					}
                     if (t.blockVolume != null) {
                         int offset = ((oz + z) * t.size + ox + x) * t.blockNy;
                         for (int v = 0; v < h; v++) dens[v] = t.blockVolume[offset + Math.min(t.blockNy - 1, (v * c + c / 2) / t.blockStepY)];
                         this.carve(col, dens, h, info, (airSky & 15) << 24);
+                        if (cliff) LodCliffs.paint(t, i, minY, info[0], col, ids);
                         b.column(x, z, col);
                         continue;
                     }
@@ -272,6 +281,7 @@ public final class MetaGen {
 						dens[v] = cd[k0] + (cd[k0 + 1] - cd[k0]) * fk;
 					}
 					this.carve(col, dens, h, info, (airSky & 15) << 24);
+					if (cliff) LodCliffs.paint(t, i, minY, info[0], col, ids);
 					b.column(x, z, col);
 				}
 			}

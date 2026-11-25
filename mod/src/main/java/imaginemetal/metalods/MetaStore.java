@@ -52,6 +52,7 @@ final class MetaStore {
 	private static final int MAGIC = 0x4D4C4F44;  // "MLOD"
 	final Path dir;
 	private final RegistryAccess access;
+	private final int cliffBiome;
 	private final ExecutorService io = Executors.newSingleThreadExecutor(r -> {
 		Thread t = new Thread(r, "MetaLODS disk");
 		t.setDaemon(true);
@@ -82,12 +83,12 @@ final class MetaStore {
         return level==0?this.genDir+(STRUCTURE_VOXELS?"-t6":"-t5"):level<=3?this.genDir+(STRUCTURE_VOXELS?"-s3":"-s2"):this.genDir;
     }
     private Path surfacePath(int level,int cx,int cz) {
-        return this.dir.resolve(this.dirFor(level)+"-surface").resolve("L"+level).resolve(cx+"."+cz+".bin");
+        return this.dir.resolve(this.generationFolder(level)+"-surface").resolve("L"+level).resolve(cx+"."+cz+".bin");
     }
     private Path farPath(int level,int cx,int cz) {
         // (-far2, fix12: fix11's far columns were interpolated, with blocky ledges; made again block-exact)
         // (-far3, fix16: fix13-15 stored far level-0 columns with estimated trees; made again with the game's trees)
-        return this.dir.resolve(this.dirFor(level)+"-far3").resolve("L"+level).resolve(cx+"."+cz+".bin");
+        return this.dir.resolve(this.generationFolder(level)+"-far3").resolve("L"+level).resolve(cx+"."+cz+".bin");
     }
     final java.util.concurrent.atomic.AtomicLong cacheHits = new java.util.concurrent.atomic.AtomicLong(), cacheMisses = new java.util.concurrent.atomic.AtomicLong(), cacheErrors = new java.util.concurrent.atomic.AtomicLong();
 
@@ -103,10 +104,11 @@ final class MetaStore {
 	/** The generated columns' folder: the generator's version, and h for heightfield ones (3D off). */
 	private final String genDir;
 
-	MetaStore(Path dir, RegistryAccess access, boolean overhangs) {
+	MetaStore(Path dir, RegistryAccess access, boolean overhangs, int cliffBiome) {
 		this.genDir = "gen" + GEN_VERSION + (overhangs ? "" : "h");
 		this.dir = dir;
 		this.access = access;
+		this.cliffBiome = cliffBiome;
 		try {
 			Files.createDirectories(dir.resolve(REAL));
 			// (fix9b: the regions of the old real/ folder are known too: read from it, re-mipped by the new rule (readRegion))
@@ -137,7 +139,11 @@ final class MetaStore {
 	// ---- generated columns ----
 
 	private Path genPath(int level, int cx, int cz) {
-		return this.dir.resolve(this.dirFor(level)).resolve("L" + level).resolve(cx + "." + cz + ".bin");
+		return this.dir.resolve(this.generationFolder(level)).resolve("L" + level).resolve(cx + "." + cz + ".bin");
+	}
+
+	private String generationFolder(int level) {
+		return this.dirFor(level) + (level == 0 && this.cliffBiome != 0 ? "-cliff1" : "");
 	}
 
 	@Nullable Rle loadGen(int level, int cx, int cz) {
@@ -159,6 +165,17 @@ final class MetaStore {
         int kind=0;
         if(!Files.exists(p) && level<=1) {p=this.farPath(level,cx,cz);kind=2;}
         if(!Files.exists(p)) {p=this.surfacePath(level,cx,cz);kind=1;}
+        boolean oldCliffCache = false;
+        if (!Files.exists(p) && level == 0 && this.cliffBiome != 0) {
+            // Only old seed columns sampling the affected biome need rebuilding. Real captures and other levels are untouched.
+            Path file = Path.of("L0", cx + "." + cz + ".bin");
+            String folder = this.dirFor(0);
+            p = this.dir.resolve(folder).resolve(file);
+            kind = 0;
+            if (!Files.exists(p)) { p = this.dir.resolve(folder + "-far3").resolve(file); kind = 2; }
+            if (!Files.exists(p)) { p = this.dir.resolve(folder + "-surface").resolve(file); kind = 1; }
+            oldCliffCache = Files.exists(p);
+        }
         if (!Files.exists(p) && level <= 3 && !MetaSettings.generate) {
             String[] folders = level == 0 ? new String[]{"-t5", "-t4", "-t3"} : new String[]{"-s2", "-s1"};
             Path file = Path.of("L" + level, cx + "." + cz + ".bin");
@@ -175,6 +192,10 @@ final class MetaStore {
         try (DataInputStream in = open(p)) {
             if (in.readInt() != MAGIC) throw new IOException("bad generated cache header");
             Rle r = this.readRle(in);
+            if (oldCliffCache && MetaSettings.generate && this.containsCliffBiome(r)) {
+                this.cacheMisses.incrementAndGet();
+                return null;
+            }
             this.cacheHits.incrementAndGet();
             this.mark(key,kind);
             return r;
@@ -183,6 +204,13 @@ final class MetaStore {
             return null;
         }
 	}
+
+    private boolean containsCliffBiome(Rle column) {
+        for (int i = 0; i < column.runs.length; i += 2) {
+            if (Voxel.biome(column.runs[i]) == this.cliffBiome) return true;
+        }
+        return false;
+    }
 
     private void mark(GeneratedKey key,int kind) {
         if(kind==1)this.surfaceColumns.add(key);else this.surfaceColumns.remove(key);

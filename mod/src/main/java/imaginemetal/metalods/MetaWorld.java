@@ -244,7 +244,8 @@ final class MetaWorld {
         if (server != null && !this.nether) mcopt.metal.lod.LodTrees.configure(server);
         this.streams = server == null || this.nether ? null : mcopt.metal.lod.LodStreams.create(server);
 		this.overhangs = MetaSettings.overhangs;
-		this.store = new MetaStore(dir, level.registryAccess(), this.overhangs);
+		var cliffBiome = mcopt.metal.lod.LodCliffs.biome(server);
+		this.store = new MetaStore(dir, level.registryAccess(), this.overhangs, cliffBiome == null ? 0 : MetaPalette.biome(cliffBiome));
 		int n = MetaSettings.workerThreads();
 		for (int i = 0; i < n; i++) {
 			final int index = i;

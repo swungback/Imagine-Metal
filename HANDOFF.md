@@ -1,3 +1,103 @@
+# 2026-11-25 — Matched Iris test LOD comparison on s1121
+
+Compared the installed `iris test` stack (Vitrail 0.13.0-beta, Distant
+Horizons 3.3.4, Complementary Reimagined r5.9.3 with Euphoria Patches 1.10.5)
+with Imagine Metal. Both started from disposable copies of the same
+Terralith canyon world, seed `-7870446096452288799`. ColdTp fixed the camera
+at (122.5, 119.25, 241.5), pitch 28, with yaw 13.5 and -72, clear weather,
+and time 5500 or 10500. Imagine Metal used fullscreen 1728×1080 with MetalFX
+at 67% and the normal packs with both PBR flags off. The reference was
+fullscreen 1440×900 at 100%. Measurements use normalized 960×600 frames.
+
+The pale foreground cliff measured 115.6 vs 115.1 mean luma in one shared
+daylight crop. The ridge behind it was brown in the Imagine Metal seed
+preview and gray in the reference. At RD 6 disabling LODs removed the ridge.
+RD 12 did not replace it during the comparison window. An RD 16 replay with
+LODs disabled drew the actual gray stone. A separate RD 16 capture warmed
+the real-chunk cache, then restored RD 6 and reproduced the gray ridge as
+an Imagine Metal LOD. Before the fix, setting far fog to zero moved daylight
+ridge luma from 119.9 to 114.1 and increased its RGB channel spread from
+49.0 to 52.0. Disabling handoff dither or distant height-map shadows changed
+the spread by less than 0.1 each. The near sunny grass was 18–23 luma
+darker in Imagine Metal across both render distances, and only 1–3
+luma different under oblique light. This view does not implicate a
+LOD grass tint change.
+
+The raw region ray check found stone at 213 of 360 sample rays in the ridge
+crop. The same check against seed L0 found 31 stone hits. The Arid Highlands
+places `terralith:highlands/arid/cliff` before the other decorations. It
+makes 65,280 attempts per chunk to replace grass, soil or moss with stone
+when another nearby column has matching ground two blocks higher. The
+seed LOD did not reproduce that step. The fix approximates its dense cover
+from adjacent sampled heights in L0 and preserves other materials and
+geometry. It only runs in an Overworld generator using the registered
+Arid Highlands feature with a stone result. The six matched seed columns
+around the ridge changed 20,359 voxels, all five eligible materials to
+stone in the targeted biome. Old eligible L0 seed columns rebuild into
+`-cliff1`. Other old seed columns and real captures stay reusable.
+`-Dmetalods.aridCliffs=false` selects the previous generation and cache paths.
+
+The daylight ridge's mean RGB channel spread on a 0–255 scale was 48.8
+before, 21.4 after, 15.1 in real chunks, 22.7 in warmed real-captured LODs,
+and 16.6 in the reference. At time 10500 it fell from 38.5 to 18.3.
+The white foreground cliff crop measured 108.6 luma before and after.
+Daylight ridge local luma contrast (mean absolute residual at sigma 1.5)
+was 4.0 before, 4.2 after, 5.2 with real-captured LODs, 7.6 in real chunks,
+and 8.7 in the reference. The seed ridge still has softer relief than
+either real chunks or Distant Horizons.
+
+SPBR-22_6 in Pack + fallback loaded 4,059 maps at 4096×4096 using the
+verified priority order SPBR-22_6, Fresh Animations, FA All Extensions,
+SPBR x FA Patch, SPBR x FA-Extensions Patch. The fixed ridge's channel
+spread was 20.7 in daylight and 18.8 in the oblique view. The comparison,
+raw captures, log files, scripts and measurements are under
+`claude-scratch/codex-s1121-iris-lod-parity-P9GJWL/`.
+
+The level overlay confirmed the principal ridge uses L0. Switching
+Generated PBR on at the same daytime pose moved the ridge channel
+spread from 21.37 to 21.43 at the same 131.82 mean luma. At time 10500,
+turning off LOD shadow casters changed ridge luma from 94.2 to 112.9
+and nearly doubled local contrast from 5.9 to 11.2. The default is
+closer to the reference's oblique exposure and contrast. At 5500, the no-caster
+check reduced local contrast from 4.17 to 2.98. Replacing LOD texture
+samples with the atlas average changed contrast by 0.09 and mean luma
+by 0.05. About 75 of 360 approximate rays also hit at different depths
+by more than four blocks in the seed terrain and the saved world.
+Daylight relief still needs seed geometry and lighting work. The
+renderer grade, grass tint, texture sampling and shadows stay at
+their previous settings.
+
+Nether at (25.5, 56, 45.5), yaw -45, pitch 3 retained its ceiling,
+hanging rock and lava at RD 6 with LODs versus RD 12 real chunks.
+The RD 6 sample logged 123 drawn LOD columns and up to 194,848 quads.
+The Black Hole End at (0.5, 113, -105.5), yaw -60, pitch 7 retained
+readable terrain and the phase-2 disk at RD 6. The report and comparison
+are in `claude-scratch/codex-s1121-arid-dimensions-z4Fm9Y/`.
+
+Offline `:mod:build` and the jar integrity check passed. Comparing jar
+entries with `8659874` found changes only in the LOD generator and cache
+classes. The existing AA, armor trail, native text and color grade binaries
+are identical.
+
+Installed `claude-scratch/codex-s1121-arid-ridge-release-V4Mwl0/imagine-metal-s1121-playtest.jar`
+as `minecraft/mods/imagine-metal-0.1.0.jar`, SHA256
+`96640b981437e70ed5c5ee4400615b4f7a79721d2ffd7d5621b54b9967459c68`.
+The live pack list, renderer and LOD settings, launcher settings,
+fullscreen and RD 6 matched the starting files. ColdTp is disabled.
+
+Rollback jars under the instance root:
+
+- `claude-scratch/codex-s1121-armor-trail-release-4q1JpK/imagine-metal-s1121-playtest.jar`
+  (`8659874`, `d2eed13ed2c060ebb12facc22ba3c61f242e092005996774113c6a56e499a345`)
+- `claude-scratch/codex-s1121-stability-release/imagine-metal-s1121-stability.jar`
+  (`ef32151`, `e20fa0df45e86e7042535e3e2512aa8f841277126ab4128a14b82dbce9bf8882`)
+- `claude-scratch/codex-s1121-nether/imagine-metal-s1121-nether-caverns.jar`
+  (`caf50d5dec5a538a450b755f8e91dd946ad4824678aba5ffb72690006aab98e2`)
+- `claude-scratch/s1121/imagine-metal-s1121-final7.jar`
+  (`2fa996a159be365cf7642f41fb895ab4e6d076854b80add73dbf257b712fe1f6`)
+
+Wait for Jack's playtest before starting the separate Forge 1.20.1 port.
+
 # 2026-11-25 — Overworld zombie trail reproduction on s1121
 
 Jack and Oscar reported a trail behind a moving land mob. They reproduced it in
