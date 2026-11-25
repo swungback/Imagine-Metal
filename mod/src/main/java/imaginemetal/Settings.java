@@ -178,6 +178,13 @@ public final class Settings {
 	 */
 	public static volatile boolean entityJitter = Engine.flag("imaginemetal.entityJitter", true);
 	/**
+	 * (s1125b) Mobs' own motion for the upscaler (EntityMotion): their pixels follow the mob, so the history stays on them. Off: as
+	 * s1125 (camera motion only, history dropped on mob pixels: mobs shake). -Dimaginemetal.entityMotion=false.
+	 */
+	public static volatile boolean entityMotion = Engine.flag("imaginemetal.entityMotion", true);
+	/** (s1125b) The upscaler's debug view: 0 off, 1 motion, 2 reactive mask, 3 mobs' coverage, 4 logs the jitter sequence. Not saved. */
+	public static volatile int fxDebug = 0;
+	/**
 	 * (Build C2b) The near shadow map centred on the ground under the camera instead of the camera: flying or standing high and
 	 * looking toward a low sun, the ground ahead left the near map ~17 blocks out and its shadows ended there (the pop-in).
 	 * -Dimaginemetal.shadowNearGround=false.

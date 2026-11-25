@@ -828,30 +828,96 @@ fragment float4 im_bloom_resolve(IMB_RESOLVE_ARGS) {
 }
 
 // ---- the MetalFX build: Apple's temporal scaler in place of im_bloom_taa (imbloom.m) ----
-// Where each pixel of the world's frame was a frame ago, in that frame's pixels (toward the earlier place): its depth gives its
-// place in the world (the terrain's sub-pixel offset taken out), the last frame's transform where that was on screen. Only the
-// camera's motion: mobs and waving leaves move by themselves and aren't followed yet.
-static float4 imbMotion(float2 uv, depth2d<float> depth, constant ImBloomParams &p) {
-	float2 size = float2(depth.get_width(), depth.get_height());
-	float d = depth.read(uint2(clamp(uv, 0.0, 0.9999) * size));
-	float2 uvj = uv - p.taa.xy;
-	float4 w = p.clipInv * float4(uvj * 2.0 - 1.0, d <= 0.00001 ? 0.0001 : d, 1.0);
-	float4 c = p.prevClip * float4(w.xyz / w.w, 1.0);
-	float2 puv = c.w > 1e-5 ? c.xy / c.w * 0.5 + 0.5 : uvj;
-	return float4((puv - uvj) * size, 0.0, 0.0);
-}
-
-fragment float4 im_bloom_motion(ImBloomOut in [[stage_in]], depth2d<float> depth [[texture(1)]], constant ImBloomParams &p [[buffer(0)]]) {
-	return imbMotion(in.uv, depth, p);
-}
 
 static bool imbEntityCoverage(float alpha) {
 	return alpha > 0.95 && alpha < 0.97;
 }
 
+// (s1125b) The mobs' own motion (imaginemetal.EntityMotion, imbloom.m im_bloom_entities), bound at buffer 2. Each mob: its box
+// (camera-relative, a little larger than its hitbox so its head and legs are inside), where it is and where it was a frame ago
+// (both from this frame's camera), and how far it turned (cos, sin of the body's yaw since the last frame). head: x the count,
+// y the upscaler's debug view (1 motion, 2 reactive mask, 3 mobs' coverage), z 1 = the mobs' own motion on.
+// Why: a mob's pixels had only the camera's motion, so a walking mob's history was in the wrong place; the reactive mask then
+// dropped every mob pixel's history (0.4 everywhere, 1 where the coverage changed, and with the sub-pixel offset a still mob's
+// edge changes coverage every frame): mobs showed close to the raw 67 % frame, its pixels and its jitter (Jack: mobs shake,
+// worse far away). With the right motion the history follows the mob as DLSS, FSR and MetalFX expect.
+#define IMB_ENTS 60
+struct ImbEnt {
+	float4 lo, hi, o, po;  // lo.w, hi.w: cos, sin of the turn
+};
+struct ImbEnts {
+	int4 head;
+	ImbEnt e[IMB_ENTS];
+};
+
+// the mob a world point on a mob's pixel belongs to: the box that holds it (the nearest centre where boxes overlap); -1 none
+static int imbEntityAt(float3 P, constant ImbEnts &E) {
+	int best = -1;
+	float bd = 1e9;
+	int n = min(E.head.x, IMB_ENTS);
+	for (int i = 0; i < n; i++) {
+		float3 lo = E.e[i].lo.xyz, hi = E.e[i].hi.xyz;
+		float3 d = max(max(lo - P, P - hi), 0.0);
+		float out = dot(d, d);
+		float sc = out * 100.0 + length(P - 0.5 * (lo + hi));
+		if (out < 1.0 && sc < bd) {
+			bd = sc;
+			best = i;
+		}
+	}
+	return best;
+}
+
+// where that point of the mob was a frame ago: its turn and its move undone (the body turns about its feet, as the renderer turns it)
+static float3 imbEntityPrev(float3 P, constant ImbEnt &e) {
+	float3 q = P - e.o.xyz;
+	float c = e.lo.w, s = e.hi.w;
+	return e.po.xyz + float3(c * q.x + s * q.z, q.y, -s * q.x + c * q.z);
+}
+
+static bool imbEntityMoving(constant ImbEnt &e) {
+	return length(e.o.xyz - e.po.xyz) > 0.002 || abs(e.hi.w) > 0.0005;
+}
+
+struct ImbMv {
+	float2 mv;   // the motion, in the frame's pixels, toward where it was (as MetalFX takes it)
+	float3 P;    // the pixel's place (camera-relative)
+	int ent;     // the mob it is on, -1 none
+};
+
+// Where each pixel of the world's frame was a frame ago, in that frame's pixels (toward the earlier place): its depth gives its
+// place in the world (the terrain's sub-pixel offset taken out), the last frame's transform where that was on screen. A mob's
+// pixel (alpha 0.96) moves with its mob as well. Waving leaves aren't followed.
+static ImbMv imbMotionE(float2 uv, depth2d<float> depth, constant ImBloomParams &p, float alpha, constant ImbEnts &E) {
+	float2 size = float2(depth.get_width(), depth.get_height());
+	float d = depth.read(uint2(clamp(uv, 0.0, 0.9999) * size));
+	float2 uvj = uv - p.taa.xy;
+	float4 w = p.clipInv * float4(uvj * 2.0 - 1.0, d <= 0.00001 ? 0.0001 : d, 1.0);
+	ImbMv m;
+	m.P = w.xyz / w.w;
+	m.ent = -1;
+	float3 pp = m.P;
+	if (E.head.z != 0 && d > 0.00001 && imbEntityCoverage(alpha)) {
+		m.ent = imbEntityAt(m.P, E);
+		if (m.ent >= 0) pp = imbEntityPrev(m.P, E.e[m.ent]);
+	}
+	float4 c = p.prevClip * float4(pp, 1.0);
+	float2 puv = c.w > 1e-5 ? c.xy / c.w * 0.5 + 0.5 : uvj;
+	m.mv = (puv - uvj) * size;
+	return m;
+}
+
+fragment float4 im_bloom_motion(ImBloomOut in [[stage_in]], texture2d<float> frame [[texture(0)]], depth2d<float> depth [[texture(1)]],
+	constant ImBloomParams &p [[buffer(0)]], constant ImbEnts &E [[buffer(2)]]) {
+	float2 size = float2(frame.get_width(), frame.get_height());
+	float a = frame.read(uint2(clamp(in.uv, 0.0, 0.9999) * size)).a;
+	return float4(imbMotionE(in.uv, depth, p, a, E).mv, 0.0, 0.0);
+}
+
 // Reject history when a mob entered or vacated a pixel. Stable coverage keeps the gentler mask that
 // lets MetalFX accumulate sub-pixel detail on multiframe silhouettes.
-static float imbEntityReactive(float2 uv, float2 motion, float alpha, texture2d<float> previous,
+// (s1125b: the rule from before the mobs' own motion, kept for the switch "Mob motion vectors" off)
+static float imbEntityReactiveOld(float2 uv, float2 motion, float alpha, texture2d<float> previous,
 	constant ImBloomParams &p, float2 size) {
 	bool covered = imbEntityCoverage(alpha);
 	if (p.taaPrev.w > 0.5) {
@@ -864,6 +930,46 @@ static float imbEntityReactive(float2 uv, float2 motion, float alpha, texture2d<
 	return covered ? 0.4 : 0.0;
 }
 
+// (s1125b) The reactive mask with the mobs' own motion. A mob's pixels keep their history (it follows the mob now). 1 only where a
+// MOVING mob changed the coverage: the ground it just uncovered (its history there is the mob: the trail Codex fixed) and the
+// new edge it moved onto. A still mob's edge changes coverage every frame by the sub-pixel offset alone: no reason to drop it.
+static float imbEntityReactive(float2 uv, ImbMv m, float alpha, texture2d<float> previous, constant ImBloomParams &p, float2 size,
+	constant ImbEnts &E) {
+	if (E.head.z == 0) return imbEntityReactiveOld(uv, m.mv, alpha, previous, p, size);
+	if (p.taaPrev.w < 0.5) return 0.0;
+	bool covered = imbEntityCoverage(alpha);
+	float2 puv = uv - p.taa.xy + m.mv / size + p.taaPrev.xy;
+	if (any(puv < 0.0) || any(puv >= 1.0)) return 0.0;
+	bool was = imbEntityCoverage(previous.read(uint2(puv * size)).a);
+	if (covered == was) return 0.0;
+	if (covered) return m.ent >= 0 && imbEntityMoving(E.e[m.ent]) ? 1.0 : 0.0;
+	// uncovered: inside the box a moving mob had a frame ago
+	int n = min(E.head.x, IMB_ENTS);
+	for (int i = 0; i < n; i++) {
+		if (!imbEntityMoving(E.e[i])) continue;
+		float3 sh = E.e[i].po.xyz - E.e[i].o.xyz;
+		float3 lo = E.e[i].lo.xyz + sh - 0.25, hi = E.e[i].hi.xyz + sh + 0.25;
+		if (all(m.P >= lo) && all(m.P <= hi)) return 1.0;
+	}
+	return 0.0;
+}
+
+// (s1125b) The upscaler's debug views (Settings.fxDebug, in the MetalFX build): 1 the motion (grey = none, red/green = across/up
+// and down, 1 pixel = 0.05), 2 the reactive mask (red) over the picture in grey, 3 the mobs (each its own colour, white: on a mob
+// but in no box, so only the camera's motion)
+static float3 imbFxDebug(float3 col, ImbMv m, float reactive, float alpha, int mode) {
+	if (mode == 1) return float3(saturate(0.5 + m.mv.x * 0.05), saturate(0.5 + m.mv.y * 0.05), 0.5);
+	float g = dot(col, float3(0.2126, 0.7152, 0.0722)) * 0.6;
+	if (mode == 2) return mix(float3(g), float3(1.0, 0.0, 0.0), reactive);
+	if (mode == 3) {
+		if (!imbEntityCoverage(alpha)) return float3(g);
+		if (m.ent < 0) return float3(1.0);
+		float h = fract(float(m.ent) * 0.618034);
+		return saturate(abs(fract(h + float3(0.0, 0.667, 0.333)) * 6.0 - 3.0) - 1.0);
+	}
+	return col;
+}
+
 // MetalFX's optional reactive mask uses the entity coverage left in resolved alpha.
 struct ImFxMotionOut {
 	float4 motion [[color(0)]];
@@ -871,12 +977,13 @@ struct ImFxMotionOut {
 };
 
 fragment ImFxMotionOut im_bloom_motion_r(ImBloomOut in [[stage_in]], texture2d<float> frame [[texture(0)]], depth2d<float> depth [[texture(1)]],
-	texture2d<float> previous [[texture(2)]], constant ImBloomParams &p [[buffer(0)]]) {
+	texture2d<float> previous [[texture(2)]], constant ImBloomParams &p [[buffer(0)]], constant ImbEnts &E [[buffer(2)]]) {
 	ImFxMotionOut o;
-	o.motion = imbMotion(in.uv, depth, p);
 	float2 size = float2(frame.get_width(), frame.get_height());
 	float a = frame.read(uint2(clamp(in.uv, 0.0, 0.9999) * size)).a;
-	o.reactive = imbEntityReactive(in.uv, o.motion.xy, a, previous, p, size);
+	ImbMv m = imbMotionE(in.uv, depth, p, a, E);
+	o.motion = float4(m.mv, 0.0, 0.0);
+	o.reactive = imbEntityReactive(in.uv, m, a, previous, p, size, E);
 	return o;
 }
 
@@ -889,10 +996,13 @@ struct ImResolveFxOut {
 	float4 motion [[color(1)]];
 };
 
-fragment ImResolveFxOut im_bloom_resolve_fx(IMB_RESOLVE_ARGS) {
+fragment ImResolveFxOut im_bloom_resolve_fx(IMB_RESOLVE_ARGS, constant ImbEnts &E [[buffer(2)]]) {
 	ImResolveFxOut o;
 	o.color = imbResolve(in, src, s, hdr, shafts, aoT, pic, depth, ms, p, f, lvol);
-	o.motion = imbMotion(in.uv, depth, p);
+	float a = float(half(o.color.a));
+	ImbMv m = imbMotionE(in.uv, depth, p, a, E);
+	o.motion = float4(m.mv, 0.0, 0.0);
+	if (E.head.y != 0) o.color.rgb = imbFxDebug(o.color.rgb, m, 0.0, a, E.head.y);
 	return o;
 }
 
@@ -902,12 +1012,14 @@ struct ImResolveFxrOut {
 	float reactive [[color(2)]];
 };
 
-fragment ImResolveFxrOut im_bloom_resolve_fxr(IMB_RESOLVE_ARGS, texture2d<float> previous [[texture(6)]]) {
+fragment ImResolveFxrOut im_bloom_resolve_fxr(IMB_RESOLVE_ARGS, texture2d<float> previous [[texture(6)]], constant ImbEnts &E [[buffer(2)]]) {
 	ImResolveFxrOut o;
 	o.color = imbResolve(in, src, s, hdr, shafts, aoT, pic, depth, ms, p, f, lvol);
-	o.motion = imbMotion(in.uv, depth, p);
 	float a = float(half(o.color.a));
-	o.reactive = imbEntityReactive(in.uv, o.motion.xy, a, previous, p, float2(depth.get_width(), depth.get_height()));
+	ImbMv m = imbMotionE(in.uv, depth, p, a, E);
+	o.motion = float4(m.mv, 0.0, 0.0);
+	o.reactive = imbEntityReactive(in.uv, m, a, previous, p, float2(depth.get_width(), depth.get_height()), E);
+	if (E.head.y != 0) o.color.rgb = imbFxDebug(o.color.rgb, m, o.reactive, a, E.head.y);
 	return o;
 }
 
@@ -947,7 +1059,8 @@ struct ImTaaOut {
 // (moving mobs and waving plants don't smear; what newly shows takes over at once). Without a history (taa.z 0: TAA off, or
 // its first frame) the frame alone, scaled up. Written to the screen and to the next frame's history.
 fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur [[texture(0)]], texture2d<float> hist [[texture(1)]],
-	depth2d<float> depth [[texture(2)]], sampler s [[sampler(0)]], constant ImBloomParams &p [[buffer(0)]]) {
+	depth2d<float> depth [[texture(2)]], sampler s [[sampler(0)]], constant ImBloomParams &p [[buffer(0)]],
+	constant ImbEnts &E [[buffer(2)]]) {
 	float2 csz = float2(cur.get_width(), cur.get_height());
 	float2 osz = float2(hist.get_width(), hist.get_height());
 	// this screen pixel's place in the world's picture: the frame holds the scene shifted by the jitter
@@ -995,7 +1108,9 @@ fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur 
 	float nearW = wx[1] * wy[1];
 	float4 w = p.clipInv * float4(in.uv * 2.0 - 1.0, dmin <= 0.00001 ? 0.0001 : dmin, 1.0);
 	float3 P = w.xyz / w.w;
-	float4 pc = p.prevClip * float4(P, 1.0);
+	// (s1125b) a mob's pixel: its history where the mob was, not where the camera alone puts it
+	int ent = E.head.z != 0 && entity > 0.5 && dmin > 0.00001 ? imbEntityAt(P, E) : -1;
+	float4 pc = p.prevClip * float4(ent >= 0 ? imbEntityPrev(P, E.e[ent]) : P, 1.0);
 	float3 res = c, shown = c;
 	if (pc.w > 0.05) {
 		float2 puv = pc.xy / pc.w * 0.5 + 0.5;
@@ -1043,7 +1158,22 @@ fragment ImTaaOut im_bloom_taa(ImBloomOut in [[stage_in]], texture2d<float> cur 
 			// this frame takes over, from one box size out. Before, any pull at all cut the history's share)
 			a = max(a, 0.5 * saturate((outside - 1.0) / 2.5) * (1.0 - 0.6 * farS));
 			bool wasEntity = hist.read(uint2(puv * osz)).a > 0.5;
-			if (wasEntity != (entity > 0.5)) a = 1.0;
+			// (s1125b: with the mobs' own motion only where a moving mob changed the coverage, as imbEntityReactive: a still mob's
+			// edge changes coverage every frame by the sub-pixel offset alone, and dropping the history there made it shake)
+			bool cut = wasEntity != (entity > 0.5);
+			if (cut && E.head.z != 0) {
+				if (entity > 0.5) cut = ent >= 0 && imbEntityMoving(E.e[ent]);
+				else {
+					cut = false;
+					int n = min(E.head.x, IMB_ENTS);
+					for (int i = 0; i < n && !cut; i++) {
+						if (!imbEntityMoving(E.e[i])) continue;
+						float3 sh = E.e[i].po.xyz - E.e[i].o.xyz;
+						cut = all(P >= E.e[i].lo.xyz + sh - 0.25) && all(P <= E.e[i].hi.xyz + sh + 0.25);
+					}
+				}
+			}
+			if (cut) a = 1.0;
 			res = mix(h, c, a);
 			// (a light sharpen against what's left of the softness, on the screen only: fed back into the history it sharpened
 			// the already sharpened picture every frame, the finest grain growing until the colour box stopped it, a crawling

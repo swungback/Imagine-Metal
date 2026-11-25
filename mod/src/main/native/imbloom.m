@@ -33,6 +33,15 @@ id<MTLTexture> mc_im_shadow_map(void);  // mcown.m: the sun's shadow maps (two c
 id<MTLSamplerState> mc_im_shadow_cmp(void);
 const void *mc_im_frame_bytes(int *length);  // mcown.m: this frame's ImFrame (lighting.metal)
 
+// (s1125b) bloom.metal ImbEnts: head x the count, y the upscaler's debug view (1 motion, 2 reactive mask, 3 mobs' coverage),
+// z flags (1: the mobs' own motion on); per mob 4 float4: the box's low corner + the turn's cos, high corner + sin, where it is
+// now, where it was a frame ago (both from this frame's camera)
+#define IMB_ENTS 60
+typedef struct {
+	int32_t head[4];
+	float e[IMB_ENTS * 16];
+} ImBloomEnts;
+
 typedef struct {
 	id<MTLDevice> device;
 	id<MTLLibrary> lib;
@@ -63,6 +72,10 @@ typedef struct {
 	MTLPixelFormat fxCopyFormat, fxDepthFormat;
 	int fxOn, fxFailed, fxSaid;
 	float fxSign[4], fxSharpness;
+	// (s1125b) the mobs' own motion (imaginemetal.EntityMotion): a header (count, the upscaler's debug view, flags) and per mob
+	// its box, where it is and where it was, its turn since the last frame; bound at buffer 2 of the passes that work out the
+	// motion and of our TAA (bloom.metal ImbEnts). Bound whole (setFragmentBytes, under 4 KB) so the shader's struct is covered
+	ImBloomEnts ents;
 	float fog[3];             // im_bloom_fog: Reimagined's bloom fog strength, 1 = eyes under water, the rainbow's strength
 	id<MTLRenderPipelineState> labelDepth;
 	id<MTLDepthStencilState> labelDepthWrite;
@@ -237,6 +250,20 @@ void im_bloom_fx(ImBloom *b, int on, float jx, float jy, float mx, float my, flo
 	b->fxSharpness = sharpness;
 }
 
+// (s1125b) This frame's mobs' motion (imaginemetal.EntityMotion: count entries of 16 floats), the upscaler's debug view, flags:
+// 1 the mobs' own motion on, 2 a camera cut (teleport, level change): the history is dropped, as Apple asks for at a cut.
+void im_bloom_entities(ImBloom *b, const float *data, int count, int debug, int flags) {
+	if (!b) return;
+	if (count < 0) count = 0;
+	if (count > IMB_ENTS) count = IMB_ENTS;
+	b->ents.head[0] = count;
+	b->ents.head[1] = debug;
+	b->ents.head[2] = flags & 1;
+	b->ents.head[3] = 0;
+	if (count > 0 && data) memcpy(b->ents.e, data, sizeof(float) * 16 * (size_t) count);
+	if (flags & 2) b->taaValid = 0;
+}
+
 static id<MTLRenderPipelineState> imbFxPipeline(ImBloom *b, NSString *fn, MTLPixelFormat format, MTLPixelFormat format1) {
 	id<MTLFunction> vs = [[b->lib newFunctionWithName:@"im_bloom_vs"] autorelease];
 	id<MTLFunction> fs = [[b->lib newFunctionWithName:fn] autorelease];
@@ -390,6 +417,7 @@ static int imbResolveFx(ImBloom *b, id<MTLCommandBuffer> cmd, id<MTLTexture> tar
 	[r setFragmentTexture:(hc ? hc : b->views[0]) atIndex:4];
 	[r setFragmentTexture:depth atIndex:5];
 	if (b->fxReactive) [r setFragmentTexture:b->fxPreviousFrame ?: src atIndex:6];
+	[r setFragmentBytes:&b->ents length:sizeof b->ents atIndex:2];
 	[r setFragmentSamplerState:(hs ? hs : b->linear) atIndex:1];
 	[r setFragmentSamplerState:b->linear atIndex:0];
 	[r setFragmentBytes:p length:sizeof *p atIndex:0];
@@ -788,6 +816,7 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 				[r setFragmentTexture:depth atIndex:1];
 				if (b->fxReactive) [r setFragmentTexture:b->fxPreviousFrame ?: b->taaCur atIndex:2];
 				[r setFragmentBytes:&p length:sizeof p atIndex:0];
+				[r setFragmentBytes:&b->ents length:sizeof b->ents atIndex:2];
 				[r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 				[r endEncoding];
 				}
@@ -862,6 +891,7 @@ int im_bloom_render(Enc *enc, ImBloom *b, id<MTLTexture> src, id<MTLTexture> dst
 				[r setFragmentTexture:depthOk ? depth : nil atIndex:2];
 				[r setFragmentSamplerState:b->linear atIndex:0];
 				[r setFragmentBytes:&p length:sizeof p atIndex:0];
+				[r setFragmentBytes:&b->ents length:sizeof b->ents atIndex:2];
 				[r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 				[r endEncoding];
 				b->taaIdx ^= 1;

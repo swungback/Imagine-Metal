@@ -258,6 +258,13 @@ public final class SettingsScreen extends OptionsSubScreen {
 					toggle("MetalFX jitter flip Y", Settings.metalfxFlipJY, v -> Settings.metalfxFlipJY = v, "Debug: the sign of the sub-pixel offset MetalFX is told, up and down."));
 				this.list.addSmall(toggle("MetalFX motion flip X", Settings.metalfxFlipMX, v -> Settings.metalfxFlipMX = v, "Debug: the sign of the motion MetalFX is told, across."),
 					toggle("MetalFX motion flip Y", Settings.metalfxFlipMY, v -> Settings.metalfxFlipMY = v, "Debug: the sign of the motion MetalFX is told, up and down."));
+				this.list.addBig(toggle("Mob motion vectors", Settings.entityMotion, v -> Settings.entityMotion = v,
+					"s1125b, not saved. Mobs' pixels move with the mob for the upscaler, so it keeps their history (steady, smooth edges). Off: as s1125 (their history dropped every frame: still mobs shake, far ones most)."));
+				String[] fxViews = {"Off", "Motion vectors", "Reactive mask", "Mobs' coverage", "Log jitter sequence"};
+				this.list.addBig(CycleButton.<Integer>builder(v -> Component.literal(fxViews[v]), Settings.fxDebug)
+					.withValues(0, 1, 2, 3, 4)
+					.withTooltip(v -> Tooltip.create(Component.literal("MetalFX's inputs on screen: motion (grey = none), the reactive mask (red: history dropped), which mob each pixel follows. The last logs 32 frames' sub-pixel offsets.")))
+					.create(0, 0, 310, 20, Component.literal("Upscaler debug view"), (b, v) -> Settings.fxDebug = v));
 				this.list.addBig(toggle("TAA sub-pixel offset", Settings.taaJitter, v -> Settings.taaJitter = v,
 					"Not saved. The terrain drawn a fraction of a pixel off in a new direction each frame, which the TAA averages into smooth edges and, with a render scale, into the full-size picture. Off to check whether a shimmer or wobble comes from it."));
 				String[] views = {"Off", "Light levels", "Normals", "Bloom glow only", "Coloured light grid", "Shadow maps"};

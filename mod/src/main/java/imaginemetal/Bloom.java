@@ -183,6 +183,10 @@ public final class Bloom {
 				// (the MetalFX build: Apple's temporal scaler in place of our TAA pass; the signs are debug switches until tested)
 				ImNative.bloomFx(state, Settings.metalfx ? 1 : 0, Settings.metalfxFlipJX ? -1f : 1f, Settings.metalfxFlipJY ? -1f : 1f,
 					Settings.metalfxFlipMX ? -1f : 1f, Settings.metalfxFlipMY ? -1f : 1f, Settings.metalfxSharpness);
+				// (s1125b) the mobs' own motion, against the camera this frame's transforms are relative to
+				long ents = stack.nmalloc(16, EntityMotion.BYTES);
+				int entN = EntityMotion.fill(ents, Reflections.camX, Reflections.camY, Reflections.camZ);
+				ImNative.bloomEntities(state, ents, entN, Settings.fxDebug, (Settings.entityMotion ? 1 : 0) | (EntityMotion.cut ? 2 : 0));
 				long clips = stack.nmalloc(4, 192);
 				Reflections.CLIP.get(MemoryUtil.memFloatBuffer(clips, 16));
 				Reflections.CLIP_INV.get(MemoryUtil.memFloatBuffer(clips + 64, 16));

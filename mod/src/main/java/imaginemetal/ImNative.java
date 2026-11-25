@@ -199,6 +199,17 @@ final class ImNative {
 		}
 	}
 
+	private static final MethodHandle BLOOM_ENTS = fn("im_bloom_entities", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_LONG, JAVA_INT, JAVA_INT, JAVA_INT), false);
+
+	/** (s1125b) This frame's mobs' motion (EntityMotion), the upscaler's debug view, flags (1 mobs' motion on, 2 a camera cut). */
+	static void bloomEntities(long state, long data, int count, int debug, int flags) {
+		try {
+			BLOOM_ENTS.invokeExact(state, data, count, debug, flags);
+		} catch (Throwable t) {
+			throw new IllegalStateException(t);
+		}
+	}
+
 	private static final MethodHandle BLOOM_FX = fn("im_bloom_fx", FunctionDescriptor.ofVoid(JAVA_LONG, JAVA_INT, JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT, JAVA_FLOAT), false);
 
 	/** (the MetalFX build) Apple's temporal scaler this frame, and the signs it is given the jitter and the motion with. */
